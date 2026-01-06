@@ -2,3 +2,7 @@ __pycache__
 *.pyc
 outputs
 plan_outputs
+*.mp4
+*.zip
+*.pth
+*.pkl

@@ -1,0 +1,131 @@
+# Franka Cube Stacking → DINO World Model Pipeline
+
+**Checkliste für die Integration von Isaac Sim Datensätzen in das DINO WM Training**
+
+---
+
+## ✅ Phase 1: Datensatz-Generierung (Isaac Sim)
+
+### 1.1 Data Logger implementieren
+- [x] `FrankaDataLogger` Klasse erstellen (`data_logger.py`)
+- [x] State-Extraktion: `get_franka_state()` → 22-dim Vektor
+- [x] Action-Extraktion: `get_franka_action()` → 9-dim Vektor
+
+### 1.2 Datensammlung-Script
+- [x] `fcs_main_parallel.py` für parallele Episoden-Generierung
+- [x] Validierung: `validate_stacking()` prüft Stacking-Erfolg
+- [x] Domain Randomization: Würfel-Positionen, Licht, Materialien
+
+### 1.3 Datensatz-Struktur generieren
+- [x] `states.pth` — Shape: `(N, T_max, 22)` float32
+- [x] `actions.pth` — Shape: `(N, T_max, 9)` float32
+- [x] `metadata.pkl` — `{'episode_lengths': [...], ...}`
+- [x] Episode-Ordner `000000/obses.pth` — `(T, 256, 256, 3)` uint8
+
+**Aktueller Datensatz:** `isaacsim/00_my_envs/Franka_Cube_Stacking_JW/dataset/franka_cube_stack_ds/`
+- 36 Episoden generiert
+- 20 Episoden mit vollständigen Metadaten (max 935 Timesteps)
+
+---
+
+## ✅ Phase 2: DINO WM Dataset-Integration
+
+### 2.1 Dataset-Loader erstellen
+> **Commit:** `def3474` — *"franka cube stack dataset und yaml config"*
+
+- [x] `datasets/franka_cube_stack_dset.py` erstellen
+- [x] `FrankaCubeStackDataset(TrajDataset)` Klasse implementieren
+- [x] `load_franka_cube_stack_slice_train_val()` Funktion für Train/Val Split
+
+### 2.2 Hydra Config erstellen
+> **Commit:** `def3474` — *"franka cube stack dataset und yaml config"*
+
+- [x] `conf/env/franka_cube_stack.yaml` anlegen
+- [x] Dataset-Target: `datasets.franka_cube_stack_dset.load_franka_cube_stack_slice_train_val`
+- [x] `data_path` konfigurierbar via `${oc.env:DATASET_DIR,./data}`
+
+### 2.3 Kompatibilität mit TrajDataset
+> **Referenz:** `f61b0ca` — *"cleanup imports; cleanup config"*
+
+- [x] `get_seq_length(idx)` implementiert
+- [x] `get_frames(idx, frames)` für Frame-Zugriff
+- [x] `proprio_dim`, `action_dim`, `state_dim` Attribute
+
+---
+
+## ⏳ Phase 3: Pfad-Konfiguration
+
+### 3.1 Datensatz-Pfad festlegen
+- [ ] Option A: Environment-Variable `DATASET_DIR` setzen
+- [ ] Option B: `data_path` in `franka_cube_stack.yaml` direkt anpassen
+- [ ] Option C: Symlink erstellen: `dino_wm/data/franka_cube_stack → Isaac Sim Dataset`
+
+### 3.2 Pfad validieren
+- [ ] Prüfen ob `states.pth` ladbar ist
+- [ ] Prüfen ob Episode-Ordner existieren
+- [ ] Metadata-Konsistenz verifizieren
+
+---
+
+## ⏳ Phase 4: Training starten
+
+### 4.1 Konfiguration prüfen
+- [ ] `conf/train.yaml` Defaults verstehen (basierend auf `0a9492f`)
+- [ ] `img_size: 224` — Resize von 256×256 auf 224×224
+- [ ] `frameskip`, `num_hist`, `num_pred` anpassen
+
+### 4.2 Training ausführen
+- [ ] Conda Environment aktivieren (`dino_wm`)
+- [ ] `python train.py env=franka_cube_stack` starten
+- [ ] WandB Logging verifizieren
+
+### 4.3 Checkpoint speichern
+> **Referenz:** `0a9492f` — *"add checkpoints"*
+
+- [ ] Checkpoints werden unter `outputs/` gespeichert
+- [ ] `model_latest.pth` für Resume
+
+---
+
+## Schnellreferenz
+
+### Datenformat-Mapping
+
+| Isaac Sim (Data Logger) | DINO WM (Dataset-Loader) |
+|------------------------|--------------------------|
+| `states.pth` (N, T, 22) | `self.states` |
+| `actions.pth` (N, T, 9) | `self.actions` |
+| `metadata.pkl['episode_lengths']` | `self.seq_lengths` |
+| `000xxx/obses.pth` (T, H, W, C) | `obs['visual']` (T, C, H, W) |
+
+### State-Vektor (22 Dimensionen)
+```
+[0:3]   EE Position (x, y, z)
+[3:7]   EE Quaternion (w, x, y, z)
+[7]     Gripper Opening (0-1)
+[8:15]  Joint Positions (7 DOF)
+[15:22] Joint Velocities (7 DOF)
+```
+
+### Action-Vektor (9 Dimensionen)
+```
+[0:7]   Joint Commands (Position/Velocity)
+[7:9]   Gripper Commands
+```
+
+---
+
+## Git-Historie (relevante Commits)
+
+| Commit | Beschreibung | Dateien |
+|--------|--------------|---------|
+| `def3474` | franka cube stack dataset und yaml config | `franka_cube_stack_dset.py`, `franka_cube_stack.yaml` |
+| `bae45b1` | Übernehme .gitignore aus yml-conf | `.gitignore` |
+| `0a9492f` | add checkpoints | `README.md`, `plan_*.yaml` |
+| `f61b0ca` | cleanup imports; cleanup config | Diverse Dataset-Loader |
+
+---
+
+*Erstellt: 2026-01-06*
+*Workspace: `/home/tsp_jw/Desktop/dino_wm/`*
+

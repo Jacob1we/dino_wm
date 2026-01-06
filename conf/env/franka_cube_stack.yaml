@@ -10,7 +10,8 @@ dataset:
   _target_: "datasets.franka_cube_stack_dset.load_franka_cube_stack_slice_train_val"
   n_rollout: null  # null = alle verfügbaren Rollouts laden
   normalize_action: ${normalize_action}
-  data_path: ${oc.env:DATASET_DIR,./data}/franka_cube_stack
+  # data_path: ${oc.env:DATASET_DIR,./data}/franka_cube_stack
+  data_path: /media/tsp_jw/9e1e7952-ab45-4c84-8800-ae3dd9f9da93/isaacsim/00_my_envs/Franka_Cube_Stacking_JW/dataset/franka_cube_stack_ds
   split_ratio: 0.9
   transform:
     _target_: "datasets.img_transforms.default_transform"

@@ -145,32 +145,7 @@ torch.cuda.OutOfMemoryError: CUDA out of memory. Tried to allocate 442.00 MiB.
 python train.py --config-name train.yaml env=franka_cube_stack frameskip=5 num_hist=3 training.batch_size=16
 ```
 
-### 6.2 Segmentation Fault / DataLoader Crash ✅ GELÖST
-
-**Problem:** Training crasht nach ~30% mit Segmentation Fault
-```
-segfault at 5e265428 ip 0000788dece699d1 in libtorch_cpu.so
-resource_tracker: There appear to be 6 leaked semaphore objects
-```
-
-**Ursache:** `num_workers=8` führt zu Multiprocessing-Problemen mit PyTorch DataLoader
-
-**Lösung:** `num_workers` auf 0 reduzieren
-```yaml
-# In conf/env/franka_cube_stack.yaml
-num_workers: 0  # War: 8
-```
-
-**Alternativen falls num_workers=0 zu langsam:**
-```bash
-# Schrittweise erhöhen und testen:
-python train.py ... env.num_workers=2
-python train.py ... env.num_workers=4
-```
-
----
-
-### 6.3 Torch Versionskonflikt ✅ GELÖST
+### 6.2 Torch Versionskonflikt ✅ GELÖST
 
 **Problem:** `RuntimeError: operator torchvision::nms does not exist`
 
@@ -197,8 +172,7 @@ export PYTHONNOUSERSITE=1
 
 - **2026-01-07 09:33:** Erstes Training gestartet → OOM bei batch_size=32
 - **2026-01-07:** Torch-Konflikt behoben durch Deinstallation der User-Installation (`pip uninstall torch torchvision --user`)
-- **2026-01-07:** Training mit batch_size=8 gestartet → Segfault nach ~34%
-- **2026-01-07:** ✅ Fix: num_workers=0 (war 8) wegen DataLoader Multiprocessing-Bug
+- **2026-01-07:** ✅ Training läuft mit batch_size=8
 - 20 Rollouts verwendet (von 36 generierten)
 - GPU: NVIDIA RTX A4000 (16GB VRAM)
 

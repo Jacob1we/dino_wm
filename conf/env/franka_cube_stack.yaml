@@ -18,5 +18,5 @@ dataset:
     img_size: ${img_size}
 
 decoder_path: null
-num_workers: 0  # Reduziert von 8 auf 0 wegen Segfault bei multiprocessing
+num_workers: 4
 

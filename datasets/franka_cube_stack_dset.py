@@ -38,6 +38,7 @@ class FrankaCubeStackDataset(TrajDataset):
         transform: Optional[Callable] = None,
         normalize_action: bool = False,
         action_scale: float = 1.0,
+        preload_images: bool = True,  # NEU: Bilder vorab in RAM laden
     ):
         """
         Args:
@@ -46,10 +47,13 @@ class FrankaCubeStackDataset(TrajDataset):
             transform: Bild-Transformationen (z.B. Resize, Normalisierung)
             normalize_action: Wenn True, werden Aktionen z-normalisiert
             action_scale: Skalierungsfaktor für Aktionen
+            preload_images: Wenn True, werden alle Bilder beim Init in RAM geladen
+                           (löst multiprocessing Deadlock-Problem)
         """
         self.data_path = Path(data_path)
         self.transform = transform
         self.normalize_action = normalize_action
+        self.preload_images = preload_images
         
         # Lade States und Actions
         self.states = torch.load(self.data_path / "states.pth").float()
@@ -108,8 +112,20 @@ class FrankaCubeStackDataset(TrajDataset):
         self.actions = (self.actions - self.action_mean) / self.action_std
         self.proprios = (self.proprios - self.proprio_mean) / self.proprio_std
         
+        # Preload Images in RAM (löst multiprocessing Deadlock)
+        self.images_cache = None
+        if self.preload_images:
+            print(f"Lade alle Bilder in RAM (kann einige Sekunden dauern)...")
+            self.images_cache = []
+            for i in range(n):
+                obs_dir = self.data_path / f"{i:06d}"
+                img = torch.load(obs_dir / "obses.pth")
+                self.images_cache.append(img)
+            print(f"  {n} Episoden-Bilder im RAM gecached")
+        
         print(f"FrankaCubeStackDataset: {n} Rollouts geladen")
         print(f"  State dim: {self.state_dim}, Action dim: {self.action_dim}")
+        print(f"  Preload images: {self.preload_images}")
     
     def _compute_stats(self, data: torch.Tensor, traj_lengths: torch.Tensor):
         """Berechnet Mean und Std über alle gültigen Timesteps."""
@@ -149,9 +165,12 @@ class FrankaCubeStackDataset(TrajDataset):
             state: Zustände für die Frames
             info: Leeres Dict (Kompatibilität)
         """
-        # Lade Bilder aus Episode-Ordner
-        obs_dir = self.data_path / f"{idx:06d}"
-        image = torch.load(obs_dir / "obses.pth")
+        # Bilder aus Cache oder von Disk laden
+        if self.images_cache is not None:
+            image = self.images_cache[idx]
+        else:
+            obs_dir = self.data_path / f"{idx:06d}"
+            image = torch.load(obs_dir / "obses.pth")
         
         # Selektiere Frames
         image = image[frames]  # (T, H, W, C) uint8

@@ -145,7 +145,33 @@ torch.cuda.OutOfMemoryError: CUDA out of memory. Tried to allocate 442.00 MiB.
 python train.py --config-name train.yaml env=franka_cube_stack frameskip=5 num_hist=3 training.batch_size=16
 ```
 
-### 6.2 Torch Versionskonflikt ✅ GELÖST
+### 6.2 Segfault / DataLoader Deadlock ✅ GELÖST
+
+**Problem:** Training crasht mit Segfault oder friert ein bei ~30-40%
+```
+segfault in libtorch_cpu.so
+resource_tracker: leaked semaphore objects
+```
+
+**Ursache:** `torch.load()` in `get_frames()` wird bei jedem Zugriff aufgerufen → Deadlock mit multiprocessing Workers
+
+**Lösung: Bilder vorab in RAM laden**
+
+Dataset-Loader wurde modifiziert (`preload_images=True` default):
+- Alle Bilder werden beim Start in RAM geladen (~3.5 GB für 20 Episoden)
+- Kein `torch.load()` mehr während des Trainings
+- Multiprocessing-Worker können sicher auf gecachte Daten zugreifen
+
+| num_workers | preload_images | Zeit/Epoch | Status |
+|-------------|----------------|------------|--------|
+| 8 | False | ~25 min | ❌ Deadlock |
+| 4 | False | ~35 min | ❌ Deadlock |
+| 0 | False | ~90 min | ✅ Stabil |
+| 4-8 | **True** | ~25-30 min | ✅ **Empfohlen** |
+
+---
+
+### 6.3 Torch Versionskonflikt ✅ GELÖST
 
 **Problem:** `RuntimeError: operator torchvision::nms does not exist`
 

@@ -53,37 +53,37 @@
 
 ---
 
-## ⏳ Phase 3: Pfad-Konfiguration
+## ✅ Phase 3: Pfad-Konfiguration
 
 ### 3.1 Datensatz-Pfad festlegen
-- [ ] Option A: Environment-Variable `DATASET_DIR` setzen
-- [ ] Option B: `data_path` in `franka_cube_stack.yaml` direkt anpassen
-- [ ] Option C: Symlink erstellen: `dino_wm/data/franka_cube_stack → Isaac Sim Dataset`
+- [x] Option B: `data_path` in `franka_cube_stack.yaml` direkt anpassen
+  - Pfad: `/media/tsp_jw/.../franka_cube_stack_ds`
 
-### 3.2 Pfad validieren
-- [ ] Prüfen ob `states.pth` ladbar ist
-- [ ] Prüfen ob Episode-Ordner existieren
-- [ ] Metadata-Konsistenz verifizieren
+### 3.2 Pfad validieren (2026-01-06)
+- [x] `states.pth` ladbar — Shape: `(100, 935, 22)` ✓
+- [x] `actions.pth` ladbar — Shape: `(100, 935, 9)` ✓
+- [x] Episode-Ordner existieren — `000000/obses.pth` ✓
+- [x] Metadata-Konsistenz — 100 Episoden, state_dim=22, action_dim=9 ✓
 
 ---
 
-## ⏳ Phase 4: Training starten
+## ✅ Phase 4: Training starten
 
 ### 4.1 Konfiguration prüfen
-- [ ] `conf/train.yaml` Defaults verstehen (basierend auf `0a9492f`)
-- [ ] `img_size: 224` — Resize von 256×256 auf 224×224
-- [ ] `frameskip`, `num_hist`, `num_pred` anpassen
+- [x] `conf/train.yaml` Defaults verstehen (basierend auf `0a9492f`)
+- [x] `img_size: 224` — Resize von 256×256 auf 224×224
+- [x] `frameskip=5`, `num_hist=3`, `num_pred=1`
 
-### 4.2 Training ausführen
-- [ ] Conda Environment aktivieren (`dino_wm`)
-- [ ] `python train.py env=franka_cube_stack` starten
-- [ ] WandB Logging verifizieren
+### 4.2 Training ausführen (2026-01-07)
+- [x] Conda Environment aktivieren (`dino_wm`)
+- [x] Training gestartet: `python train.py env=franka_cube_stack frameskip=5 num_hist=3`
+- [x] WandB Logging: https://wandb.ai/jacob-weyer-rwth-aachen-university/dino_wm
 
 ### 4.3 Checkpoint speichern
 > **Referenz:** `0a9492f` — *"add checkpoints"*
 
-- [ ] Checkpoints werden unter `outputs/` gespeichert
-- [ ] `model_latest.pth` für Resume
+- [x] Checkpoints unter: `outputs/2026-01-07/09-33-48/`
+- [ ] `model_latest.pth` nach Training vorhanden
 
 ---
 

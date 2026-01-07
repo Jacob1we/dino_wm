@@ -1,0 +1,8 @@
+Experiment_ID,Datum,Status,Env,Epochs,Batch_Size,Frameskip,Num_Hist,Num_Pred,LR_Predictor,LR_Decoder,LR_Action,N_Rollouts,State_Dim,Action_Dim,Emb_Dim,Train_Loss_Final,Val_Loss_Final,Z_Err_Pred,WandB_Run,Checkpoint_Path,Notizen
+franka_cube_stack_f5_h3_p1,2026-01-07,Failed,franka_cube_stack,100,32,5,3,1,5e-4,3e-4,5e-4,20,22,9,404,,,,lively-violet-5,outputs/2026-01-07/09-33-48/,OOM bei batch_size=32 - RTX A4000 16GB
+franka_cube_stack_f5_h3_p1_bs8,2026-01-07,Running,franka_cube_stack,100,8,5,3,1,5e-4,3e-4,5e-4,20,22,9,404,,,,,outputs/,batch_size=8 funktioniert
+,,,,,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,,,,,
+

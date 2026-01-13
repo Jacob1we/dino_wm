@@ -194,16 +194,79 @@ export PYTHONNOUSERSITE=1
 
 ---
 
+### 6.4 GPU Thermal Throttling ✅ GELÖST
+
+**Problem:** Training friert nach 15-25 Minuten ein, GPU-Auslastung fällt auf 0%
+
+**Symptome (WandB Monitoring):**
+- GPU-Temperatur steigt kontinuierlich auf 82-83°C
+- Bei ~83°C: Plötzlicher Abfall aller Metriken (Power, Memory Access, Utilization)
+- Training-Prozess hängt, reagiert nicht mehr
+
+**Ursache:** RTX A4000 überhitzt → Thermal Throttling / System-Schutzabschaltung
+- Blower-Style Kühlung (Einzellüfter)
+- VBIOS-Lüfterkurve zu konservativ: Nur 62% Lüfter bei 83°C!
+- Maximale Betriebstemperatur: 83-86°C (zu nah am Limit)
+
+**Diagnose:**
+```bash
+nvidia-smi
+# Ausgabe zeigte: 83°C, Fan 64%, Power 72W/140W
+```
+
+**Lösung (angewendet):**
+
+1. **Power Limit reduziert:**
+   ```bash
+   sudo nvidia-smi -pl 100  # Von 140W auf 100W
+   ```
+
+2. **GreenWithEnvy (GWE) installiert** für custom Lüfterkurve:
+   ```bash
+   sudo apt install flatpak
+   flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+   flatpak install flathub com.leinardi.gwe
+   flatpak run com.leinardi.gwe
+   ```
+
+3. **Custom Fan Profile "JW" erstellt:**
+   | Temperatur | Lüfter |
+   |------------|--------|
+   | 30°C | 0% |
+   | 40°C | 40% |
+   | 60°C | 60% |
+   | 70°C | 75% |
+   | 75°C | 100% |
+
+4. **GWE Autostart aktiviert:** Settings → Launch on login
+
+**Ergebnis:**
+| Vorher | Nachher |
+|--------|---------|
+| 83°C @ 62% Fan | <80°C @ 100% Fan |
+| Training friert ein | Training stabil |
+
+**Empfohlene Konfiguration für RTX A4000:**
+- Power Limit: 100-110W (statt 140W)
+- Lüfter: 100% ab 70-75°C
+- Gehäuse offen oder Zusatzlüfter bei langen Trainings
+
+---
+
 ## 7. Notizen
 
 - **2026-01-07 09:33:** Erstes Training gestartet → OOM bei batch_size=32
 - **2026-01-07:** Torch-Konflikt behoben durch Deinstallation der User-Installation (`pip uninstall torch torchvision --user`)
 - **2026-01-07:** ✅ Training läuft mit batch_size=8
+- **2026-01-13:** ❌ Training friert regelmäßig nach 15-25 Min ein (auch mit kleinem 10-Episode Dataset)
+- **2026-01-13:** 🔍 Ursache identifiziert: GPU Thermal Throttling (83°C, Lüfter nur 62%)
+- **2026-01-13:** ✅ GreenWithEnvy installiert, Custom Fan Profile "JW", Power Limit 100W
+- **2026-01-13:** ✅ GPU-Temperatur jetzt unter Kontrolle (78°C, Lüfter folgt Kurve)
 - 20 Rollouts verwendet (von 36 generierten)
 - GPU: NVIDIA RTX A4000 (16GB VRAM)
 
 ---
 
 *Log erstellt: 2026-01-07*
-*Letzte Aktualisierung: 2026-01-07*
+*Letzte Aktualisierung: 2026-01-13*
 

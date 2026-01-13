@@ -85,6 +85,37 @@
 - [x] Checkpoints unter: `outputs/2026-01-07/09-33-48/`
 - [ ] `model_latest.pth` nach Training vorhanden
 
+### 4.4 GPU Thermal Management (RTX A4000)
+> **Datum:** 2026-01-13 — *"Training Freeze durch Thermal Throttling"*
+
+- [x] Problem identifiziert: GPU erreicht 83°C → Thermal Throttling
+- [x] Power Limit reduziert: `sudo nvidia-smi -pl 100` (von 140W)
+- [x] GreenWithEnvy (GWE) installiert für Lüftersteuerung
+- [x] Custom Fan Profile "JW" erstellt (100% ab 70-75°C)
+- [x] GWE Autostart aktiviert
+
+---
+
+## ⚠️ Hardware-Voraussetzungen
+
+### GPU Kühlung für RTX A4000
+
+Die RTX A4000 ist eine Blower-Karte mit konservativer VBIOS-Lüfterkurve. Für stabiles Training:
+
+| Einstellung | Empfohlen | Tool |
+|-------------|-----------|------|
+| Power Limit | 100-110W | `nvidia-smi -pl` |
+| Lüfter @ 70°C | 80-100% | GreenWithEnvy |
+| Lüfter @ 75°C | 100% | GreenWithEnvy |
+| Max Temp | <80°C | Monitoring |
+
+**Installation GreenWithEnvy:**
+```bash
+sudo apt install flatpak
+flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+flatpak install flathub com.leinardi.gwe
+```
+
 ---
 
 ## Schnellreferenz
@@ -127,5 +158,6 @@
 ---
 
 *Erstellt: 2026-01-06*
+*Letzte Aktualisierung: 2026-01-13*
 *Workspace: `/home/tsp_jw/Desktop/dino_wm/`*
 

@@ -11,7 +11,7 @@ dataset:
   n_rollout: null  # null = alle verfügbaren Rollouts laden
   normalize_action: ${normalize_action}
   # data_path: ${oc.env:DATASET_DIR,./data}/franka_cube_stack
-  data_path: /home/tsp_jw/Desktop/isaacsim/00_my_envs/Franka_Cube_Stacking_JW/dataset/franka_cube_stack_ds
+  data_path: /media/tsp_jw/fc8bca1b-cab8-4522-81d0-06172d2beae8/fcs_datasets/2026_01_13_1152_fcs_dset
   split_ratio: 0.9
   transform:
     _target_: "datasets.img_transforms.default_transform"

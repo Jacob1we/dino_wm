@@ -1,4 +1,4 @@
-name: dino_wm
+name: dino_wm2
 channels:
   - conda-forge
 dependencies:

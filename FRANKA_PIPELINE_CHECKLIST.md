@@ -94,6 +94,57 @@
 - [x] Custom Fan Profile "JW" erstellt (100% ab 70-75°C)
 - [x] GWE Autostart aktiviert
 
+### 4.5 Training Freeze / Deadlock Problem
+> **Datum:** 2026-01-13 — *"Wiederholte Training-Freezes unabhängig von Temperatur"*
+
+**Symptome:**
+- [x] Training freezt nach zufälliger Zeit (nicht temperaturabhängig)
+- [x] GPU-Temperatur bei Freeze: ~48°C (normal)
+- [x] Zombie-Prozess `[python] <defunct>` entsteht
+- [x] Mehrere Subprozesse bleiben hängen
+- [x] Keine Fehlermeldung, kein OOM, kein Crash
+
+**Diagnose:**
+```bash
+ps aux | grep train.py
+# Zeigt: Hauptprozess + Zombie + mehrere DataLoader-Worker
+```
+
+**Ausgeschlossene Ursachen:**
+- [x] GPU Thermal Throttling → NEIN (Temp bei Freeze: 48°C)
+- [x] DataLoader Multiprocessing (`num_workers > 0`) → NEIN (freezt auch mit `num_workers=0`)
+- [x] `preload_images=True` bereits aktiv → Hilft NICHT
+- [x] Datensatz-Größe → NEIN (freezt mit 10 und 100 Episoden)
+- [x] Zeit-basiert → NEIN (Freeze nach 15min, 48min, variabel)
+
+**WandB Monitoring Analyse (25 Runs):**
+- RAM ist KONSTANT (~4-5GB) - **KEIN Speicherleck**
+- GPU-Temperatur variiert (50-85°C) bei Crash - **NICHT temperaturabhängig**
+- Crashes zeitlich verstreut (15min - 60min+) - **KEIN zeitliches Muster**
+- GPU Power fällt plötzlich von ~80W auf ~20W ab
+
+**Noch offene Fragen:**
+- Warum stoppt GPU plötzlich?
+- Ist es ein CUDA/Driver-Problem?
+- Hängt es mit WandB Network Traffic zusammen?
+
+**Lösungsversuche:**
+- [x] `num_workers: 0` setzen → Freeze bleibt
+- [x] `preload_images: True` → Freeze bleibt
+- [ ] `WANDB_MODE=offline` (WandB deaktivieren) - **PRIORITÄT 1**
+- [ ] `training.num_reconstruct_samples: 0` (keine Visualisierungen)
+- [ ] RAM-Monitoring während Training: `watch -n 5 free -h`
+- [ ] gc.collect() nach jeder Epoche einfügen
+
+**Nächster Debug-Schritt (RAM-Leak Test):**
+```bash
+# Terminal 1: RAM überwachen
+watch -n 5 'free -h && ps aux --sort=-%mem | head -5'
+
+# Terminal 2: Training OHNE WandB starten
+WANDB_MODE=disabled python train.py env=franka_cube_stack training.num_reconstruct_samples=0
+```
+
 ---
 
 ## ⚠️ Hardware-Voraussetzungen

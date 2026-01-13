@@ -12,6 +12,34 @@
 
 ---
 
+## 0. System Hardware
+
+### GPU
+| Feld | Wert |
+|------|------|
+| **Modell** | NVIDIA RTX A4000 |
+| **VRAM Total** | 16,376 MiB (~16 GB) |
+| **Driver Version** | 570.195.03 |
+| **CUDA Version** | 12.8 |
+
+### CPU
+| Feld | Wert |
+|------|------|
+| **Modell** | Intel Core i9-14900K |
+| **Kerne** | 24 Cores (32 Threads) |
+| **Sockets** | 1 |
+| **Max Takt** | 6.0 GHz |
+| **Min Takt** | 0.8 GHz |
+
+### RAM
+| Feld | Wert |
+|------|------|
+| **Total** | 188 GB |
+| **Verfügbar** | ~169 GB |
+| **Swap** | 2 GB |
+
+---
+
 ## 1. Datensatz Parameter
 
 | Parameter | Wert | Beschreibung |
@@ -145,29 +173,45 @@ torch.cuda.OutOfMemoryError: CUDA out of memory. Tried to allocate 442.00 MiB.
 python train.py --config-name train.yaml env=franka_cube_stack frameskip=5 num_hist=3 training.batch_size=16
 ```
 
-### 6.2 Segfault / DataLoader Deadlock ✅ GELÖST
+### 6.2 Training Freeze ⚠️ UNGELÖST
 
-**Problem:** Training crasht mit Segfault oder friert ein bei ~30-40%
+**Problem:** Training friert nach zufälliger Zeit ein (15min - 60min+)
+- Keine Fehlermeldung, kein Crash
+- GPU-Temperatur normal (~48°C)
+- Zombie-Prozess `[python] <defunct>` entsteht
+
+**Bereits getestete Lösungen (OHNE Erfolg):**
+
+| Versuch | Ergebnis |
+|---------|----------|
+| `num_workers=0` | ❌ Freeze bleibt |
+| `preload_images=True` | ❌ Freeze bleibt |
+| Kleinerer Datensatz (10 statt 100 Episoden) | ❌ Freeze bleibt |
+| GPU Thermal Management (Power Limit, Lüfter) | ❌ Freeze bleibt (Temp war nie das Problem) |
+
+**Ausgeschlossene Ursachen:**
+- ~~DataLoader Multiprocessing~~ → Freeze auch mit `num_workers=0`
+- ~~GPU Überhitzung~~ → Temp bei Freeze: 48°C
+- ~~Datensatz-Größe~~ → Freeze mit 10 und 100 Episoden
+- ~~OOM~~ → Keine Fehlermeldung, genug RAM/VRAM
+
+**WandB Analyse (25 Runs):**
+- RAM ist KONSTANT (~4-5GB) - kein Speicherleck
+- Crashes zeitlich verstreut (15-60+ min) - kein Muster
+- GPU Power fällt plötzlich ab (80W → 20W)
+- Ursache weiterhin unbekannt
+
+**Noch zu testen:**
+- [ ] WandB deaktivieren (`WANDB_MODE=disabled`) - **PRIORITÄT 1**
+- [ ] Visualisierungen deaktivieren (`training.num_reconstruct_samples=0`)
+- [ ] RAM-Monitoring parallel zum Training
+- [ ] gc.collect() nach jeder Epoche
+
+**Debug-Befehl:**
+```bash
+# RAM-Leak Test ohne WandB und Visualisierungen
+WANDB_MODE=disabled python train.py env=franka_cube_stack training.num_reconstruct_samples=0
 ```
-segfault in libtorch_cpu.so
-resource_tracker: leaked semaphore objects
-```
-
-**Ursache:** `torch.load()` in `get_frames()` wird bei jedem Zugriff aufgerufen → Deadlock mit multiprocessing Workers
-
-**Lösung: Bilder vorab in RAM laden**
-
-Dataset-Loader wurde modifiziert (`preload_images=True` default):
-- Alle Bilder werden beim Start in RAM geladen (~3.5 GB für 20 Episoden)
-- Kein `torch.load()` mehr während des Trainings
-- Multiprocessing-Worker können sicher auf gecachte Daten zugreifen
-
-| num_workers | preload_images | Zeit/Epoch | Status |
-|-------------|----------------|------------|--------|
-| 8 | False | ~25 min | ❌ Deadlock |
-| 4 | False | ~35 min | ❌ Deadlock |
-| 0 | False | ~90 min | ✅ Stabil |
-| 4-8 | **True** | ~25-30 min | ✅ **Empfohlen** |
 
 ---
 
@@ -259,11 +303,19 @@ nvidia-smi
 - **2026-01-07:** Torch-Konflikt behoben durch Deinstallation der User-Installation (`pip uninstall torch torchvision --user`)
 - **2026-01-07:** ✅ Training läuft mit batch_size=8
 - **2026-01-13:** ❌ Training friert regelmäßig nach 15-25 Min ein (auch mit kleinem 10-Episode Dataset)
-- **2026-01-13:** 🔍 Ursache identifiziert: GPU Thermal Throttling (83°C, Lüfter nur 62%)
+- **2026-01-13:** 🔍 Verdacht: GPU Thermal Throttling (83°C, Lüfter nur 62%)
 - **2026-01-13:** ✅ GreenWithEnvy installiert, Custom Fan Profile "JW", Power Limit 100W
-- **2026-01-13:** ✅ GPU-Temperatur jetzt unter Kontrolle (78°C, Lüfter folgt Kurve)
-- 20 Rollouts verwendet (von 36 generierten)
+- **2026-01-13:** ❌ Freeze bleibt trotz GPU-Kühlung (Temp bei Freeze: 48°C)
+- **2026-01-13:** ❌ `num_workers=0` getestet → Freeze bleibt
+- **2026-01-13:** ❌ Kleiner Datensatz (10 Episoden) → Freeze bleibt
+- **2026-01-13:** ⚠️ **Ursache weiterhin unbekannt** - weder Temperatur noch DataLoader noch Datensatz-Größe
 - GPU: NVIDIA RTX A4000 (16GB VRAM)
+
+### Nächste Schritte
+1. WandB deaktivieren testen (`WANDB_MODE=offline`)
+2. CUDA synchron testen (`CUDA_LAUNCH_BLOCKING=1`)
+3. Accelerator/DDP deaktivieren
+4. Auf anderem System testen
 
 ---
 

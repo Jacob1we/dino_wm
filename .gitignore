@@ -3,6 +3,5 @@ __pycache__
 outputs
 plan_outputs
 *.mp4
-*.zip
 *.pth
 *.pkl

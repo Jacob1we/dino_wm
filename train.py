@@ -1,4 +1,5 @@
 import os
+import sys
 import time
 import hydra
 import torch
@@ -7,6 +8,7 @@ import logging
 import warnings
 import threading
 import itertools
+import traceback
 import numpy as np
 from tqdm import tqdm
 from omegaconf import OmegaConf, open_dict
@@ -25,6 +27,23 @@ from utils import slice_trajdict_with_t, cfg_to_dict, seed, sample_tensors
 
 warnings.filterwarnings("ignore")
 log = logging.getLogger(__name__)
+
+# === Globaler Exception Handler für detailliertes Logging ===
+def _global_exception_handler(exc_type, exc_value, exc_tb):
+    """Loggt alle unbehandelten Exceptions mit vollem Traceback."""
+    if issubclass(exc_type, KeyboardInterrupt):
+        sys.__excepthook__(exc_type, exc_value, exc_tb)
+        return
+    log.error("=" * 80)
+    log.error("UNHANDLED EXCEPTION")
+    log.error(f"Type: {exc_type.__name__}")
+    log.error(f"Value: {exc_value}")
+    log.error("Traceback:")
+    for line in traceback.format_exception(exc_type, exc_value, exc_tb):
+        log.error(line.rstrip())
+    log.error("=" * 80)
+
+sys.excepthook = _global_exception_handler
 
 class Trainer:
     def __init__(self, cfg):
@@ -371,11 +390,16 @@ class Trainer:
         init_epoch = self.epoch + 1  # epoch starts from 1
         for epoch in range(init_epoch, init_epoch + self.total_epochs):
             self.epoch = epoch
-            self.accelerator.wait_for_everyone()
-            self.train()
-            self.accelerator.wait_for_everyone()
-            self.val()
-            self.logs_flash(step=self.epoch)
+            try:
+                self.accelerator.wait_for_everyone()
+                self.train()
+                self.accelerator.wait_for_everyone()
+                self.val()
+                self.logs_flash(step=self.epoch)
+            except Exception as e:
+                log.error(f"ERROR at epoch {self.epoch}: {type(e).__name__}: {e}")
+                log.error(traceback.format_exc())
+                raise
             if self.epoch % self.cfg.training.save_every_x_epoch == 0:
                 ckpt_path, model_name, model_epoch = self.save_ckpt()
                 # main thread only: launch planning jobs on the saved ckpt
@@ -814,8 +838,20 @@ class Trainer:
 
 @hydra.main(config_path="conf", config_name="train")
 def main(cfg: OmegaConf):
-    trainer = Trainer(cfg)
-    trainer.run()
+    try:
+        trainer = Trainer(cfg)
+        trainer.run()
+    except KeyboardInterrupt:
+        log.warning("Training interrupted by user (Ctrl+C)")
+        raise
+    except Exception as e:
+        log.error("=" * 80)
+        log.error("TRAINING FAILED")
+        log.error(f"Exception: {type(e).__name__}: {e}")
+        log.error("Full traceback:")
+        log.error(traceback.format_exc())
+        log.error("=" * 80)
+        raise
 
 
 if __name__ == "__main__":

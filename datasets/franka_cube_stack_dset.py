@@ -116,6 +116,9 @@ class FrankaCubeStackDataset(TrajDataset):
         self.action_dim = self.all_actions[0].shape[-1]
         self.eef_dim = self.all_eef_states[0].shape[-1]
         
+        # State dim: EEF States werden als States verwendet
+        self.state_dim = self.eef_dim
+        
         # Proprio: EEF Position (erste 3 Dimensionen)
         self.proprio_dim = 3
         
@@ -130,11 +133,17 @@ class FrankaCubeStackDataset(TrajDataset):
             self.action_std = all_actions_flat.std(dim=0) + 1e-6
             
             all_eef_flat = torch.cat(self.eef_tensors, dim=0)
+            # State mean/std: für alle EEF-Dimensionen
+            self.state_mean = all_eef_flat.mean(dim=0)
+            self.state_std = all_eef_flat.std(dim=0) + 1e-6
+            # Proprio mean/std: nur für Position (erste 3 Dimensionen)
             self.proprio_mean = all_eef_flat[:, :3].mean(dim=0)
             self.proprio_std = all_eef_flat[:, :3].std(dim=0) + 1e-6
         else:
             self.action_mean = torch.zeros(self.action_dim)
             self.action_std = torch.ones(self.action_dim)
+            self.state_mean = torch.zeros(self.state_dim)
+            self.state_std = torch.ones(self.state_dim)
             self.proprio_mean = torch.zeros(self.proprio_dim)
             self.proprio_std = torch.ones(self.proprio_dim)
         
@@ -142,6 +151,7 @@ class FrankaCubeStackDataset(TrajDataset):
         self.actions_tensors = [(a - self.action_mean) / self.action_std for a in self.actions_tensors]
         
         print(f"  Action dim: {self.action_dim}")
+        print(f"  State dim: {self.state_dim}")
         print(f"  EEF dim: {self.eef_dim}")
         print(f"  Proprio dim: {self.proprio_dim}")
         print(f"  Preload images: {self.preload_images}")
@@ -186,6 +196,9 @@ class FrankaCubeStackDataset(TrajDataset):
         act = self.actions_tensors[idx][frames]
         eef = self.eef_tensors[idx][frames]
         
+        # State: EEF States (normalisiert)
+        state = (eef - self.state_mean) / self.state_std
+        
         # Proprio: EEF Position (erste 3 Dimensionen)
         proprio = (eef[:, :3] - self.proprio_mean) / self.proprio_std
         
@@ -201,7 +214,7 @@ class FrankaCubeStackDataset(TrajDataset):
             image = self.transform(image)
         
         obs = {"visual": image, "proprio": proprio}
-        return obs, act, eef, {}
+        return obs, act, state, {}
     
     def __getitem__(self, idx: int):
         """Lädt eine vollständige Trajektorie."""

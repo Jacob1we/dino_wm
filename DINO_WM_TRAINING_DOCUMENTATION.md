@@ -14,7 +14,6 @@
 6. [Loss-Funktionen](#6-loss-funktionen)
 7. [Training starten](#7-training-starten)
 8. [Glossar](#8-glossar)
-9. [Troubleshooting](#9-troubleshooting)
 
 ---
 
@@ -308,7 +307,7 @@ self.patch_embed = nn.Conv1d(
 
 **Zusammenfassung des Datenflusses:**
 ```
-Actions:  (B, T, 9) ──frameskip──► (B, T, 45) ──Conv1d──► (B, T, 10)
+Actions:  (B, T, 9) ──frameskip(5)──► (B, T, 9*5=45) ──Conv1d──► (B, T, 10)
 Proprio:  (B, T, 3) ─────────────────────────► Conv1d──► (B, T, 10)
 ```
 
@@ -340,9 +339,6 @@ decoder_path: null       # Optional: Vortrainierter Decoder
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │  SCHRITT 1: Konfiguration laden                                             │
 │  ─────────────────────────────────────────────────────────────────────────  │
-│  Zweck: Alle Hyperparameter und Pfade aus YAML-Dateien einlesen.            │
-│  Hydra ermöglicht hierarchische Konfiguration und Command-Line-Overrides.   │
-│  ─────────────────────────────────────────────────────────────────────────  │
 │  python train.py env=franka_cube_stack                                      │
 │                                                                             │
 │  → Hydra lädt: conf/train.yaml + conf/env/franka_cube_stack.yaml           │
@@ -352,9 +348,6 @@ decoder_path: null       # Optional: Vortrainierter Decoder
                                     ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │  SCHRITT 2: Trainer-Objekt erstellen                                        │
-│  ─────────────────────────────────────────────────────────────────────────  │
-│  Zweck: Zentrale Klasse, die Training, Validation und Logging koordiniert.  │
-│  Accelerator abstrahiert GPU/Multi-GPU und integriert Weights & Biases.     │
 │  ─────────────────────────────────────────────────────────────────────────  │
 │  class Trainer:                                                             │
 │      def __init__(self, cfg):                                               │
@@ -370,10 +363,7 @@ decoder_path: null       # Optional: Vortrainierter Decoder
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │  SCHRITT 3: FrankaCubeStackDataset laden                                    │
 │  ─────────────────────────────────────────────────────────────────────────  │
-│  Zweck: Rohdaten (Bilder, States, Actions) von der Festplatte laden.        │
-│  Bilder werden in RAM gecacht für schnellen Zugriff während des Trainings.  │
-│  Z-Normalisierung stabilisiert das Training durch einheitliche Wertebereiche│
-│  ─────────────────────────────────────────────────────────────────────────  │
+│                                                                             │
 │  class FrankaCubeStackDataset:                                              │
 │      def __init__(self, data_path, ...):                                    │
 │          # 1. States und Actions laden                                      │
@@ -402,9 +392,7 @@ decoder_path: null       # Optional: Vortrainierter Decoder
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │  SCHRITT 4: Train/Validation Split                                          │
 │  ─────────────────────────────────────────────────────────────────────────  │
-│  Zweck: Episoden in Training und Validation aufteilen zur Overfitting-Kontrolle.│
-│  Validation-Daten werden NIE zum Training verwendet, nur zur Evaluation.    │
-│  ─────────────────────────────────────────────────────────────────────────  │
+│                                                                             │
 │  Mit split_ratio=0.9 und 10 Episoden:                                       │
 │  - Training: 9 Episoden (zufällig ausgewählt)                               │
 │  - Validation: 1 Episode                                                    │
@@ -418,10 +406,7 @@ decoder_path: null       # Optional: Vortrainierter Decoder
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │  SCHRITT 5: TrajSlicerDataset erstellen                                     │
 │  ─────────────────────────────────────────────────────────────────────────  │
-│  Zweck: Lange Episoden in kurze, überlappende Trainings-Samples schneiden.  │
-│  Frameskip und num_hist bestimmen die Länge und Auflösung jedes Samples.    │
-│  Shuffling der Slices verhindert, dass das Modell Sequenz-Reihenfolge lernt.│
-│  ─────────────────────────────────────────────────────────────────────────  │
+│                                                                             │
 │  Parameter:                                                                 │
 │  - num_frames = num_hist + num_pred = 3 + 1 = 4                            │
 │  - frameskip = 5                                                            │
@@ -452,10 +437,7 @@ decoder_path: null       # Optional: Vortrainierter Decoder
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │  SCHRITT 6: DINO v2 Encoder laden                                           │
 │  ─────────────────────────────────────────────────────────────────────────  │
-│  Zweck: Vortrainiertes Vision-Modell extrahiert semantische Bild-Features.  │
-│  DINO wurde auf Millionen Bildern trainiert und ist hier EINGEFROREN.       │
-│  Output: 256 Patch-Tokens à 384 Dimensionen pro Bild.                       │
-│  ─────────────────────────────────────────────────────────────────────────  │
+│                                                                             │
 │  self.encoder = DinoV2Encoder(                                              │
 │      name="dinov2_vits14",          # ViT-Small, Patch 14                   │
 │      feature_key="x_norm_patchtokens"                                       │
@@ -479,10 +461,7 @@ decoder_path: null       # Optional: Vortrainierter Decoder
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │  SCHRITT 7: Action & Proprio Encoder laden                                  │
 │  ─────────────────────────────────────────────────────────────────────────  │
-│  Zweck: Roboter-Aktionen und Propriozeption in kompakte Embeddings wandeln. │
-│  Conv1d lernt, welche Action-Kombinationen für Vorhersagen relevant sind.   │
-│  Diese Encoder werden MIT trainiert (im Gegensatz zu DINO).                 │
-│  ─────────────────────────────────────────────────────────────────────────  │
+│                                                                             │
 │  # Action Encoder                                                           │
 │  self.action_encoder = ProprioceptiveEmbedding(                             │
 │      in_chans=45,      # action_dim × frameskip = 9 × 5                    │
@@ -502,10 +481,7 @@ decoder_path: null       # Optional: Vortrainierter Decoder
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │  SCHRITT 8: ViT Predictor laden                                             │
 │  ─────────────────────────────────────────────────────────────────────────  │
-│  Zweck: Kernkomponente - lernt zukünftige Zustände im Latent-Space vorherzusagen.│
-│  Kausale Maske verhindert, dass das Modell in die Zukunft "schaut".         │
-│  6 Transformer-Blöcke mit 16 Attention-Heads für komplexe Dynamik-Modellierung.│
-│  ─────────────────────────────────────────────────────────────────────────  │
+│                                                                             │
 │  self.predictor = ViTPredictor(                                             │
 │      num_patches=198,  # 196 visual + 2 (proprio + action bei concat_dim=0) │
 │                        # oder 196 bei concat_dim=1                          │
@@ -525,10 +501,7 @@ decoder_path: null       # Optional: Vortrainierter Decoder
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │  SCHRITT 9: VQ-VAE Decoder laden                                            │
 │  ─────────────────────────────────────────────────────────────────────────  │
-│  Zweck: Rekonstruiert Bilder aus dem Latent-Space zur Visualisierung.       │
-│  Upsampling von 16×16 auf 224×224 durch transponierte Convolutions.         │
-│  Quantisierung ist deaktiviert für kontinuierlichen, glatten Latent-Space.  │
-│  ─────────────────────────────────────────────────────────────────────────  │
+│                                                                             │
 │  self.decoder = VQVAE(                                                      │
 │      channel=384,       # Entspricht DINO emb_dim                           │
 │      n_embed=2048,      # Codebook-Größe (nicht verwendet wenn quantize=F)  │
@@ -545,10 +518,7 @@ decoder_path: null       # Optional: Vortrainierter Decoder
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │  SCHRITT 10: VWorldModel zusammensetzen                                     │
 │  ─────────────────────────────────────────────────────────────────────────  │
-│  Zweck: Alle Komponenten zu einem einheitlichen World Model verbinden.      │
-│  Definiert den Datenfluss: Encode → Concatenate → Predict → Decode.         │
-│  concat_dim=1 bedeutet, dass Embeddings entlang der Feature-Dimension kombiniert werden.│
-│  ─────────────────────────────────────────────────────────────────────────  │
+│                                                                             │
 │  self.model = VWorldModel(                                                  │
 │      encoder=self.encoder,                                                  │
 │      proprio_encoder=self.proprio_encoder,                                  │
@@ -568,10 +538,7 @@ decoder_path: null       # Optional: Vortrainierter Decoder
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │  SCHRITT 11: Optimizer initialisieren                                       │
 │  ─────────────────────────────────────────────────────────────────────────  │
-│  Zweck: Separate Optimizer für jede Komponente mit unterschiedlichen Lernraten.│
-│  AdamW für Predictor (mit Weight Decay), Adam für Encoder/Decoder.          │
-│  Niedrige Encoder-LR (1e-6) da DINO-Weights meist eingefroren bleiben.      │
-│  ─────────────────────────────────────────────────────────────────────────  │
+│                                                                             │
 │  self.encoder_optimizer = Adam(encoder.parameters(), lr=1e-6)               │
 │  self.predictor_optimizer = AdamW(predictor.parameters(), lr=5e-4)          │
 │  self.decoder_optimizer = Adam(decoder.parameters(), lr=3e-4)               │
@@ -584,10 +551,7 @@ decoder_path: null       # Optional: Vortrainierter Decoder
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │  SCHRITT 12: Training-Epoch                                                 │
 │  ─────────────────────────────────────────────────────────────────────────  │
-│  Zweck: Hauptschleife - iteriert über alle Batches und aktualisiert Gewichte.│
-│  Forward Pass berechnet Vorhersagen, Backward Pass berechnet Gradienten.    │
-│  Nur trainierbare Komponenten (Predictor, Decoder, Action-Encoder) werden aktualisiert.│
-│  ─────────────────────────────────────────────────────────────────────────  │
+│                                                                             │
 │  for epoch in range(1, 101):  # 100 Epochen                                │
 │      for batch in dataloader:                                               │
 │          obs, act, state = batch                                            │
@@ -627,10 +591,7 @@ decoder_path: null       # Optional: Vortrainierter Decoder
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │  SCHRITT 13: Forward Pass - Encoding                                        │
 │  ─────────────────────────────────────────────────────────────────────────  │
-│  Zweck: Rohdaten (Bilder, Proprio, Actions) in einheitliche Embeddings wandeln.│
-│  DINO transformiert Bilder in 256 semantische Patch-Tokens.                 │
-│  Action/Proprio-Encoder komprimieren Sensordaten in 10-dimensionale Vektoren.│
-│  ─────────────────────────────────────────────────────────────────────────  │
+│                                                                             │
 │  INPUT:                                                                     │
 │  ───────                                                                    │
 │  obs['visual']: (B, 4, 3, 224, 224)   # 4 RGB Bilder                       │
@@ -671,10 +632,7 @@ decoder_path: null       # Optional: Vortrainierter Decoder
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │  SCHRITT 14: Forward Pass - Concatenation (concat_dim=1)                    │
 │  ─────────────────────────────────────────────────────────────────────────  │
-│  Zweck: Visuelle, propriozeptive und Action-Information zu einem Vektor vereinen.│
-│  Tiling repliziert Proprio/Action auf alle 256 Patches für einheitliche Dim.│
-│  Ergebnis: Jeder Patch enthält visuelle + Roboter-Information (404 dim).    │
-│  ─────────────────────────────────────────────────────────────────────────  │
+│                                                                             │
 │  Mit concat_dim=1: Embeddings werden entlang Feature-Dimension konkateniert │
 │                                                                             │
 │  z_visual:  (B, 4, 256, 384)  # 256 Patches × 384 dim                      │
@@ -696,10 +654,7 @@ decoder_path: null       # Optional: Vortrainierter Decoder
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │  SCHRITT 15: Forward Pass - Prediction                                      │
 │  ─────────────────────────────────────────────────────────────────────────  │
-│  Zweck: Transformer sagt basierend auf Historie den nächsten Zustand vorher.│
-│  Kausale Maske: Frame 2 kann Frame 0,1,2 sehen, aber nicht Frame 3.         │
-│  Target ist um 1 Zeitschritt verschoben - Modell lernt "was kommt als nächstes".│
-│  ─────────────────────────────────────────────────────────────────────────  │
+│                                                                             │
 │  Source (Input für Predictor):                                              │
 │  z_src = z[:, :num_hist]   = z[:, :3]   # Erste 3 Zeitschritte             │
 │  z_src: (B, 3, 256, 404)                                                    │
@@ -730,10 +685,7 @@ decoder_path: null       # Optional: Vortrainierter Decoder
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │  SCHRITT 16: Forward Pass - Decoding                                        │
 │  ─────────────────────────────────────────────────────────────────────────  │
-│  Zweck: Latent-Space Vorhersagen zurück in Pixel-Bilder wandeln.            │
-│  Ermöglicht visuelle Inspektion der Vorhersagequalität.                     │
-│  Decoder trainiert auf Rekonstruktion, nicht auf Vorhersage (detached).     │
-│  ─────────────────────────────────────────────────────────────────────────  │
+│                                                                             │
 │  Separate Embeddings:                                                       │
 │  z_pred: (B, 3, 256, 404)                                                   │
 │      ↓                                                                      │
@@ -762,10 +714,7 @@ decoder_path: null       # Optional: Vortrainierter Decoder
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │  SCHRITT 17: Loss-Berechnung                                                │
 │  ─────────────────────────────────────────────────────────────────────────  │
-│  Zweck: Fehler zwischen Vorhersage und Ground Truth quantifizieren.         │
-│  z_loss trainiert den Predictor im kompakten Latent-Space (robust).         │
-│  decoder_loss trainiert den Decoder für gute Bildrekonstruktion.            │
-│  ─────────────────────────────────────────────────────────────────────────  │
+│                                                                             │
 │  ┌─────────────────────────────────────────────────────────────────────┐   │
 │  │  LATENT SPACE LOSS (z_loss)                                          │   │
 │  │  ─────────────────────────                                           │   │
@@ -816,10 +765,7 @@ decoder_path: null       # Optional: Vortrainierter Decoder
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │  SCHRITT 18: Validation                                                     │
 │  ─────────────────────────────────────────────────────────────────────────  │
-│  Zweck: Modell auf ungesehenen Daten evaluieren zur Overfitting-Erkennung.  │
-│  Open-Loop Rollout testet autoregressive Vorhersage über mehrere Schritte.  │
-│  model.eval() deaktiviert Dropout und Batch-Normalisierung für Konsistenz.  │
-│  ─────────────────────────────────────────────────────────────────────────  │
+│                                                                             │
 │  model.eval()  # Keine Gradientenberechnung                                │
 │                                                                             │
 │  1. Standard Validation (wie Training, aber ohne Optimizer-Steps)          │
@@ -844,10 +790,7 @@ decoder_path: null       # Optional: Vortrainierter Decoder
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │  SCHRITT 19: Logging zu Weights & Biases                                    │
 │  ─────────────────────────────────────────────────────────────────────────  │
-│  Zweck: Training-Fortschritt visualisieren und Experimente vergleichen.     │
-│  Loss-Kurven zeigen Konvergenz, Bild-Metriken (PSNR/SSIM) zeigen Qualität.  │
-│  Visualisierungen helfen, Fehlerquellen schnell zu identifizieren.          │
-│  ─────────────────────────────────────────────────────────────────────────  │
+│                                                                             │
 │  Geloggte Metriken:                                                         │
 │  - train_loss, val_loss                                                     │
 │  - train_z_loss, val_z_loss                                                 │
@@ -867,10 +810,7 @@ decoder_path: null       # Optional: Vortrainierter Decoder
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │  SCHRITT 20: Checkpoint speichern                                           │
 │  ─────────────────────────────────────────────────────────────────────────  │
-│  Zweck: Modell-Zustand sichern für späteres Laden oder Inferenz.            │
-│  Speichert alle Weights + Optimizer-States für nahtlose Fortsetzung.        │
-│  model_latest.pth wird bei jedem Save überschrieben, model_N.pth bleibt.    │
-│  ─────────────────────────────────────────────────────────────────────────  │
+│                                                                             │
 │  if epoch % save_every_x_epoch == 0:                                        │
 │      torch.save({                                                           │
 │          'epoch': epoch,                                                    │
@@ -1293,70 +1233,6 @@ Training wird automatisch zu W&B geloggt:
 | **MSE** | Mean Squared Error - quadratischer Fehler |
 | **Proprio** | Proprioceptive Daten - Roboter-Eigenwahrnehmung (z.B. Gelenkwinkel) |
 | **Accelerator** | HuggingFace Tool für verteiltes Training |
-
----
-
-## 9. Troubleshooting
-
-### 9.1 Training Freeze / Deadlock (kein Temperatur-Problem)
-
-**Symptome:**
-- Training stoppt ohne Fehlermeldung
-- GPU-Temperatur ist normal (~48°C)
-- `ps aux | grep train.py` zeigt Zombie-Prozess `[python] <defunct>`
-- Mehrere DataLoader-Worker-Prozesse hängen
-
-**Ursache:** PyTorch DataLoader Multiprocessing Deadlock
-- `num_workers > 0` kann bei `torch.load()` in Subprozessen deadlocken
-- Bekanntes PyTorch-Issue bei großen Tensoren
-
-**Lösung 1: num_workers auf 0 setzen**
-```yaml
-# conf/env/franka_cube_stack.yaml
-num_workers: 0  # Deaktiviert Multiprocessing - langsamer aber stabil
-```
-
-**Lösung 2: preload_images aktivieren (bereits Standard)**
-```python
-# In FrankaCubeStackDataset - lädt alle Bilder beim Init in RAM
-preload_images=True  # Verhindert torch.load() in Worker-Prozessen
-```
-
-**Lösung 3: Debugging aktivieren**
-```bash
-CUDA_LAUNCH_BLOCKING=1 python train.py env=franka_cube_stack
-```
-
-### 9.2 GPU Out of Memory (OOM)
-
-**Symptome:**
-- `RuntimeError: CUDA out of memory`
-- Training crasht beim ersten Batch
-
-**Lösung:**
-```bash
-# Batch-Size reduzieren
-python train.py env=franka_cube_stack training.batch_size=8
-
-# Oder num_hist reduzieren
-python train.py env=franka_cube_stack num_hist=2
-```
-
-### 9.3 GPU Thermal Throttling
-
-**Symptome:**
-- Training wird langsamer über Zeit
-- GPU-Temperatur >80°C
-- `nvidia-smi` zeigt reduzierte Taktrate
-
-**Lösung:**
-```bash
-# Power Limit reduzieren
-sudo nvidia-smi -pl 100
-
-# Lüftersteuerung mit GreenWithEnvy
-flatpak run com.leinardi.gwe
-```
 
 ---
 

@@ -2,24 +2,26 @@
 Dataset-Loader für Franka Cube Stacking Datensätze.
 Kompatibel mit DINO World Model Training.
 
-Erwartet Datenstruktur (generiert von FrankaDataLogger):
+Format (Rope kompatibel):
     data_path/
-    ├── states.pth        # (N, T_max, state_dim) float32
-    ├── actions.pth       # (N, T_max, action_dim) float32
-    ├── metadata.pkl      # {'episode_lengths': [...], ...}
-    ├── 000000/
-    │   └── obses.pth     # (T, H, W, C) uint8, RGB-Bilder
-    ├── 000001/
-    │   └── obses.pth
-    └── ...
+    ├── 000000/               # Episode 0
+    │   ├── obses.pth         # (T, H, W, C) float32
+    │   ├── property_params.pkl
+    │   ├── 00.h5             # Timestep 0
+    │   ├── 01.h5             # Timestep 1
+    │   └── ...
+    ├── 000001/               # Episode 1
+    │   └── ...
+    └── metadata.pkl          # Optional: Gesamtstatistiken
 """
 
 import torch
 import pickle
+import h5py
 import numpy as np
 from pathlib import Path
 from einops import rearrange
-from typing import Callable, Optional
+from typing import Callable, Optional, List
 from .traj_dset import TrajDataset, get_train_val_sliced
 
 
@@ -27,7 +29,7 @@ class FrankaCubeStackDataset(TrajDataset):
     """
     Dataset für Franka Panda Cube Stacking Trajektorien.
     
-    Lädt RGB-Bilder, Zustände und Aktionen aus dem FrankaDataLogger-Format.
+    Lädt Daten im Rope-Format: Episode-Ordner mit obses.pth und H5-Dateien.
     Kompatibel mit dem DINO World Model Training-Pipeline.
     """
     
@@ -38,7 +40,7 @@ class FrankaCubeStackDataset(TrajDataset):
         transform: Optional[Callable] = None,
         normalize_action: bool = False,
         action_scale: float = 1.0,
-        preload_images: bool = True,  # NEU: Bilder vorab in RAM laden
+        preload_images: bool = True,
     ):
         """
         Args:
@@ -48,108 +50,109 @@ class FrankaCubeStackDataset(TrajDataset):
             normalize_action: Wenn True, werden Aktionen z-normalisiert
             action_scale: Skalierungsfaktor für Aktionen
             preload_images: Wenn True, werden alle Bilder beim Init in RAM geladen
-                           (löst multiprocessing Deadlock-Problem)
         """
         self.data_path = Path(data_path)
         self.transform = transform
         self.normalize_action = normalize_action
         self.preload_images = preload_images
         
-        # Lade States und Actions
-        self.states = torch.load(self.data_path / "states.pth").float()
-        self.actions = torch.load(self.data_path / "actions.pth").float()
-        self.actions = self.actions / action_scale
+        # Finde alle Episode-Ordner (000000, 000001, ...)
+        self.episode_dirs = sorted([
+            d for d in self.data_path.iterdir()
+            if d.is_dir() and d.name.isdigit()
+        ])
         
-        # Lade Metadaten für Sequenzlängen
-        metadata_path = self.data_path / "metadata.pkl"
-        if metadata_path.exists():
-            with open(metadata_path, "rb") as f:
-                metadata = pickle.load(f)
-            self.seq_lengths = torch.tensor(metadata["episode_lengths"])
-        else:
-            # Fallback: Nutze volle Länge
-            self.seq_lengths = torch.tensor([self.states.shape[1]] * len(self.states))
-        
-        # Begrenze Anzahl Rollouts falls angegeben
         if n_rollout is not None:
-            n = min(n_rollout, len(self.states))
-        else:
-            n = len(self.states)
+            self.episode_dirs = self.episode_dirs[:n_rollout]
         
-        self.states = self.states[:n]
-        self.actions = self.actions[:n]
-        self.seq_lengths = self.seq_lengths[:n]
+        n_episodes = len(self.episode_dirs)
+        print(f"FrankaCubeStackDataset: {n_episodes} Episoden gefunden")
         
-        # Dimensionen extrahieren
-        self.action_dim = self.actions.shape[-1]
-        self.state_dim = self.states.shape[-1]
+        # Lade Daten aus allen Episoden
+        self.seq_lengths = []
+        self.all_actions = []
+        self.all_eef_states = []
+        self.images_cache = [] if preload_images else None
         
-        # Proprio: Nutze EE-Position (erste 3 Dimensionen des States)
-        # State-Format: [ee_pos(3), ee_quat(4), gripper(1), joints(7), joint_vel(7)]
-        self.proprios = self.states[..., :3].clone()  # EE-Position als Proprio
-        self.proprio_dim = self.proprios.shape[-1]
+        for i, episode_dir in enumerate(self.episode_dirs):
+            # Lade obses.pth
+            obses_path = episode_dir / "obses.pth"
+            if not obses_path.exists():
+                raise FileNotFoundError(f"obses.pth nicht gefunden: {obses_path}")
+            
+            obses = torch.load(obses_path)
+            episode_length = obses.shape[0]
+            self.seq_lengths.append(episode_length)
+            
+            if preload_images:
+                self.images_cache.append(obses)
+            
+            # Lade Actions und EEF-States aus H5-Dateien
+            actions = []
+            eef_states = []
+            
+            for t in range(episode_length):
+                h5_path = episode_dir / f"{t:02d}.h5"
+                if h5_path.exists():
+                    with h5py.File(h5_path, "r") as f:
+                        action = f["action"][:]
+                        eef = f["eef_states"][:]
+                        actions.append(action)
+                        eef_states.append(eef.flatten())
+                else:
+                    # Fallback wenn H5 nicht existiert
+                    actions.append(np.zeros(4))  # Rope hat 4-dim actions
+                    eef_states.append(np.zeros(14))
+            
+            self.all_actions.append(np.stack(actions, axis=0))
+            self.all_eef_states.append(np.stack(eef_states, axis=0))
+            
+            if (i + 1) % 10 == 0 or i == n_episodes - 1:
+                print(f"  Geladen: {i + 1}/{n_episodes} Episoden")
+        
+        self.seq_lengths = torch.tensor(self.seq_lengths)
+        
+        # Dimensionen aus ersten Daten extrahieren
+        self.action_dim = self.all_actions[0].shape[-1]
+        self.eef_dim = self.all_eef_states[0].shape[-1]
+        
+        # Proprio: EEF Position (erste 3 Dimensionen)
+        self.proprio_dim = 3
+        
+        # Konvertiere zu Tensoren
+        self.actions_tensors = [torch.from_numpy(a).float() / action_scale for a in self.all_actions]
+        self.eef_tensors = [torch.from_numpy(e).float() for e in self.all_eef_states]
         
         # Normalisierung
         if normalize_action:
-            self.action_mean, self.action_std = self._compute_stats(
-                self.actions, self.seq_lengths
-            )
-            self.state_mean, self.state_std = self._compute_stats(
-                self.states, self.seq_lengths
-            )
-            self.proprio_mean, self.proprio_std = self._compute_stats(
-                self.proprios, self.seq_lengths
-            )
+            all_actions_flat = torch.cat(self.actions_tensors, dim=0)
+            self.action_mean = all_actions_flat.mean(dim=0)
+            self.action_std = all_actions_flat.std(dim=0) + 1e-6
+            
+            all_eef_flat = torch.cat(self.eef_tensors, dim=0)
+            self.proprio_mean = all_eef_flat[:, :3].mean(dim=0)
+            self.proprio_std = all_eef_flat[:, :3].std(dim=0) + 1e-6
         else:
             self.action_mean = torch.zeros(self.action_dim)
             self.action_std = torch.ones(self.action_dim)
-            self.state_mean = torch.zeros(self.state_dim)
-            self.state_std = torch.ones(self.state_dim)
             self.proprio_mean = torch.zeros(self.proprio_dim)
             self.proprio_std = torch.ones(self.proprio_dim)
         
-        # Wende Normalisierung an
-        self.actions = (self.actions - self.action_mean) / self.action_std
-        self.proprios = (self.proprios - self.proprio_mean) / self.proprio_std
+        # Normalisiere
+        self.actions_tensors = [(a - self.action_mean) / self.action_std for a in self.actions_tensors]
         
-        # Preload Images in RAM (löst multiprocessing Deadlock)
-        self.images_cache = None
-        if self.preload_images:
-            print(f"Lade alle Bilder in RAM (kann einige Sekunden dauern)...")
-            self.images_cache = []
-            for i in range(n):
-                obs_dir = self.data_path / f"{i:06d}"
-                img = torch.load(obs_dir / "obses.pth")
-                self.images_cache.append(img)
-            print(f"  {n} Episoden-Bilder im RAM gecached")
-        
-        print(f"FrankaCubeStackDataset: {n} Rollouts geladen")
-        print(f"  State dim: {self.state_dim}, Action dim: {self.action_dim}")
+        print(f"  Action dim: {self.action_dim}")
+        print(f"  EEF dim: {self.eef_dim}")
+        print(f"  Proprio dim: {self.proprio_dim}")
         print(f"  Preload images: {self.preload_images}")
-    
-    def _compute_stats(self, data: torch.Tensor, traj_lengths: torch.Tensor):
-        """Berechnet Mean und Std über alle gültigen Timesteps."""
-        all_data = []
-        for traj in range(len(traj_lengths)):
-            traj_len = traj_lengths[traj]
-            traj_data = data[traj, :traj_len]
-            all_data.append(traj_data)
-        all_data = torch.vstack(all_data)
-        data_mean = torch.mean(all_data, dim=0)
-        data_std = torch.std(all_data, dim=0) + 1e-6
-        return data_mean, data_std
     
     def get_seq_length(self, idx: int) -> int:
         """Gibt die Länge der idx-ten Trajektorie zurück."""
         return int(self.seq_lengths[idx])
     
     def get_all_actions(self) -> torch.Tensor:
-        """Gibt alle (nicht-gepadded) Aktionen als einzelner Tensor zurück."""
-        result = []
-        for i in range(len(self.seq_lengths)):
-            T = self.seq_lengths[i]
-            result.append(self.actions[i, :T, :])
-        return torch.cat(result, dim=0)
+        """Gibt alle Aktionen als einzelner Tensor zurück."""
+        return torch.cat(self.actions_tensors, dim=0)
     
     def get_frames(self, idx: int, frames):
         """
@@ -162,37 +165,50 @@ class FrankaCubeStackDataset(TrajDataset):
         Returns:
             obs: Dict mit 'visual' und 'proprio' Tensoren
             act: Aktionen für die Frames
-            state: Zustände für die Frames
+            state: EEF-States für die Frames
             info: Leeres Dict (Kompatibilität)
         """
         # Bilder aus Cache oder von Disk laden
         if self.images_cache is not None:
             image = self.images_cache[idx]
         else:
-            obs_dir = self.data_path / f"{idx:06d}"
-            image = torch.load(obs_dir / "obses.pth")
+            obses_path = self.episode_dirs[idx] / "obses.pth"
+            image = torch.load(obses_path)
+        
+        # Konvertiere frames zu Liste falls nötig
+        if isinstance(frames, range):
+            frames = list(frames)
         
         # Selektiere Frames
-        image = image[frames]  # (T, H, W, C) uint8
-        proprio = self.proprios[idx, frames]
-        act = self.actions[idx, frames]
-        state = self.states[idx, frames]
+        image = image[frames]  # (T, H, W, C)
+        
+        # Actions und EEF für diese Frames
+        act = self.actions_tensors[idx][frames]
+        eef = self.eef_tensors[idx][frames]
+        
+        # Proprio: EEF Position (erste 3 Dimensionen)
+        proprio = (eef[:, :3] - self.proprio_mean) / self.proprio_std
         
         # Konvertiere Bilder: (T, H, W, C) -> (T, C, H, W), [0, 1]
-        image = rearrange(image, "T H W C -> T C H W") / 255.0
+        if image.dtype == torch.uint8:
+            image = image.float() / 255.0
+        elif image.max() > 1.0:
+            image = image / 255.0
+        
+        image = rearrange(image, "T H W C -> T C H W")
         
         if self.transform:
             image = self.transform(image)
         
         obs = {"visual": image, "proprio": proprio}
-        return obs, act, state, {}
+        return obs, act, eef, {}
     
     def __getitem__(self, idx: int):
         """Lädt eine vollständige Trajektorie."""
         return self.get_frames(idx, range(self.get_seq_length(idx)))
     
     def __len__(self) -> int:
-        return len(self.seq_lengths)
+        return len(self.episode_dirs)
     
     def preprocess_imgs(self, imgs: torch.Tensor) -> torch.Tensor:
         """Preprocessing für externe Bilder (z.B. aus Umgebung)."""
@@ -211,9 +227,6 @@ def load_franka_cube_stack_slice_train_val(
 ):
     """
     Lädt den Franka Cube Stack Datensatz mit Train/Val Split.
-    
-    Erzeugt geschnittene Datensätze für DINO WM Training mit
-    konfigurierbarer Historie und Prädiktion.
     
     Args:
         transform: Bild-Transformationen
@@ -253,4 +266,3 @@ def load_franka_cube_stack_slice_train_val(
     }
     
     return datasets, traj_dset
-

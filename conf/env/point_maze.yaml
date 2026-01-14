@@ -6,7 +6,7 @@ dataset:
   _target_: "datasets.point_maze_dset.load_point_maze_slice_train_val"
   n_rollout: null
   normalize_action: ${normalize_action}
-  data_path: ${oc.env:DATASET_DIR}/point_maze
+  data_path: /media/tsp_jw/fc8bca1b-cab8-4522-81d0-06172d2beae8/point_maze # ${oc.env:DATASET_DIR}/point_maze
   split_ratio: 0.9
   transform:
     _target_: "datasets.img_transforms.default_transform"

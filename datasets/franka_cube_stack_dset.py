@@ -2,17 +2,34 @@
 Dataset-Loader für Franka Cube Stacking Datensätze.
 Kompatibel mit DINO World Model Training.
 
+Action-Format (2 Optionen, gespeichert in H5 info/action_mode Attribut):
+
+    action_mode="delta_pose":
+        action = [delta_x, delta_y, delta_z, delta_yaw]
+        - delta_x/y/z: Relative Position-Änderung des EE in Metern
+        - delta_yaw: Rotation um Z-Achse in Radiant
+
+    action_mode="velocity":
+        action = [vx, vy, vz, omega_z]
+        - vx/vy/vz: Translatorische Geschwindigkeit in m/s
+        - omega_z: Rotatorische Geschwindigkeit um Z-Achse in rad/s
+
 Format (Rope kompatibel):
     data_path/
+    ├── cameras/
+    │   ├── intrinsic.npy     # (4, 4) Kamera-Intrinsik
+    │   └── extrinsic.npy     # (4, 4, 4) Kamera-Extrinsik
     ├── 000000/               # Episode 0
-    │   ├── obses.pth         # (T, H, W, C) float32
-    │   ├── property_params.pkl
+    │   ├── obses.pth         # (T, H, W, C) float32, Werte 0-255
     │   ├── 00.h5             # Timestep 0
+    │   │   ├── action        # (4,) siehe Action-Format
+    │   │   ├── eef_states    # (1, 1, 14)
+    │   │   ├── positions     # (1, n_cubes, 4) Würfel [x, y, z, yaw]
+    │   │   ├── info/         # n_cams, n_cubes, timestamp, action_mode (attr)
+    │   │   └── observations/ # color/cam_0, depth/cam_0
     │   ├── 01.h5             # Timestep 1
     │   └── ...
-    ├── 000001/               # Episode 1
-    │   └── ...
-    └── metadata.pkl          # Optional: Gesamtstatistiken
+    └── 000001/               # Episode 1
 """
 
 import torch
@@ -31,6 +48,10 @@ class FrankaCubeStackDataset(TrajDataset):
     
     Lädt Daten im Rope-Format: Episode-Ordner mit obses.pth und H5-Dateien.
     Kompatibel mit dem DINO World Model Training-Pipeline.
+    
+    Action-Format (wird automatisch aus H5 info/action_mode erkannt):
+        - "delta_pose": [delta_x, delta_y, delta_z, delta_yaw]
+        - "velocity":   [vx, vy, vz, omega_z]
     """
     
     def __init__(
@@ -55,6 +76,7 @@ class FrankaCubeStackDataset(TrajDataset):
         self.transform = transform
         self.normalize_action = normalize_action
         self.preload_images = preload_images
+        self.action_mode = None  # Wird aus H5 gelesen
         
         # Finde alle Episode-Ordner (000000, 000001, ...)
         self.episode_dirs = sorted([
@@ -99,9 +121,16 @@ class FrankaCubeStackDataset(TrajDataset):
                         eef = f["eef_states"][:]
                         actions.append(action)
                         eef_states.append(eef.flatten())
+                        
+                        # Erkenne action_mode aus erstem H5 der ersten Episode
+                        if self.action_mode is None and "info" in f:
+                            if "action_mode" in f["info"].attrs:
+                                self.action_mode = f["info"].attrs["action_mode"]
+                                if isinstance(self.action_mode, bytes):
+                                    self.action_mode = self.action_mode.decode("utf-8")
                 else:
                     # Fallback wenn H5 nicht existiert
-                    actions.append(np.zeros(4))  # Rope hat 4-dim actions
+                    actions.append(np.zeros(4))  # 4-dim actions
                     eef_states.append(np.zeros(14))
             
             self.all_actions.append(np.stack(actions, axis=0))
@@ -126,9 +155,17 @@ class FrankaCubeStackDataset(TrajDataset):
         self.actions_tensors = [torch.from_numpy(a).float() / action_scale for a in self.all_actions]
         self.eef_tensors = [torch.from_numpy(e).float() for e in self.all_eef_states]
         
-        # Normalisierung
+        # Default action_mode falls nicht in H5 gefunden
+        if self.action_mode is None:
+            self.action_mode = "delta_pose"
+            print(f"  Warning: action_mode nicht in H5 gefunden, verwende default: {self.action_mode}")
+        
+        # Normalisierung für Action
+        # Beide Modi haben Format: [translation/velocity (3), rotation/omega (1)]
         if normalize_action:
             all_actions_flat = torch.cat(self.actions_tensors, dim=0)
+            
+            # Z-Normalisierung für alle 4 Dimensionen
             self.action_mean = all_actions_flat.mean(dim=0)
             self.action_std = all_actions_flat.std(dim=0) + 1e-6
             
@@ -147,14 +184,23 @@ class FrankaCubeStackDataset(TrajDataset):
             self.proprio_mean = torch.zeros(self.proprio_dim)
             self.proprio_std = torch.ones(self.proprio_dim)
         
-        # Normalisiere
+        # Normalisiere Actions
         self.actions_tensors = [(a - self.action_mean) / self.action_std for a in self.actions_tensors]
         
+        print(f"  Action mode: {self.action_mode}")
+        if self.action_mode == "delta_pose":
+            print(f"  Action format: [delta_x, delta_y, delta_z, delta_yaw]")
+        else:
+            print(f"  Action format: [vx, vy, vz, omega_z]")
         print(f"  Action dim: {self.action_dim}")
         print(f"  State dim: {self.state_dim}")
         print(f"  EEF dim: {self.eef_dim}")
         print(f"  Proprio dim: {self.proprio_dim}")
         print(f"  Preload images: {self.preload_images}")
+        if normalize_action:
+            print(f"  Action normalization: z-score")
+            print(f"    Mean: {self.action_mean.numpy()}")
+            print(f"    Std: {self.action_std.numpy()}")
     
     def get_seq_length(self, idx: int) -> int:
         """Gibt die Länge der idx-ten Trajektorie zurück."""

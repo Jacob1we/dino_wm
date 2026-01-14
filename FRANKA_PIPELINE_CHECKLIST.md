@@ -145,6 +145,41 @@ watch -n 5 'free -h && ps aux --sort=-%mem | head -5'
 WANDB_MODE=disabled python train.py env=franka_cube_stack training.num_reconstruct_samples=0
 ```
 
+### 4.6 Segmentation Fault Problem (2026-01-14)
+> **Symptome:** Training crasht mit "Segmentation fault (core dumped)" nach 6-7 Iterationen
+
+**Behobene Probleme:**
+- [x] NaN-Werte in Actions (18/935 H5-Dateien pro Episode)
+- [x] Fix in `franka_cube_stack_dset.py`: `np.nan_to_num(action, nan=0.0)`
+- [x] Fix in `data_logger.py`: NaN-Prüfung vor Speichern
+
+**Aktueller Status:**
+- [x] Alte Datensätze (4D delta_pose): Training läuft nach NaN-Fix ✓
+- [ ] Neue Datensätze (6D ee_pos): Segfault bleibt → weitere Diagnose nötig
+
+**Debug-Schritte für Segfault:**
+- [ ] GPU-Speicher prüfen: `nvidia-smi`
+- [ ] Bilddaten validieren:
+  ```bash
+  python -c "
+  import torch
+  o = torch.load('fcs_datasets/2026_01_14_1639_fcs_dset/000000/obses.pth')
+  print(f'Shape: {o.shape}, NaN: {torch.isnan(o).any()}, Min/Max: {o.min()}/{o.max()}')
+  "
+  ```
+- [ ] GDB Backtrace für genaue Crash-Position:
+  ```bash
+  gdb -ex run -ex bt --args python train.py --config-name train.yaml env=franka_cube_stack
+  ```
+- [ ] CUDA Synchronous Execution:
+  ```bash
+  CUDA_LAUNCH_BLOCKING=1 python train.py env=franka_cube_stack
+  ```
+- [ ] Kleinere Batch-Size testen:
+  ```bash
+  python train.py env=franka_cube_stack batch_size=2
+  ```
+
 ---
 
 ## ⚠️ Hardware-Voraussetzungen
@@ -209,6 +244,6 @@ flatpak install flathub com.leinardi.gwe
 ---
 
 *Erstellt: 2026-01-06*
-*Letzte Aktualisierung: 2026-01-13*
+*Letzte Aktualisierung: 2026-01-14*
 *Workspace: `/home/tsp_jw/Desktop/dino_wm/`*
 

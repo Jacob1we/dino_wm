@@ -2,17 +2,22 @@
 Dataset-Loader für Franka Cube Stacking Datensätze.
 Kompatibel mit DINO World Model Training.
 
-Action-Format (2 Optionen, gespeichert in H5 info/action_mode Attribut):
+Action-Format (3 Optionen, gespeichert in H5 info/action_mode Attribut):
 
-    action_mode="delta_pose":
+    action_mode="delta_pose" (4D):
         action = [delta_x, delta_y, delta_z, delta_yaw]
         - delta_x/y/z: Relative Position-Änderung des EE in Metern
         - delta_yaw: Rotation um Z-Achse in Radiant
 
-    action_mode="velocity":
+    action_mode="velocity" (4D):
         action = [vx, vy, vz, omega_z]
         - vx/vy/vz: Translatorische Geschwindigkeit in m/s
         - omega_z: Rotatorische Geschwindigkeit um Z-Achse in rad/s
+
+    action_mode="ee_pos" (6D, wie DINO WM Rope):
+        action = [x_start, y_start, z_start, x_end, y_end, z_end]
+        - x/y/z_start: EE-Position am Anfang der Bewegung
+        - x/y/z_end: EE-Position am Ende der Bewegung
 
 Format (Rope kompatibel):
     data_path/
@@ -50,8 +55,9 @@ class FrankaCubeStackDataset(TrajDataset):
     Kompatibel mit dem DINO World Model Training-Pipeline.
     
     Action-Format (wird automatisch aus H5 info/action_mode erkannt):
-        - "delta_pose": [delta_x, delta_y, delta_z, delta_yaw]
-        - "velocity":   [vx, vy, vz, omega_z]
+        - "delta_pose": [delta_x, delta_y, delta_z, delta_yaw] (4D)
+        - "velocity":   [vx, vy, vz, omega_z] (4D)
+        - "ee_pos":     [x_start, y_start, z_start, x_end, y_end, z_end] (6D, wie DINO WM Rope)
     """
     
     def __init__(
@@ -119,6 +125,15 @@ class FrankaCubeStackDataset(TrajDataset):
                     with h5py.File(h5_path, "r") as f:
                         action = f["action"][:]
                         eef = f["eef_states"][:]
+                        
+                        # Handle NaN values in actions (replace with zeros)
+                        if np.isnan(action).any():
+                            action = np.nan_to_num(action, nan=0.0)
+                        
+                        # Handle NaN values in eef_states
+                        if np.isnan(eef).any():
+                            eef = np.nan_to_num(eef, nan=0.0)
+                        
                         actions.append(action)
                         eef_states.append(eef.flatten())
                         
@@ -130,7 +145,9 @@ class FrankaCubeStackDataset(TrajDataset):
                                     self.action_mode = self.action_mode.decode("utf-8")
                 else:
                     # Fallback wenn H5 nicht existiert
-                    actions.append(np.zeros(4))  # 4-dim actions
+                    # Bestimme action_dim aus vorherigen Actions, sonst 6 (ee_pos)
+                    fallback_action_dim = actions[-1].shape[0] if actions else 6
+                    actions.append(np.zeros(fallback_action_dim))
                     eef_states.append(np.zeros(14))
             
             self.all_actions.append(np.stack(actions, axis=0))
@@ -157,8 +174,12 @@ class FrankaCubeStackDataset(TrajDataset):
         
         # Default action_mode falls nicht in H5 gefunden
         if self.action_mode is None:
-            self.action_mode = "delta_pose"
-            print(f"  Warning: action_mode nicht in H5 gefunden, verwende default: {self.action_mode}")
+            # Bestimme aus action_dim
+            if self.action_dim == 6:
+                self.action_mode = "ee_pos"
+            else:
+                self.action_mode = "delta_pose"
+            print(f"  Warning: action_mode nicht in H5 gefunden, inferred from dim: {self.action_mode}")
         
         # Normalisierung für Action
         # Beide Modi haben Format: [translation/velocity (3), rotation/omega (1)]
@@ -189,9 +210,11 @@ class FrankaCubeStackDataset(TrajDataset):
         
         print(f"  Action mode: {self.action_mode}")
         if self.action_mode == "delta_pose":
-            print(f"  Action format: [delta_x, delta_y, delta_z, delta_yaw]")
-        else:
-            print(f"  Action format: [vx, vy, vz, omega_z]")
+            print(f"  Action format: [delta_x, delta_y, delta_z, delta_yaw] (4D)")
+        elif self.action_mode == "velocity":
+            print(f"  Action format: [vx, vy, vz, omega_z] (4D)")
+        else:  # ee_pos
+            print(f"  Action format: [x_start, y_start, z_start, x_end, y_end, z_end] (6D)")
         print(f"  Action dim: {self.action_dim}")
         print(f"  State dim: {self.state_dim}")
         print(f"  EEF dim: {self.eef_dim}")

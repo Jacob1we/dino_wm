@@ -569,11 +569,15 @@ class Trainer:
                     f"train_{k}": [v] for k, v in train_rollout_logs.items()
                 }
                 self.logs_update(train_rollout_logs)
-                val_rollout_logs = self.openloop_rollout(self.val_traj_dset, mode="val")
-                val_rollout_logs = {
-                    f"val_{k}": [v] for k, v in val_rollout_logs.items()
-                }
-                self.logs_update(val_rollout_logs)
+                
+                if len(self.val_traj_dset) > 0:
+                    val_rollout_logs = self.openloop_rollout(self.val_traj_dset, mode="val")
+                    val_rollout_logs = {
+                        f"val_{k}": [v] for k, v in val_rollout_logs.items()
+                    }
+                    self.logs_update(val_rollout_logs)
+                else:
+                    log.warning("Val trajectory dataset is empty, skipping rollout evaluation")
 
         self.accelerator.wait_for_everyone()
         for i, data in enumerate(

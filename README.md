@@ -1,3 +1,7 @@
+
+python -m memory_profiler train.py --config-name train.yaml env=franka_cube_stack frameskip=5 num_hist=3
+
+
 # **DINO-WM**: World Models on Pre-trained Visual Features enable Zero-shot Planning
 [[Paper]](https://arxiv.org/abs/2411.04983) [[Code]]() [[Data]](https://osf.io/bmw48/?view_only=a56a296ce3b24cceaf408383a175ce28) [[Project Website]](https://dino-wm.github.io/) 
 

@@ -12,8 +12,9 @@
 4. [Training-Pipeline (Chronologisch)](#4-training-pipeline-chronologisch)
 5. [Modell-Architektur](#5-modell-architektur)
 6. [Loss-Funktionen](#6-loss-funktionen)
-7. [Training starten](#7-training-starten)
-8. [Glossar](#8-glossar)
+7. [W&B Metriken und Monitoring](#7-wb-metriken-und-monitoring)
+8. [Training starten](#8-training-starten)
+9. [Glossar](#9-glossar)
 
 ---
 
@@ -1155,12 +1156,263 @@ DINO (Self-**DI**stillation with **NO** labels) ist ein selbstüberwachtes Visio
 
 ---
 
-## 7. Training starten
+## 7. W&B Metriken und Monitoring
 
-### 7.1 Basis-Kommando
+### 7.1 Übersicht aller geplotteten Metriken
+
+Das Training loggt automatisch zahlreiche Metriken zu Weights & Biases. Hier eine vollständige Übersicht:
+
+#### 7.1.1 Hauptverluste (Loss)
+
+| Metrik | Definition | Ziel |
+|--------|------------|------|
+| `train_loss` / `val_loss` | Gesamtverlust (kombiniert alle Komponenten) | ↓ niedrig |
+| `train_z_loss` / `val_z_loss` | Verlust im latenten Raum (z-Space) - Hauptmetrik für Predictor | ↓ niedrig |
+| `train_z_visual_loss` / `val_z_visual_loss` | Visueller Encoder-Verlust im latenten Raum (nur 384 DINO-Features) | ↓ niedrig |
+| `train_z_proprio_loss` / `val_z_proprio_loss` | Propriozeptiver Verlust im latenten Raum (10 proprio-dim) | ↓ niedrig |
+
+#### 7.1.2 Decoder-Verluste
+
+| Metrik | Definition | Ziel |
+|--------|------------|------|
+| `decoder_loss_reconstructed` | Rekonstruktionsverlust (Bild → Encoder → Decoder → Bild) | ↓ niedrig |
+| `decoder_loss_pred` | Verlust für vorhergesagte Frames (durch Predictor) | ↓ niedrig |
+| `decoder_recon_loss_*` | Reiner Rekonstruktionsverlust ohne VQ-Komponente | ↓ niedrig |
+| `decoder_vq_loss_*` | Vector-Quantization Verlust (= 0, wenn `quantize: false`) | ↓ niedrig |
+
+#### 7.1.3 Bildqualitätsmetriken
+
+Diese Metriken messen die Qualität der rekonstruierten/vorhergesagten Bilder:
+
+| Metrik | Definition | Optimal |
+|--------|------------|---------|
+| `img_mse_reconstructed` / `img_mse_pred` | Mean Squared Error der Pixel | ↓ niedrig (< 0.01 gut) |
+| `img_l1_reconstructed` / `img_l1_pred` | L1 Norm (mittlerer absoluter Fehler) | ↓ niedrig |
+| `img_l2_reconstructed` / `img_l2_pred` | L2 Norm (euklidischer Abstand) | ↓ niedrig |
+| `img_ssim_reconstructed` / `img_ssim_pred` | Structural Similarity Index (Struktur-Ähnlichkeit) | ↑ hoch (max 1.0, > 0.9 gut) |
+| `img_psnr_reconstructed` / `img_psnr_pred` | Peak Signal-to-Noise Ratio (dB) | ↑ hoch (> 30 gut, > 40 exzellent) |
+| `img_lpips_reconstructed` / `img_lpips_pred` | Learned Perceptual Image Patch Similarity | ↓ niedrig (< 0.1 gut) |
+
+**Hinweis:** 
+- `*_reconstructed`: Decoder rekonstruiert den Input direkt (keine Vorhersage)
+- `*_pred`: Decoder rekonstruiert die Vorhersage des Predictors
+
+#### 7.1.4 Rollout-Fehler (Latent Space)
+
+Diese Metriken bewerten die Vorhersagequalität über mehrere Zeitschritte:
+
+| Metrik | Definition |
+|--------|------------|
+| `z_visual_err_pred` | Vorhersagefehler im visuellen latenten Raum (1-Schritt) |
+| `z_visual_err_rollout` | Akkumulierter Fehler über mehrere Vorhersage-Schritte |
+| `z_visual_err_rollout_1framestart` | Rollout-Fehler, beginnend vom ersten Frame |
+| `z_visual_err_full` | Gesamter visueller Rollout-Fehler über alle Frames |
+| `z_visual_err_next1` | Fehler für den nächsten einzelnen Frame |
+| `z_proprio_err_pred` | Vorhersagefehler für Propriozeption (1-Schritt) |
+| `z_proprio_err_rollout` | Akkumulierter Proprio-Fehler über mehrere Schritte |
+| `z_proprio_err_rollout_1framestart` | Proprio-Rollout-Fehler, beginnend vom ersten Frame |
+| `z_proprio_err_full` | Gesamter Propriozeption-Rollout-Fehler |
+| `z_proprio_err_next1` | Proprio-Fehler für den nächsten Frame |
+
+### 7.2 Interpretation der Metriken
+
+#### Gute Trainingskurven zeigen:
+```
+train_loss         ────────────────────────────────────────  
+                  ╲                                          Konvergenz
+                   ╲___________________________________  ←   (flach)
+                                                             
+val_loss          ────────────────────────────────────────
+                  ╲
+                   ╲___________________________________  ←   Ähnlich zu train
+                                                             
+train_img_ssim    ────────────────────────────────────────
+                              _________________________ 
+                             ╱                          ←   Anstieg zu ~0.9+
+                   _________╱                                
+```
+
+#### Typische Probleme:
+
+**1. Overfitting:**
+```
+train_loss        val_loss
+   │                 │
+   ╲                 ╲
+    ╲_______          ╲____╱‾‾‾‾‾  ← val steigt wieder an!
+                                     (train fällt weiter)
+```
+
+**2. Underfitting:**
+```
+train_loss = val_loss
+     │
+     │_______________  ← Beide stagnieren auf hohem Niveau
+```
+
+**3. Instabilität:**
+```
+train_loss
+     │╱╲  ╱╲  ╱╲
+     │  ╲╱  ╲╱  ╲╱  ← Starke Schwankungen
+```
+
+### 7.3 Overfitting-Diagnose und Lösungsansätze
+
+#### 7.3.1 Typische Overfitting-Indikatoren
+
+Overfitting tritt auf, wenn das Modell die Trainingsdaten "auswendig lernt" statt zu generalisieren:
+
+| Symptom | Betroffene Metriken |
+|---------|---------------------|
+| Val-Loss steigt nach anfänglichem Abfall | `val_loss`, `val_z_loss` |
+| Train-Metriken verbessern sich weiter | `train_loss` fällt weiter |
+| Steigende Image-Fehler auf Validation | `val_img_mse_*`, `val_img_l2_*` steigen |
+| Sinkende Image-Qualität auf Validation | `val_img_psnr_*`, `val_img_ssim_*` fallen |
+| Akkumulierende Rollout-Fehler | `val_z_visual_err_full`, `val_z_proprio_err_full` steigen |
+
+#### 7.3.2 Besonders anfällige Metriken
+
+Basierend auf Experimenten mit kleinen Datensätzen (20 Episoden):
+
+1. **`val_z_proprio_loss`** - Steigt oft ab Epoch 40-60
+2. **`val_z_visual_err_full`** - Akkumulierter Fehler wächst kontinuierlich
+3. **`val_img_mse_reconstructed`** - Verschlechtert sich nach Epoch 50
+4. **`val_decoder_loss_reconstructed`** - Steigt langsam an
+
+#### 7.3.3 Lösungsansätze gegen Overfitting
+
+| Ansatz | Konfiguration | Empfehlung |
+|--------|---------------|------------|
+| **Learning Rate reduzieren** | `decoder_lr: 1e-4` (von 3e-4)<br>`predictor_lr: 2e-4` (von 5e-4) | ✓ Erste Maßnahme |
+| **Weniger Epochen** | `training.epochs: 50` (von 100) | ✓ Bei kleinen Datensätzen |
+| **Mehr Dropout** | `predictor.dropout: 0.2` (von 0.1) | ✓ Regularisierung |
+| **Early Stopping** | Manuell bei Anstieg von val_loss | ✓ Bester Checkpoint wählen |
+| **Learning Rate Scheduler** | CosineAnnealingLR oder ReduceLROnPlateau | ⚠️ Nicht implementiert |
+| **Weight Decay** | In AdamW Optimizer | ⚠️ Erfordert Code-Änderung |
+| **Mehr Trainingsdaten** | Zusätzliche Episoden sammeln | ⚠️ Aufwändig |
+| **Data Augmentation** | Bild-Transformationen | ⚠️ Erfordert Code-Änderung |
+
+#### 7.3.4 Dropout erklärt
+
+**Was ist Dropout?**
+
+Dropout ist eine Regularisierungstechnik, die während des Trainings zufällig einen Prozentsatz der Neuronen "ausschaltet" (auf 0 setzt):
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                          DROPOUT MECHANISMUS                                 │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  OHNE Dropout (Inferenz):       MIT Dropout (Training, p=0.2):             │
+│                                                                             │
+│    ●───●───●───●───●              ●───○───●───●───○                        │
+│    │   │   │   │   │              │       │   │                            │
+│    ●───●───●───●───●              ●───●───○───●───●                        │
+│    │   │   │   │   │              │   │       │   │                        │
+│    ●───●───●───●───●              ○───●───●───●───●                        │
+│                                                                             │
+│    Alle Neuronen aktiv           20% zufällig deaktiviert (○)              │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Warum hilft Dropout gegen Overfitting?**
+
+| Effekt | Erklärung |
+|--------|-----------|
+| **Verhindert Co-Adaptation** | Neuronen können sich nicht auf andere Neuronen "verlassen" |
+| **Ensemble-Effekt** | Trainiert implizit viele verschiedene Sub-Netzwerke |
+| **Robustere Features** | Jedes Neuron muss unabhängig nützlich sein |
+| **Noise Injection** | Fügt Rauschen hinzu, das Generalisierung fördert |
+
+**Dropout im ViT Predictor:**
+
+Im DINO World Model wird Dropout an zwei Stellen im Predictor verwendet:
+
+```yaml
+# conf/predictor/vit.yaml
+predictor:
+  dropout: 0.1      # Dropout nach Attention & Feed-Forward Layers
+  emb_dropout: 0    # Dropout nach Embedding Layer (aktuell 0)
+```
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  ViT Predictor - Dropout Positionen                                         │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  Input Embedding                                                            │
+│       │                                                                     │
+│       ▼                                                                     │
+│  [Embedding Dropout] ← emb_dropout (Standard: 0)                           │
+│       │                                                                     │
+│       ▼                                                                     │
+│  ┌──────────────────────────────────────┐                                  │
+│  │  Transformer Block (×6)              │                                  │
+│  │  ┌────────────────────────────────┐  │                                  │
+│  │  │  Multi-Head Attention          │  │                                  │
+│  │  │         │                      │  │                                  │
+│  │  │    [Dropout] ← dropout (0.1)   │  │                                  │
+│  │  │         │                      │  │                                  │
+│  │  │  Feed-Forward Network          │  │                                  │
+│  │  │         │                      │  │                                  │
+│  │  │    [Dropout] ← dropout (0.1)   │  │                                  │
+│  │  └────────────────────────────────┘  │                                  │
+│  └──────────────────────────────────────┘                                  │
+│       │                                                                     │
+│       ▼                                                                     │
+│  Output                                                                     │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Empfohlene Dropout-Werte:**
+
+| Datensatz-Größe | Empfohlenes Dropout | Begründung |
+|-----------------|---------------------|------------|
+| < 20 Episoden | 0.3 - 0.4 | Starke Regularisierung nötig |
+| 20-50 Episoden | 0.2 - 0.3 | Moderate Regularisierung |
+| 50-100 Episoden | 0.1 - 0.2 | Leichte Regularisierung |
+| > 100 Episoden | 0.0 - 0.1 | Wenig/keine Regularisierung |
+
+**Wichtig:** Dropout ist nur während des **Trainings** aktiv. Bei Inferenz (`model.eval()`) werden alle Neuronen verwendet, aber die Gewichte werden skaliert.
+
+#### 7.3.5 Empfohlene Konfiguration für kleine Datensätze (< 50 Episoden)
+
+```yaml
+# conf/train.yaml Anpassungen
+training:
+  epochs: 50          # Reduziert von 100
+  decoder_lr: 1e-4    # Reduziert von 3e-4
+  predictor_lr: 2e-4  # Reduziert von 5e-4
+
+predictor:
+  dropout: 0.2        # Erhöht von 0.1
+```
+
+#### 7.3.6 Optimales Checkpoint-Auswahl
+
+Bei Overfitting **NICHT** das letzte Checkpoint verwenden! Stattdessen:
+
+1. W&B Dashboard öffnen
+2. Epoch mit niedrigstem `val_loss` identifizieren (oft Epoch 40-60)
+3. Entsprechendes Checkpoint laden: `checkpoints/model_XX.pth`
+
+```python
+# Beispiel: Bestes Modell laden
+best_epoch = 45  # Aus W&B abgelesen
+checkpoint_path = f"outputs/DATUM/ZEIT/checkpoints/model_{best_epoch}.pth"
+```
+
+---
+
+## 8. Training starten
+
+### 8.1 Basis-Kommando
 
 ```bash
-cd /media/tsp_jw/fc8bca1b-cab8-4522-81d0-06172d2beae8/dino_wm2
+cd /path/to/dino_wm
 
 # Standard-Training
 python train.py env=franka_cube_stack
@@ -1173,7 +1425,7 @@ python train.py env=franka_cube_stack \
     training.batch_size=8
 ```
 
-### 7.2 Empfohlene Parameter für deinen Datensatz
+### 8.2 Empfohlene Parameter für deinen Datensatz
 
 Da du nur 10 Episoden hast, hier optimierte Einstellungen:
 
@@ -1188,7 +1440,7 @@ python train.py env=franka_cube_stack \
     debug=True                       # Wandb Debug-Projekt
 ```
 
-### 7.3 Erwartete Ausgabe
+### 8.3 Erwartete Ausgabe
 
 ```
 outputs/
@@ -1208,7 +1460,7 @@ outputs/
         └── hydra.yaml               # Gespeicherte Konfiguration
 ```
 
-### 7.4 Monitoring mit Weights & Biases
+### 8.4 Monitoring mit Weights & Biases
 
 Training wird automatisch zu W&B geloggt:
 - Projekt: `dino_wm_debug` (wenn `debug=True`) oder `dino_wm`
@@ -1216,7 +1468,7 @@ Training wird automatisch zu W&B geloggt:
 
 ---
 
-## 8. Glossar
+## 9. Glossar
 
 | Begriff | Erklärung |
 |---------|-----------|

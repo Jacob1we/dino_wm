@@ -660,6 +660,11 @@ class Trainer:
     def openloop_rollout(
         self, dset, num_rollout=10, rand_start_end=True, min_horizon=2, mode="train"
     ):
+        # Guard against empty datasets
+        if len(dset) == 0:
+            log.warning(f"Trajectory dataset for {mode} is empty, skipping rollout evaluation")
+            return {}
+        
         np.random.seed(self.cfg.training.seed)
         min_horizon = min_horizon + self.cfg.num_hist
         plotting_dir = f"rollout_plots/e{self.epoch}_rollout"

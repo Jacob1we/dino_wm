@@ -37,8 +37,8 @@ training:
   reconstruct_every_x_batch: 500
   num_reconstruct_samples: 6
   encoder_lr: 1e-6
-  decoder_lr: 3e-4
-  predictor_lr: 5e-4
+  decoder_lr: 1e-4   # von 3e-4
+  predictor_lr: 2e-4 # von 5e-4
   action_encoder_lr: 5e-4
 
 img_size: 224 # should be a multiple of 224

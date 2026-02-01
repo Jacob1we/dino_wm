@@ -28,7 +28,7 @@ dataset:
   # WICHTIG: Muss auf den Ordner zeigen, der die Episode-Ordner enthält!
   # data_path: "/media/tsp_jw/fc8bca1b-cab8-4522-81d0-06172d2beae8/fcs_datasets/2026_01_14_1639_fcs_dset"
   # data_path: ${oc.env:DATASET_DIR,./data}/franka_cube_stack
-  data_path: "/home/tsp_jw/Desktop/fcs_datasets/NEps50_ActInt10_RobOpac5_NCams1_NCube1__Steps152/"
+  data_path: "/home/tsp_jw/Desktop/fcs_datasets/NEps50_ActInt10_RobOpac10_NCams1_NCube1__Steps152/"
   split_ratio: 0.9
   transform:
     _target_: "datasets.img_transforms.default_transform"

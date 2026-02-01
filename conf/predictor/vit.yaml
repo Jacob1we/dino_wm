@@ -2,6 +2,6 @@ _target_: models.vit.ViTPredictor
 depth: 6
 heads: 16
 mlp_dim: 2048
-dropout: 0.2  # erhöht von 0.1 (Auf Grund von Overfitting im Ersten Trainignsdurchlauf)
+dropout: 0.1  # erhöht von 0.1 (Auf Grund von Overfitting im Ersten Trainignsdurchlauf)
 emb_dropout: 0
 pool: 'mean'

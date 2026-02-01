@@ -1,5 +1,14 @@
 from gym.envs.registration import register
-from .pointmaze import U_MAZE
+import warnings
+
+# Try to import MuJoCo-dependent environments (optional)
+try:
+    from .pointmaze import U_MAZE
+    _HAS_MUJOCO = True
+except Exception as e:
+    _HAS_MUJOCO = False
+    warnings.warn(f"MuJoCo not available, pointmaze environment disabled: {e}")
+
 register(
     id="pusht",
     entry_point="env.pusht.pusht_wrapper:PushTWrapper",
@@ -29,6 +38,14 @@ register(
 register(
     id="deformable_env",
     entry_point="env.deformable_env.FlexEnvWrapper:FlexEnvWrapper",
+    max_episode_steps=300,
+    reward_threshold=1.0,
+)
+
+# Franka Cube Stack Environment (für Isaac Sim Integration)
+register(
+    id="franka_cube_stack",
+    entry_point="env.franka_cube_stack:FrankaCubeStackWrapper",
     max_episode_steps=300,
     reward_threshold=1.0,
 )

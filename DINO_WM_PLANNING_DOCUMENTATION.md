@@ -1,0 +1,807 @@
+# 🎯 DINO World Model - Planning Dokumentation
+
+> Vollständige Dokumentation der Planning-Pipeline für das DINO World Model mit Fokus auf Franka Cube Stacking Integration.
+
+---
+
+## 📑 Inhaltsverzeichnis
+
+1. [Überblick: Planning mit World Models](#1-überblick-planning-mit-world-models)
+2. [Architektur-Übersicht](#2-architektur-übersicht)
+3. [Schnittstellen und Datenfluss](#3-schnittstellen-und-datenfluss)
+4. [Environment Wrapper Interface](#4-environment-wrapper-interface)
+5. [CEM Planner im Detail](#5-cem-planner-im-detail)
+6. [Integration mit Isaac Sim](#6-integration-mit-isaac-sim)
+7. [Konfiguration und Start](#7-konfiguration-und-start)
+8. [Troubleshooting](#8-troubleshooting)
+
+---
+
+## 1. Überblick: Planning mit World Models
+
+### 1.1 Was ist World Model Planning?
+
+Das DINO World Model wurde trainiert, um **zukünftige visuelle Zustände** vorherzusagen. Beim Planning nutzen wir diese Fähigkeit, um **optimale Aktionssequenzen** zu finden:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                     WORLD MODEL PLANNING KONZEPT                             │
+│                                                                             │
+│   ┌─────────┐                                      ┌─────────┐             │
+│   │ Aktuell │ ──── Welche Aktionen führen zu? ───► │  Ziel   │             │
+│   │  Bild   │                                      │  Bild   │             │
+│   └─────────┘                                      └─────────┘             │
+│                                                                             │
+│   Der Planner:                                                              │
+│   1. Generiert viele mögliche Aktionssequenzen                             │
+│   2. Simuliert diese im World Model (Latent Space!)                        │
+│   3. Vergleicht vorhergesagte Zustände mit Ziel                            │
+│   4. Wählt die beste Aktionssequenz aus                                    │
+│                                                                             │
+│   VORTEIL: Keine echte Simulation nötig - alles im Latent Space!           │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 1.2 Warum kein klassischer Controller?
+
+| Aspekt | Klassischer Controller | World Model Planner |
+|--------|----------------------|---------------------|
+| **Input** | Explizite Zustandsrepräsentation | Rohe Bilder |
+| **Wissen** | Manuell definierte Regeln | Aus Daten gelernt |
+| **Flexibilität** | Task-spezifisch | Generalisiert auf neue Situationen |
+| **Setup** | Aufwändige Kalibrierung | Nur Training nötig |
+
+### 1.3 Planning-Modi
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                          PLANNING MODI                                       │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  MODUS 1: Open-Loop Planning                                                │
+│  ─────────────────────────────                                              │
+│  - Plane einmal am Anfang                                                   │
+│  - Führe alle Aktionen blind aus                                            │
+│  - Schnell, aber anfällig für Fehlerakkumulation                           │
+│                                                                             │
+│  [Bild_0] → Planner → [a_0, a_1, a_2, ..., a_T] → Ausführen                │
+│                                                                             │
+│                                                                             │
+│  MODUS 2: MPC (Model Predictive Control) - Receding Horizon                │
+│  ──────────────────────────────────────────────────────────                │
+│  - Plane bei jedem Schritt neu                                              │
+│  - Führe nur erste Aktion(en) aus                                          │
+│  - Robuster, aber rechenintensiver                                         │
+│                                                                             │
+│  [Bild_0] → Planner → [a_0, a_1, ...] → Führe a_0 aus                      │
+│  [Bild_1] → Planner → [a_0', a_1', ...] → Führe a_0' aus                   │
+│  [Bild_2] → Planner → [a_0'', ...] → ...                                   │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 2. Architektur-Übersicht
+
+### 2.1 Komponenten der Planning-Pipeline
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                     PLANNING PIPELINE ARCHITEKTUR                            │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  ┌──────────────────────────────────────────────────────────────────────┐  │
+│  │                         plan.py (Hauptskript)                         │  │
+│  │  - Lädt Konfiguration (Hydra)                                        │  │
+│  │  - Initialisiert alle Komponenten                                    │  │
+│  │  - Orchestriert den Planning-Prozess                                 │  │
+│  └──────────────────────────────────────────────────────────────────────┘  │
+│                              │                                              │
+│              ┌───────────────┼───────────────┐                              │
+│              ▼               ▼               ▼                              │
+│  ┌────────────────┐  ┌────────────────┐  ┌────────────────┐                │
+│  │ VWorldModel    │  │ CEMPlanner     │  │ Environment    │                │
+│  │ (trainiert)    │  │ (planning/     │  │ Wrapper        │                │
+│  │                │  │  cem.py)       │  │                │                │
+│  │ - Encoder      │  │                │  │ - prepare()    │                │
+│  │ - Predictor    │  │ - plan()       │  │ - rollout()    │                │
+│  │ - Decoder      │  │ - optimize()   │  │ - eval_state() │                │
+│  └────────────────┘  └────────────────┘  └────────────────┘                │
+│         │                    │                   │                          │
+│         └────────────────────┼───────────────────┘                          │
+│                              ▼                                              │
+│  ┌──────────────────────────────────────────────────────────────────────┐  │
+│  │                      PlanEvaluator                                    │  │
+│  │                   (planning/evaluator.py)                             │  │
+│  │  - eval_actions(): Führt Aktionen aus und bewertet                   │  │
+│  │  - _compute_rollout_metrics(): Berechnet Erfolgsmetriken             │  │
+│  │  - _plot_rollout_compare(): Visualisiert Ergebnisse                  │  │
+│  └──────────────────────────────────────────────────────────────────────┘  │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 2.2 Dateien und ihre Rollen
+
+| Datei | Pfad | Beschreibung |
+|-------|------|--------------|
+| **plan.py** | `dino_wm/plan.py` | Hauptskript, orchestriert alles |
+| **cem.py** | `planning/cem.py` | CEM Planner Implementierung |
+| **gd.py** | `planning/gd.py` | Gradient Descent Planner (Alternative) |
+| **mpc.py** | `planning/mpc.py` | MPC Wrapper für iteratives Planning |
+| **evaluator.py** | `planning/evaluator.py` | Evaluiert geplante Aktionen |
+| **base_planner.py** | `planning/base_planner.py` | Abstrakte Basis-Klasse |
+| **serial_vector_env.py** | `env/serial_vector_env.py` | Wrapper für mehrere Environments |
+| **FlexEnvWrapper.py** | `env/deformable_env/` | Referenz-Implementation |
+
+---
+
+## 3. Schnittstellen und Datenfluss
+
+### 3.1 Datenfluss beim Planning
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                          PLANNING DATENFLUSS                                 │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  SCHRITT 1: Ziele vorbereiten                                               │
+│  ─────────────────────────────                                              │
+│                                                                             │
+│  Dataset ──► [obs_0, obs_g, state_0, state_g] ──► PlanWorkspace            │
+│              │                                    │                         │
+│              │  obs_0: Startbild (B, 1, H, W, C)  │                         │
+│              │  obs_g: Zielbild (B, 1, H, W, C)   │                         │
+│              │  state_0: Startzustand (B, D)      │                         │
+│              │  state_g: Zielzustand (B, D)       │                         │
+│              │                                    │                         │
+│  Referenz: plan.py Zeile ~200 (prepare_targets)  │                         │
+│                                                                             │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  SCHRITT 2: Aktionen planen                                                 │
+│  ──────────────────────────                                                 │
+│                                                                             │
+│  obs_0, obs_g ──► CEMPlanner.plan() ──► actions (B, T, action_dim)         │
+│                   │                                                         │
+│                   │  1. Initiale Aktionen samplen                           │
+│                   │  2. Im World Model simulieren                           │
+│                   │  3. Mit Ziel vergleichen (Objective Function)           │
+│                   │  4. Beste Aktionen auswählen (Top-K)                    │
+│                   │  5. Wiederholen (CEM Optimierung)                       │
+│                   │                                                         │
+│  Referenz: planning/cem.py Zeile ~70 (plan)                                │
+│                                                                             │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  SCHRITT 3: Aktionen evaluieren                                             │
+│  ─────────────────────────────                                              │
+│                                                                             │
+│  actions ──► PlanEvaluator.eval_actions() ──► logs, successes              │
+│              │                                                              │
+│              │  1. Rollout im World Model (imaginiert)                      │
+│              │  2. Rollout im Environment (real)                            │
+│              │  3. Vergleiche final states                                  │
+│              │  4. Berechne Metriken                                        │
+│              │                                                              │
+│  Referenz: planning/evaluator.py Zeile ~85 (eval_actions)                  │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 3.2 Aktions-Format und Normalisierung
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        AKTIONS-TRANSFORMATIONEN                              │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  TRAINING (wie Aktionen gespeichert wurden):                                │
+│  ───────────────────────────────────────────                                │
+│  raw_action: (9,) = [joint_cmd(7), gripper_cmd(2)]                         │
+│                                                                             │
+│  Mit frameskip=5 während Training:                                          │
+│  wm_action: (45,) = [raw_t, raw_t+1, raw_t+2, raw_t+3, raw_t+4]            │
+│                                                                             │
+│  Normalisiert (Z-Score):                                                    │
+│  normalized_action = (wm_action - action_mean) / action_std                 │
+│                                                                             │
+│                                                                             │
+│  PLANNING (wie Aktionen verwendet werden):                                  │
+│  ─────────────────────────────────────────                                  │
+│                                                                             │
+│  Planner Output: normalized_actions (B, T, 45)                              │
+│       │                                                                     │
+│       │  Referenz: cem.py Zeile ~125 (return mu)                           │
+│       ▼                                                                     │
+│  Denormalisierung: (Preprocessor)                                           │
+│  exec_actions = normalized_actions * action_std + action_mean              │
+│       │                                                                     │
+│       │  Referenz: evaluator.py Zeile ~112                                 │
+│       ▼                                                                     │
+│  Reshape für Ausführung:                                                    │
+│  exec_actions: (B, T*frameskip, 9) = (B, T*5, 9)                           │
+│       │                                                                     │
+│       │  Referenz: evaluator.py Zeile ~111                                 │
+│       ▼                                                                     │
+│  An Environment senden: env.rollout(seed, init_state, exec_actions)        │
+│                                                                             │
+│       │  Referenz: evaluator.py Zeile ~116                                 │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 4. Environment Wrapper Interface
+
+### 4.1 Erforderliche Methoden
+
+Das Environment muss folgende Schnittstelle implementieren (siehe `FrankaCubeStackWrapper`):
+
+```python
+class EnvironmentWrapper:
+    """
+    Minimale Schnittstelle für DINO WM Planning.
+    Referenz: env/deformable_env/FlexEnvWrapper.py
+    """
+    
+    def prepare(self, seed: int, init_state: np.ndarray) -> Tuple[obs, state]:
+        """
+        Setzt Environment in definierten Anfangszustand.
+        
+        Aufgerufen von:
+        - evaluator.py: eval_actions() Zeile ~110
+        - rollout() intern
+        
+        Returns:
+            obs: {"visual": (H,W,3), "proprio": (proprio_dim,)}
+            state: (state_dim,)
+        """
+        pass
+    
+    def step_multiple(self, actions: np.ndarray) -> Tuple[obses, rewards, dones, infos]:
+        """
+        Führt Aktionssequenz aus.
+        
+        Aufgerufen von:
+        - rollout() intern
+        
+        Args:
+            actions: (T, action_dim)
+            
+        Returns:
+            obses: {"visual": (T,H,W,3), "proprio": (T,proprio_dim)}
+            rewards: float
+            dones: bool
+            infos: {"state": (T, state_dim)}
+        """
+        pass
+    
+    def rollout(self, seed, init_state, actions) -> Tuple[obses, states]:
+        """
+        Kompletter Rollout = prepare() + step_multiple()
+        
+        Aufgerufen von:
+        - evaluator.py: eval_actions() Zeile ~113-116
+        
+        WICHTIG: Rückgabe hat T+1 Zeitschritte (inkl. Initial-State)!
+        
+        Returns:
+            obses: {"visual": (T+1,H,W,3), ...}
+            states: (T+1, state_dim)
+        """
+        pass
+    
+    def eval_state(self, goal_state, cur_state) -> Dict:
+        """
+        Bewertet ob Ziel erreicht wurde.
+        
+        Aufgerufen von:
+        - evaluator.py: _compute_rollout_metrics() Zeile ~150
+        
+        Returns:
+            {"success": bool, "distance": float, ...}
+        """
+        pass
+    
+    def update_env(self, env_info) -> None:
+        """
+        Aktualisiert Environment-Konfiguration.
+        
+        Aufgerufen von:
+        - plan.py: prepare_targets() Zeile ~230
+        """
+        pass
+```
+
+### 4.2 SerialVectorEnv - Mehrere Environments parallel
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        SERIAL VECTOR ENV                                     │
+│                     (env/serial_vector_env.py)                               │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  Zweck: Wrapper um mehrere Environment-Instanzen für parallele Evaluation  │
+│                                                                             │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │  SerialVectorEnv                                                     │   │
+│  │  ├── env[0]: FrankaCubeStackWrapper                                 │   │
+│  │  ├── env[1]: FrankaCubeStackWrapper                                 │   │
+│  │  ├── env[2]: FrankaCubeStackWrapper                                 │   │
+│  │  └── ...                                                            │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│                                                                             │
+│  Methoden-Mapping:                                                          │
+│                                                                             │
+│  vector_env.prepare(seeds, init_states)                                     │
+│      → [env[i].prepare(seeds[i], init_states[i]) for i in range(n)]        │
+│      → Aggregiert zu (n_envs, ...) Arrays                                  │
+│                                                                             │
+│  vector_env.rollout(seeds, init_states, actions)                           │
+│      → [env[i].rollout(...) for i in range(n)]                             │
+│      → obses: {"visual": (n_envs, T+1, H, W, C)}                           │
+│      → states: (n_envs, T+1, state_dim)                                    │
+│                                                                             │
+│  vector_env.eval_state(goal_states, cur_states)                            │
+│      → [env[i].eval_state(goal_states[i], cur_states[i]) for i in range(n)]│
+│      → {"success": (n_envs,), "distance": (n_envs,)}                       │
+│                                                                             │
+│  Referenz: env/serial_vector_env.py                                        │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 5. CEM Planner im Detail
+
+### 5.1 Cross-Entropy Method (CEM)
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    CEM (Cross-Entropy Method) ALGORITHMUS                    │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  CEM ist eine derivative-free Optimierungsmethode:                          │
+│  - Keine Gradienten nötig (funktioniert mit Black-Box World Model)         │
+│  - Iterative Verbesserung durch Sampling                                   │
+│  - Robust gegenüber lokalen Minima                                         │
+│                                                                             │
+│  ┌────────────────────────────────────────────────────────────────────┐    │
+│  │  CEM ALGORITHMUS (planning/cem.py)                                  │    │
+│  │                                                                      │    │
+│  │  1. INITIALISIERUNG:                                                │    │
+│  │     μ = 0 (Mittelwert der Aktionsverteilung)                        │    │
+│  │     σ = var_scale (Standardabweichung)                              │    │
+│  │                                                                      │    │
+│  │  2. FÜR JEDE OPTIMIERUNGS-ITERATION:                               │    │
+│  │                                                                      │    │
+│  │     a) Sample num_samples Aktionssequenzen:                         │    │
+│  │        actions ~ N(μ, σ)                                            │    │
+│  │        Shape: (num_samples, horizon, action_dim)                    │    │
+│  │                                                                      │    │
+│  │     b) Simuliere im World Model:                                    │    │
+│  │        z_pred = wm.rollout(obs_0, actions)                          │    │
+│  │                                                                      │    │
+│  │     c) Berechne Kosten (Distanz zum Ziel):                          │    │
+│  │        loss = objective_fn(z_pred, z_goal)                          │    │
+│  │                                                                      │    │
+│  │     d) Wähle Top-K beste Aktionen:                                  │    │
+│  │        topk_actions = actions[argsort(loss)[:topk]]                 │    │
+│  │                                                                      │    │
+│  │     e) Update Verteilung:                                           │    │
+│  │        μ = mean(topk_actions)                                       │    │
+│  │        σ = std(topk_actions)                                        │    │
+│  │                                                                      │    │
+│  │  3. RÜCKGABE: μ (optimierte Aktionssequenz)                         │    │
+│  │                                                                      │    │
+│  └────────────────────────────────────────────────────────────────────┘    │
+│                                                                             │
+│  Referenz: planning/cem.py Zeile ~70-125                                   │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 5.2 CEM Hyperparameter
+
+```yaml
+# Aus conf/planner/cem.yaml
+planner:
+  name: cem
+  
+  # Optimierungs-Parameter
+  horizon: 5          # Planungshorizont (Anzahl Zeitschritte)
+  num_samples: 512    # Anzahl gesampelter Aktionssequenzen pro Iteration
+  topk: 64            # Anzahl bester Sequenzen für Update
+  var_scale: 1.0      # Initiale Standardabweichung
+  opt_steps: 10       # Anzahl Optimierungs-Iterationen
+  
+  # Evaluation
+  eval_every: 5       # Evaluiere alle N Iterationen
+```
+
+### 5.3 Objective Function
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        OBJECTIVE FUNCTION                                    │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  Die Objective Function bewertet, wie nah die vorhergesagten               │
+│  Zustände am Ziel sind.                                                    │
+│                                                                             │
+│  loss = objective_fn(z_pred, z_goal)                                       │
+│                                                                             │
+│  Standardmäßig: MSE im Latent Space                                        │
+│  ─────────────────────────────────────                                      │
+│  loss = ||z_pred[:, -1] - z_goal||²                                        │
+│                                                                             │
+│  Mit alpha-Gewichtung (für proprio):                                       │
+│  ─────────────────────────────────────                                      │
+│  loss = ||z_visual_pred - z_visual_goal||²                                 │
+│       + alpha * ||z_proprio_pred - z_proprio_goal||²                       │
+│                                                                             │
+│  Referenz: planning/objective.py                                           │
+│  Konfiguration: conf/objective/default.yaml                                │
+│                                                                             │
+│  Parameter:                                                                 │
+│  - alpha: Gewichtung von proprio vs. visual (default: 0.1)                 │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 5.4 World Model Rollout im Planner
+
+```python
+# Pseudocode aus cem.py Zeile ~100-110
+
+def plan(self, obs_0, obs_g, actions=None):
+    # 1. Encode Ziel-Observation
+    trans_obs_g = self.preprocessor.transform_obs(obs_g)
+    z_obs_g = self.wm.encode_obs(trans_obs_g)  # Ziel im Latent Space
+    
+    # 2. Für jede Optimierungs-Iteration
+    for i in range(self.opt_steps):
+        # 3. Sample Aktionen aus aktueller Verteilung
+        actions = torch.randn(...) * sigma + mu
+        
+        # 4. Rollout im World Model (KEIN echtes Environment!)
+        with torch.no_grad():
+            z_obses, _ = self.wm.rollout(
+                obs_0=trans_obs_0,  # Start-Observation
+                act=actions,         # Aktionssequenz
+            )
+        # z_obses: (num_samples, horizon+1, num_patches, emb_dim)
+        
+        # 5. Berechne Loss zum Ziel
+        loss = self.objective_fn(z_obses, z_obs_g)
+        
+        # 6. Update μ, σ basierend auf Top-K
+        ...
+    
+    return mu  # Optimierte Aktionssequenz
+```
+
+---
+
+## 6. Integration mit Isaac Sim
+
+### 6.1 Architektur für Isaac Sim Integration
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    ISAAC SIM INTEGRATION ARCHITEKTUR                         │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │                        DINO World Model                              │   │
+│  │                         (Python/PyTorch)                             │   │
+│  │                                                                      │   │
+│  │  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐          │   │
+│  │  │  CEMPlanner  │───►│ VWorldModel  │───►│ FrankaCube-  │          │   │
+│  │  │              │    │ (Prediction) │    │ StackWrapper │          │   │
+│  │  └──────────────┘    └──────────────┘    └──────┬───────┘          │   │
+│  │                                                  │                  │   │
+│  └──────────────────────────────────────────────────┼──────────────────┘   │
+│                                                     │                      │
+│                                                     │ Isaac Sim Interface  │
+│                                                     │ (Zu implementieren)  │
+│                                                     ▼                      │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │                         Isaac Sim                                    │   │
+│  │                                                                      │   │
+│  │  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐          │   │
+│  │  │   Franka     │    │    Cubes     │    │   Camera     │          │   │
+│  │  │   Robot      │    │              │    │  (256x256)   │          │   │
+│  │  └──────────────┘    └──────────────┘    └──────────────┘          │   │
+│  │                                                                      │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 6.2 FrankaCubeStackWrapper Implementierung
+
+Der `FrankaCubeStackWrapper` in `env/franka_cube_stack/franka_cube_stack_wrapper.py` implementiert die erforderliche Schnittstelle:
+
+```python
+# Verwendung des Wrappers
+
+# 1. Offline-Modus (nur World Model, kein Isaac Sim)
+from env.franka_cube_stack import FrankaCubeStackWrapper
+
+wrapper = FrankaCubeStackWrapper(
+    offline_mode=True,  # Keine Isaac Sim Verbindung
+    img_size=(256, 256)
+)
+
+# 2. Online-Modus (mit Isaac Sim)
+# Erfordert Implementierung des Isaac Sim Interface
+wrapper = FrankaCubeStackWrapper(
+    isaac_sim_interface=my_isaac_interface,
+    offline_mode=False
+)
+
+# 3. Mit SerialVectorEnv für parallele Evaluation
+from env.franka_cube_stack.franka_cube_stack_wrapper import create_franka_env_for_planning
+
+env = create_franka_env_for_planning(
+    n_envs=5,  # 5 parallele Evaluationen
+    offline_mode=True
+)
+```
+
+### 6.3 Isaac Sim Interface (zu implementieren)
+
+```python
+# Beispiel-Struktur für Isaac Sim Interface
+# Datei: env/franka_cube_stack/isaac_sim_interface.py
+
+class IsaacSimInterface:
+    """
+    Interface zwischen FrankaCubeStackWrapper und Isaac Sim.
+    
+    DIESE KLASSE MUSS AN DEIN ISAAC SIM SETUP ANGEPASST WERDEN!
+    """
+    
+    def __init__(self, config_path: str):
+        """Initialisiert Verbindung zu Isaac Sim."""
+        # TODO: Verbindung zu laufender Isaac Sim Instanz
+        pass
+    
+    def reset(self) -> None:
+        """Setzt Simulation zurück."""
+        # TODO: Simulation reset
+        pass
+    
+    def set_robot_state(self, state: np.ndarray) -> None:
+        """
+        Setzt Roboter in gegebenen Zustand.
+        
+        Args:
+            state: [ee_pos(3), ee_quat(4), gripper(1), joints(7), joint_vel(7)]
+        """
+        joint_positions = state[8:15]  # joints
+        gripper = state[7]
+        # TODO: Setze joint positions in Isaac Sim
+        pass
+    
+    def apply_action(self, action: np.ndarray) -> None:
+        """
+        Wendet Aktion an.
+        
+        Args:
+            action: [joint_cmd(7), gripper_cmd(2)]
+        """
+        # TODO: Sende Kommandos an Roboter-Controller
+        pass
+    
+    def step(self, dt: float = 1/60) -> None:
+        """Führt Simulationsschritt aus."""
+        # TODO: world.step()
+        pass
+    
+    def get_camera_image(self) -> np.ndarray:
+        """
+        Holt aktuelles Kamerabild.
+        
+        Returns:
+            RGB Bild (H, W, 3) uint8
+        """
+        # TODO: Rendere Kamerabild
+        pass
+    
+    def get_robot_state(self) -> np.ndarray:
+        """
+        Holt aktuellen Roboterzustand.
+        
+        Returns:
+            state: (22,) - [ee_pos, ee_quat, gripper, joints, joint_vel]
+        """
+        # TODO: Lese Roboterzustand aus
+        pass
+```
+
+---
+
+## 7. Konfiguration und Start
+
+### 7.1 Konfigurations-Dateien
+
+```
+conf/
+├── plan.yaml              # Haupt-Planning-Konfiguration
+├── plan_pusht.yaml        # PushT spezifisch
+├── plan_wall.yaml         # Wall spezifisch
+├── plan_point_maze.yaml   # PointMaze spezifisch
+│
+├── planner/
+│   ├── cem.yaml          # CEM Parameter
+│   ├── gd.yaml           # Gradient Descent Parameter
+│   └── mpc.yaml          # MPC Parameter
+│
+├── objective/
+│   └── default.yaml      # Objective Function Parameter
+│
+└── env/
+    └── franka_cube_stack.yaml  # Environment-Konfiguration
+```
+
+### 7.2 Wichtige Parameter in plan.yaml
+
+```yaml
+# conf/plan.yaml - Haupt-Konfiguration
+
+# Checkpoint des trainierten Modells
+ckpt_base_path: "."
+model_name: "model_50.pth"
+model_epoch: "final"
+
+# Planning Parameter
+goal_H: 5              # Planungshorizont (wie weit in die Zukunft)
+goal_source: "dset"    # Woher kommen Zielbilder?
+                       # - "dset": Aus Validation-Dataset
+                       # - "random_state": Zufällig generiert
+                       # - "file": Aus Datei laden
+
+# Evaluation
+n_evals: 5             # Anzahl paralleler Evaluationen
+n_plot_samples: 3      # Anzahl zu visualisierender Samples
+seed: 42
+
+# Planner (wird aus planner/*.yaml geladen)
+planner:
+  name: cem
+  # ... weitere Parameter aus cem.yaml
+
+# Objective (wird aus objective/*.yaml geladen)  
+objective:
+  alpha: 0.1           # Gewichtung proprio vs. visual
+```
+
+### 7.3 Planning starten
+
+```bash
+# Basis-Befehl
+python plan.py <checkpoint_ordner> model_name=<modell>.pth goal_H=<horizont>
+
+# Beispiel mit deinem trainierten Modell:
+cd ~/Desktop/dino_wm
+
+# Standard-Planning mit CEM
+python plan.py outputs/2026-01-31/23-03-37/checkpoints \
+    model_name=model_50.pth \
+    goal_H=5
+
+# Mit anderen Planern
+python plan.py outputs/2026-01-31/23-03-37/checkpoints \
+    model_name=model_50.pth \
+    goal_H=5 \
+    planner=gd  # oder planner=mpc
+
+# Mit verschiedenen goal_sources
+python plan.py outputs/2026-01-31/23-03-37/checkpoints \
+    model_name=model_50.pth \
+    goal_H=5 \
+    goal_source=random_state
+```
+
+### 7.4 Environment registrieren
+
+Füge zu `env/__init__.py` hinzu:
+
+```python
+# Franka Cube Stack Environment registrieren
+register(
+    id="franka_cube_stack",
+    entry_point="env.franka_cube_stack:FrankaCubeStackWrapper",
+    max_episode_steps=300,
+    reward_threshold=1.0,
+)
+```
+
+---
+
+## 8. Troubleshooting
+
+### 8.1 MuJoCo Fehler
+
+**Problem:**
+```
+Exception: You appear to be missing MuJoCo.
+```
+
+**Lösung:**
+Die `env/__init__.py` wurde bereits angepasst, um MuJoCo-abhängige Imports optional zu machen. Falls der Fehler weiterhin auftritt:
+
+```python
+# In env/__init__.py - bereits implementiert
+try:
+    from .pointmaze import U_MAZE
+    _HAS_MUJOCO = True
+except Exception:
+    _HAS_MUJOCO = False
+```
+
+### 8.2 Checkpoint nicht gefunden
+
+**Problem:**
+```
+FileNotFoundError: model_50.pth not found
+```
+
+**Lösung:**
+Überprüfe den Pfad:
+```bash
+ls outputs/2026-01-31/23-03-37/checkpoints/
+# Sollte model_X.pth Dateien zeigen
+```
+
+### 8.3 CUDA Out of Memory
+
+**Problem:**
+```
+CUDA out of memory
+```
+
+**Lösung:**
+Reduziere `num_samples` in der Planner-Konfiguration:
+```bash
+python plan.py ... planner.num_samples=128
+```
+
+### 8.4 Environment nicht gefunden
+
+**Problem:**
+```
+gym.error.Error: Environment 'franka_cube_stack' doesn't exist
+```
+
+**Lösung:**
+Registriere das Environment (siehe 7.4) oder verwende direkt den Wrapper:
+```python
+from env.franka_cube_stack.franka_cube_stack_wrapper import create_franka_env_for_planning
+env = create_franka_env_for_planning(n_envs=5)
+```
+
+---
+
+## Anhang: Wichtige Code-Referenzen
+
+| Konzept | Datei | Zeilen |
+|---------|-------|--------|
+| Planning Hauptloop | plan.py | 430-508 |
+| CEM Optimierung | planning/cem.py | 70-125 |
+| Evaluator | planning/evaluator.py | 85-150 |
+| World Model Rollout | models/visual_world_model.py | rollout() |
+| Environment Interface | env/deformable_env/FlexEnvWrapper.py | Alle |
+| SerialVectorEnv | env/serial_vector_env.py | Alle |
+| Preprocessor | preprocessor.py | Normalisierung |
+| FrankaCubeStackWrapper | env/franka_cube_stack/franka_cube_stack_wrapper.py | Alle |
+
+---
+
+*Dokumentation erstellt am 01.02.2026*

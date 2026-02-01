@@ -116,7 +116,7 @@ class FrankaCubeStackWrapper(gym.Env):
     def __init__(
         self,
         isaac_sim_interface: Optional[Any] = None,
-        img_size: Tuple[int, int] = (256, 256),
+        img_size: Tuple[int, int] = (224, 224),
         offline_mode: bool = True,
     ):
         """
@@ -557,32 +557,30 @@ class FrankaCubeStackWrapper(gym.Env):
         """
         Setzt Isaac Sim zurück und gibt Observation zurück.
         
-        IMPLEMENTIERE DIESE METHODE für Live-Integration!
+        Verwendet das IsaacSimInterface aus Franka_Cube_Stacking/isaac_sim_interface.py
         
         Args:
-            init_state: Gewünschter Anfangszustand
+            init_state: Gewünschter Anfangszustand (22D)
             
         Returns:
-            obs: Observation aus Isaac Sim
-            state: Aktueller State
+            obs: Observation aus Isaac Sim {"visual": (H,W,3), "proprio": (3,)}
+            state: Aktueller State (22,)
         """
         if self.isaac_sim is None:
             raise RuntimeError(
                 "Isaac Sim Interface nicht verbunden! "
-                "Verwende offline_mode=True oder stelle Verbindung her."
+                "Erstelle das Interface und übergebe es bei Initialisierung:\n"
+                "  from Franka_Cube_Stacking.isaac_sim_interface import IsaacSimInterface\n"
+                "  interface = IsaacSimInterface()\n"
+                "  interface.setup()\n"
+                "  wrapper = FrankaCubeStackWrapper(isaac_sim_interface=interface, offline_mode=False)"
             )
         
-        # TODO: Implementiere Isaac Sim Reset
-        # Beispiel-Pseudocode:
-        # self.isaac_sim.reset()
-        # self.isaac_sim.set_robot_state(init_state)
-        # image = self.isaac_sim.get_camera_image()
-        # state = self.isaac_sim.get_robot_state()
-        # obs = {"visual": image, "proprio": state[:3]}
+        # Verwende Interface reset() mit aktuellem Seed
+        seed = np.random.randint(0, 10000)
+        obs, state = self.isaac_sim.reset(seed=seed, init_state=init_state)
         
-        raise NotImplementedError(
-            "Isaac Sim Integration muss implementiert werden!"
-        )
+        return obs, state
     
     def _execute_isaac_sim_step(
         self,
@@ -591,31 +589,24 @@ class FrankaCubeStackWrapper(gym.Env):
         """
         Führt eine Aktion in Isaac Sim aus.
         
-        IMPLEMENTIERE DIESE METHODE für Live-Integration!
+        Verwendet das IsaacSimInterface aus Franka_Cube_Stacking/isaac_sim_interface.py
         
         Args:
             action: Auszuführende Aktion [joint_cmd(7), gripper_cmd(2)]
             
         Returns:
-            obs: Neue Observation
-            state: Neuer State
+            obs: Neue Observation {"visual": (H,W,3), "proprio": (3,)}
+            state: Neuer State (22,)
         """
         if self.isaac_sim is None:
             raise RuntimeError(
                 "Isaac Sim Interface nicht verbunden!"
             )
         
-        # TODO: Implementiere Isaac Sim Step
-        # Beispiel-Pseudocode:
-        # self.isaac_sim.apply_action(action)
-        # self.isaac_sim.step()
-        # image = self.isaac_sim.get_camera_image()
-        # state = self.isaac_sim.get_robot_state()
-        # obs = {"visual": image, "proprio": state[:3]}
+        # Verwende Interface step()
+        obs, state, done = self.isaac_sim.step(action)
         
-        raise NotImplementedError(
-            "Isaac Sim Integration muss implementiert werden!"
-        )
+        return obs, state
     
     # =========================================================================
     # GYM INTERFACE (Standard Gym Methoden)
@@ -658,7 +649,8 @@ class FrankaCubeStackWrapper(gym.Env):
 def create_franka_env_for_planning(
     n_envs: int = 1,
     offline_mode: bool = True,
-    img_size: Tuple[int, int] = (256, 256),
+    img_size: Tuple[int, int] = (224, 224),
+    isaac_sim_interface: Optional[Any] = None,
 ) -> "SerialVectorEnv":
     """
     Erstellt eine SerialVectorEnv mit FrankaCubeStackWrapper Instanzen.
@@ -669,21 +661,39 @@ def create_franka_env_for_planning(
     
     Args:
         n_envs: Anzahl paralleler Environments
-        offline_mode: True für World Model only
-        img_size: Bildgröße
+        offline_mode: True für World Model only, False für Isaac Sim
+        img_size: Bildgröße (224, 224 für DINO WM)
+        isaac_sim_interface: Optional - Interface für Online-Modus
+                            Nur relevant wenn offline_mode=False
         
     Returns:
         SerialVectorEnv mit n_envs FrankaCubeStackWrapper
         
-    Beispiel:
-        >>> from env.serial_vector_env import SerialVectorEnv
+    Beispiel (Offline):
+        >>> from env.franka_cube_stack import create_franka_env_for_planning
         >>> env = create_franka_env_for_planning(n_envs=5)
         >>> obs, state = env.prepare(seeds, init_states)
+        
+    Beispiel (Online mit Isaac Sim):
+        >>> from Franka_Cube_Stacking.isaac_sim_interface import IsaacSimInterface
+        >>> interface = IsaacSimInterface(headless=True)
+        >>> interface.setup()
+        >>> env = create_franka_env_for_planning(
+        ...     n_envs=1,  # Online nur mit 1 Env!
+        ...     offline_mode=False,
+        ...     isaac_sim_interface=interface
+        ... )
     """
     from env.serial_vector_env import SerialVectorEnv
     
+    if not offline_mode and n_envs > 1:
+        print("[WARNING] Online-Modus unterstützt nur n_envs=1!")
+        print("         Isaac Sim kann nicht parallel mit mehreren Environments laufen.")
+        n_envs = 1
+    
     envs = [
         FrankaCubeStackWrapper(
+            isaac_sim_interface=isaac_sim_interface if not offline_mode else None,
             offline_mode=offline_mode,
             img_size=img_size,
         )
@@ -691,3 +701,58 @@ def create_franka_env_for_planning(
     ]
     
     return SerialVectorEnv(envs)
+
+
+def create_franka_env_online(
+    isaac_sim_interface: Any,
+    img_size: Tuple[int, int] = (224, 224),
+) -> "FrankaCubeStackWrapper":
+    """
+    Erstellt einen einzelnen FrankaCubeStackWrapper für Online-Planung.
+    
+    Convenience-Funktion für den häufigsten Use-Case: Ein einzelnes
+    Environment mit Isaac Sim Verbindung.
+    
+    Args:
+        isaac_sim_interface: IsaacSimInterface Instanz (muss setup() aufgerufen haben!)
+        img_size: Bildgröße (224, 224 für DINO WM)
+        
+    Returns:
+        FrankaCubeStackWrapper im Online-Modus
+        
+    Beispiel:
+        >>> from Franka_Cube_Stacking.isaac_sim_interface import IsaacSimInterface
+        >>> from env.franka_cube_stack import create_franka_env_online
+        >>> 
+        >>> # Interface erstellen und starten
+        >>> interface = IsaacSimInterface(headless=False)
+        >>> interface.setup()
+        >>> 
+        >>> # Environment erstellen
+        >>> env = create_franka_env_online(interface)
+        >>> 
+        >>> # Rollout durchführen
+        >>> obs, state = env.prepare(seed=42, init_state=np.zeros(22))
+        >>> actions = np.zeros((10, 9))  # 10 Dummy-Actions
+        >>> obses, states = env.rollout(seed=42, init_state=state, actions=actions)
+    """
+    if isaac_sim_interface is None:
+        raise ValueError(
+            "isaac_sim_interface darf nicht None sein!\n"
+            "Erstelle zuerst ein Interface:\n"
+            "  from Franka_Cube_Stacking.isaac_sim_interface import IsaacSimInterface\n"
+            "  interface = IsaacSimInterface()\n"
+            "  interface.setup()"
+        )
+    
+    if not isaac_sim_interface.is_initialized:
+        raise RuntimeError(
+            "IsaacSimInterface ist nicht initialisiert!\n"
+            "Rufe interface.setup() auf bevor du es verwendest."
+        )
+    
+    return FrankaCubeStackWrapper(
+        isaac_sim_interface=isaac_sim_interface,
+        offline_mode=False,
+        img_size=img_size,
+    )

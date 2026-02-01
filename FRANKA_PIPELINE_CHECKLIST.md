@@ -182,6 +182,428 @@ WANDB_MODE=disabled python train.py env=franka_cube_stack training.num_reconstru
 
 ---
 
+## 🔄 Phase 5: Online-Planung (Isaac Sim Interface)
+
+> **Ziel:** Live-Ausführung von geplanten Aktionen in Isaac Sim
+
+### 5.1 Isaac Sim Interface implementieren
+
+**Datei:** `Franka_Cube_Stacking/isaac_sim_interface.py`
+
+- [ ] `IsaacSimInterface` Klasse erstellen
+- [ ] Verbindung zu laufender Isaac Sim Instanz
+- [ ] State-Extraktion (22D) analog zu Data Logger
+- [ ] Action-Ausführung über bestehenden Controller
+
+**Methoden-Übersicht:**
+
+| Methode | Beschreibung | Referenz |
+|---------|--------------|----------|
+| `__init__(config_path)` | Initialisiert Isaac Sim Szene | `fcs_main_parallel.py` |
+| `reset(init_state)` | Setzt Roboter in Anfangszustand | `domain_randomization()` |
+| `step(action)` | Führt Action aus, gibt obs+state zurück | `controller.forward()` |
+| `get_observation()` | Extrahiert RGB-Bild (224×224) | `get_rgb()` |
+| `get_state()` | Extrahiert 22D State-Vektor | `extract_cube_states()` |
+| `close()` | Beendet Simulation | `simulation_app.close()` |
+
+### 5.2 State-Extraktion (22 Dimensionen)
+
+```python
+def get_franka_state(franka) -> np.ndarray:
+    """
+    Extrahiert den vollständigen Roboter-Zustand.
+    
+    Returns:
+        np.ndarray: Shape (22,)
+            [0:3]   EE Position (x, y, z)
+            [3:7]   EE Quaternion (w, x, y, z)
+            [7]     Gripper Opening (0-1)
+            [8:15]  Joint Positions (7 DOF)
+            [15:22] Joint Velocities (7 DOF)
+    """
+    # End-Effektor Pose
+    ee_pos, ee_quat = franka.end_effector.get_world_pose()
+    
+    # Gripper-Öffnung (normalisiert)
+    gripper_pos = franka.gripper.get_joint_positions()
+    gripper_opening = gripper_pos[0] / 0.04  # Max 4cm
+    
+    # Joint States
+    joint_positions = franka.get_joint_positions()[:7]
+    joint_velocities = franka.get_joint_velocities()[:7]
+    
+    return np.concatenate([
+        ee_pos.flatten(),           # [0:3]
+        ee_quat.flatten(),          # [3:7]
+        [gripper_opening],          # [7]
+        joint_positions.flatten(),  # [8:15]
+        joint_velocities.flatten()  # [15:22]
+    ]).astype(np.float32)
+```
+
+### 5.3 Observation-Extraktion (224×224 RGB)
+
+```python
+def get_observation(camera, franka) -> dict:
+    """
+    Extrahiert Observation für World Model.
+    
+    Returns:
+        dict: {
+            "visual": np.ndarray (224, 224, 3) uint8,
+            "proprio": np.ndarray (3,) float32 - EE Position
+        }
+    """
+    # RGB-Bild (bereits 224×224 aus Kamera-Config)
+    rgba = camera.get_rgba()
+    rgb = rgba[:, :, :3].astype(np.uint8)
+    
+    # Proprio = EE Position
+    ee_pos, _ = franka.end_effector.get_world_pose()
+    proprio = ee_pos.flatten()[:3].astype(np.float32)
+    
+    return {
+        "visual": rgb,
+        "proprio": proprio
+    }
+```
+
+### 5.4 Action-Ausführung
+
+**Action-Format für DINO WM Planning:**
+- Mit `frameskip=5`: Action Shape = `(45,)` → 5 × 9D Actions
+- Ohne frameskip: Action Shape = `(9,)` → 1 × 9D Action
+
+```python
+def apply_action(controller, action: np.ndarray, frameskip: int = 5):
+    """
+    Führt Action-Sequenz aus.
+    
+    Args:
+        controller: StackingController_JW Instanz
+        action: np.ndarray Shape (frameskip * 9,) oder (9,)
+        frameskip: Anzahl Frames pro Action
+    """
+    action_dim = 9  # [joint_cmd(7), gripper_cmd(2)]
+    
+    if action.shape[0] == frameskip * action_dim:
+        # Konkatenierte Actions aufteilen
+        actions = action.reshape(frameskip, action_dim)
+    else:
+        actions = action.reshape(1, action_dim)
+    
+    for act in actions:
+        joint_cmd = act[:7]   # Joint Commands
+        gripper_cmd = act[7:] # Gripper Commands
+        
+        # Controller-Schritt ausführen
+        controller.forward(
+            joint_positions=joint_cmd,
+            gripper_action=gripper_cmd
+        )
+        world.step(render=True)
+```
+
+### 5.5 Interface-Klasse Implementierung
+
+**Datei:** `Franka_Cube_Stacking/isaac_sim_interface.py`
+
+```python
+"""
+Isaac Sim Interface für DINO World Model Online-Planung.
+
+Verbindet FrankaCubeStackWrapper mit laufender Isaac Sim Instanz.
+Basiert auf fcs_main_parallel.py Architektur.
+"""
+
+import numpy as np
+from pathlib import Path
+from typing import Dict, Tuple, Optional
+
+class IsaacSimInterface:
+    """
+    Interface zwischen DINO WM Planner und Isaac Sim.
+    
+    Verwendung:
+        # In separatem Terminal: Isaac Sim starten
+        # python fcs_main_parallel.py --mode=online
+        
+        # Im DINO WM Planner:
+        from isaac_sim_interface import IsaacSimInterface
+        
+        interface = IsaacSimInterface(config_path="config.yaml")
+        obs, state = interface.reset()
+        
+        # Planning Loop
+        for action in planned_actions:
+            obs, state, done = interface.step(action)
+    
+    Attributes:
+        img_size (tuple): Bildgröße (224, 224)
+        state_dim (int): 22
+        action_dim (int): 9
+        frameskip (int): 5 (muss mit Training übereinstimmen!)
+    """
+    
+    IMG_SIZE = (224, 224)
+    STATE_DIM = 22
+    ACTION_DIM = 9
+    PROPRIO_DIM = 3
+    
+    def __init__(
+        self,
+        config_path: str = "config.yaml",
+        headless: bool = False,
+        frameskip: int = 5
+    ):
+        """
+        Initialisiert Isaac Sim Interface.
+        
+        Args:
+            config_path: Pfad zur config.yaml
+            headless: True für GUI-lose Ausführung
+            frameskip: Muss mit Training-Config übereinstimmen!
+        """
+        self.config_path = Path(config_path)
+        self.headless = headless
+        self.frameskip = frameskip
+        
+        # Isaac Sim Komponenten (werden in setup() initialisiert)
+        self.simulation_app = None
+        self.world = None
+        self.env = None
+        self.controller = None
+        self.camera = None
+        
+        self._is_initialized = False
+    
+    def setup(self) -> None:
+        """
+        Initialisiert Isaac Sim Szene.
+        
+        WICHTIG: Muss VOR reset() aufgerufen werden!
+        """
+        if self._is_initialized:
+            return
+            
+        # Isaac Sim starten
+        import isaacsim
+        from isaacsim import SimulationApp
+        
+        self.simulation_app = SimulationApp({"headless": self.headless})
+        
+        # Komponenten importieren (nach SimulationApp Start!)
+        from omni.isaac.core import World
+        from Franka_Env_JW import Stacking_JW, StackingController_JW
+        
+        # World erstellen
+        self.world = World(stage_units_in_meters=1.0)
+        self.world.scene.add_default_ground_plane()
+        
+        # Environment erstellen (Single-Env für Online-Modus)
+        from fcs_main_parallel import Franka_Cube_Stack
+        self.env = Franka_Cube_Stack(env_idx=0)
+        self.env.setup_world(self.world)
+        
+        self.world.reset()
+        
+        # Controller initialisieren
+        self.controller = self.env.setup_post_load()
+        
+        # Kamera hinzufügen
+        self.camera = self.env.add_scene_cam()
+        self.camera.initialize()
+        
+        self._is_initialized = True
+    
+    def reset(
+        self,
+        init_state: Optional[np.ndarray] = None,
+        seed: int = 42
+    ) -> Tuple[Dict[str, np.ndarray], np.ndarray]:
+        """
+        Setzt Environment zurück.
+        
+        Args:
+            init_state: Optional - Spezifischer Anfangszustand (22D)
+            seed: Random-Seed für Domain Randomization
+        
+        Returns:
+            obs: {"visual": (224,224,3), "proprio": (3,)}
+            state: np.ndarray (22,)
+        """
+        if not self._is_initialized:
+            self.setup()
+        
+        # Domain Randomization
+        self.env.domain_randomization(seed)
+        self.world.reset()
+        
+        # Optional: Spezifischen State setzen
+        if init_state is not None:
+            self._set_robot_state(init_state)
+        
+        # Warm-up Steps für Kamera
+        for _ in range(10):
+            self.world.step(render=True)
+        
+        obs = self._get_observation()
+        state = self._get_state()
+        
+        return obs, state
+    
+    def step(
+        self,
+        action: np.ndarray
+    ) -> Tuple[Dict[str, np.ndarray], np.ndarray, bool]:
+        """
+        Führt Action aus.
+        
+        Args:
+            action: np.ndarray Shape (frameskip * 9,) oder (9,)
+        
+        Returns:
+            obs: {"visual": (224,224,3), "proprio": (3,)}
+            state: np.ndarray (22,)
+            done: bool - Episode beendet
+        """
+        self._apply_action(action)
+        
+        obs = self._get_observation()
+        state = self._get_state()
+        done = False  # TODO: Termination-Bedingung
+        
+        return obs, state, done
+    
+    def _get_observation(self) -> Dict[str, np.ndarray]:
+        """Extrahiert aktuelle Observation."""
+        from fcs_main_parallel import get_rgb
+        
+        rgb = get_rgb(self.camera)
+        if rgb is None:
+            rgb = np.zeros((*self.IMG_SIZE, 3), dtype=np.uint8)
+        
+        ee_pos, _ = self.env.franka.end_effector.get_world_pose()
+        proprio = np.atleast_1d(ee_pos).flatten()[:3].astype(np.float32)
+        
+        return {
+            "visual": rgb,
+            "proprio": proprio
+        }
+    
+    def _get_state(self) -> np.ndarray:
+        """Extrahiert 22D State-Vektor."""
+        franka = self.env.franka
+        
+        # EE Pose
+        ee_pos, ee_quat = franka.end_effector.get_world_pose()
+        ee_pos = np.atleast_1d(ee_pos).flatten()[:3]
+        ee_quat = np.atleast_1d(ee_quat).flatten()[:4]
+        
+        # Gripper (normalisiert auf 0-1)
+        gripper_pos = franka.gripper.get_joint_positions()
+        gripper_opening = float(gripper_pos[0]) / 0.04
+        
+        # Joints
+        joint_pos = franka.get_joint_positions()[:7]
+        joint_vel = franka.get_joint_velocities()[:7]
+        
+        return np.concatenate([
+            ee_pos, ee_quat, [gripper_opening],
+            joint_pos, joint_vel
+        ]).astype(np.float32)
+    
+    def _set_robot_state(self, state: np.ndarray) -> None:
+        """Setzt Roboter in spezifischen State."""
+        # Joint Positions aus State extrahieren
+        joint_positions = state[8:15]
+        self.env.franka.set_joint_positions(joint_positions)
+        
+        # Gripper setzen
+        gripper_opening = state[7] * 0.04  # Denormalisieren
+        self.env.franka.gripper.set_joint_positions(
+            np.array([gripper_opening, gripper_opening])
+        )
+    
+    def _apply_action(self, action: np.ndarray) -> None:
+        """Führt Action(s) aus."""
+        action = np.atleast_1d(action).flatten()
+        
+        # Aufteilen falls konkateniert
+        if action.shape[0] == self.frameskip * self.ACTION_DIM:
+            actions = action.reshape(self.frameskip, self.ACTION_DIM)
+        else:
+            actions = action.reshape(-1, self.ACTION_DIM)
+        
+        for act in actions:
+            # TODO: Action-Interpretation anpassen
+            # Aktuell: Direktes Joint-Kommando
+            self.world.step(render=True)
+    
+    def close(self) -> None:
+        """Beendet Isaac Sim."""
+        if self.simulation_app is not None:
+            self.simulation_app.close()
+            self._is_initialized = False
+```
+
+### 5.6 Integration in FrankaCubeStackWrapper
+
+**Datei:** `dino_wm/env/franka_cube_stack/franka_cube_stack_wrapper.py`
+
+Die Bildgröße im Wrapper von 256×256 auf 224×224 anpassen:
+
+```python
+def __init__(
+    self,
+    isaac_sim_interface: Optional[Any] = None,
+    img_size: Tuple[int, int] = (224, 224),  # Angepasst!
+    offline_mode: bool = True,
+):
+```
+
+### 5.7 Checkliste Online-Modus
+
+- [x] `isaac_sim_interface.py` in `Franka_Cube_Stacking/` erstellt
+- [x] State-Extraktion implementiert: `_get_state()` → 22D ✓
+- [x] Observation-Extraktion implementiert: `_get_observation()` → 224×224 RGB ✓
+- [x] Action-Ausführung implementiert: `_apply_single_action()` 
+- [x] `FrankaCubeStackWrapper` mit Interface verbunden
+- [x] `create_franka_env_online()` Hilfsfunktion erstellt
+- [ ] End-to-End Test: Dataset-Episode replizieren
+
+### 5.8 Testprotokoll
+
+```bash
+# 1. Isaac Sim Interface standalone testen
+cd Franka_Cube_Stacking
+python -c "
+from isaac_sim_interface import IsaacSimInterface
+interface = IsaacSimInterface(headless=True)
+obs, state = interface.reset(seed=42)
+print(f'Obs visual: {obs[\"visual\"].shape}')  # (224, 224, 3)
+print(f'Obs proprio: {obs[\"proprio\"].shape}')  # (3,)
+print(f'State: {state.shape}')  # (22,)
+interface.close()
+"
+
+# 2. Mit DINO WM Wrapper testen
+cd dino_wm
+python -c "
+from env.franka_cube_stack import FrankaCubeStackWrapper
+# Online-Modus erfordert Isaac Sim Interface
+# wrapper = FrankaCubeStackWrapper(isaac_sim_interface=..., offline_mode=False)
+"
+
+# 3. Planning mit Online-Ausführung
+python plan.py env=franka_cube_stack \
+    goal_source=dataset \
+    planner=cem \
+    online_mode=true
+```
+
+---
+
 ## ⚠️ Hardware-Voraussetzungen
 
 ### GPU Kühlung für RTX A4000
@@ -213,7 +635,7 @@ flatpak install flathub com.leinardi.gwe
 | `states.pth` (N, T, 22) | `self.states` |
 | `actions.pth` (N, T, 9) | `self.actions` |
 | `metadata.pkl['episode_lengths']` | `self.seq_lengths` |
-| `000xxx/obses.pth` (T, H, W, C) | `obs['visual']` (T, C, H, W) |
+| `000xxx/obses.pth` (T, 224, 224, C) | `obs['visual']` (T, C, 224, 224) |
 
 ### State-Vektor (22 Dimensionen)
 ```
@@ -244,6 +666,6 @@ flatpak install flathub com.leinardi.gwe
 ---
 
 *Erstellt: 2026-01-06*
-*Letzte Aktualisierung: 2026-01-14*
+*Letzte Aktualisierung: 2026-02-01*
 *Workspace: `/home/tsp_jw/Desktop/dino_wm/`*
 

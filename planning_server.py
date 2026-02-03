@@ -70,9 +70,18 @@ model_ckpt = Path(model_path) / "checkpoints" / "model_latest.pth"
 model = load_model(model_ckpt, model_cfg, model_cfg.num_action_repeat, device)
 
 # Preprocessor (wie in PlanWorkspace)
+# WICHTIG: action_mean/std haben Shape (action_dim,) z.B. (6,)
+# Aber der Planner arbeitet mit action_dim * frameskip z.B. (12,)
+# Daher müssen wir die Stats repeaten für korrekte Denormalisierung
+full_action_dim = dset.action_dim * model_cfg.frameskip
+action_mean_full = dset.action_mean.repeat(model_cfg.frameskip)  # (6,) -> (12,)
+action_std_full = dset.action_std.repeat(model_cfg.frameskip)    # (6,) -> (12,)
+print(f"Action stats: base_dim={dset.action_dim}, frameskip={model_cfg.frameskip}, full_dim={full_action_dim}")
+print(f"  action_mean shape: {dset.action_mean.shape} -> {action_mean_full.shape}")
+
 preprocessor = Preprocessor(
-    action_mean=dset.action_mean,
-    action_std=dset.action_std,
+    action_mean=action_mean_full,
+    action_std=action_std_full,
     state_mean=dset.state_mean,
     state_std=dset.state_std,
     proprio_mean=dset.proprio_mean,

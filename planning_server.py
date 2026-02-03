@@ -204,9 +204,10 @@ while True:
                         actions, _ = planner.plan(obs_0=cur_obs, obs_g=goal_obs)
                     
                     # Erste Aktion denormalisieren und zurückgeben
-                    # actions: (B, T, action_dim) = (1, horizon, 12)
+                    # actions: (B, T, action_dim) = (1, horizon, 12) auf CUDA
                     print(f"  [Plan] Actions shape: {actions.shape}")
-                    action = preprocessor.denormalize_actions(actions[0, 0:1]).numpy().squeeze()
+                    # Wichtig: Actions von CUDA auf CPU holen vor Denormalisierung
+                    action = preprocessor.denormalize_actions(actions[0, 0:1].cpu()).numpy().squeeze()
                     print(f"  [Plan] Denormalized action shape: {action.shape}")
                     response = {"status": "ok", "action": action.tolist()}
                     print(f"  [Plan] Action: {action[:6]} ✓")

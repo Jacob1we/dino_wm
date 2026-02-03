@@ -156,6 +156,12 @@ while True:
                 response = {"status": "ok", "action": action}
                 print(f"  Action: {action[:3]}")
                 
+            elif cmd == "reset":
+                # Goal zurücksetzen für neue Episode
+                goal_obs = None
+                response = {"status": "ok"}
+                print(f"  Reset")
+                
             elif cmd == "quit":
                 response = {"status": "ok"}
                 pickle_resp = pickle.dumps(response)

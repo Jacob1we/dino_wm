@@ -495,33 +495,30 @@ class FrankaCubeStackWrapper(gym.Env):
         """
         Simuliert einen Schritt im Offline-Modus.
         
-        HINWEIS: Dies ist eine vereinfachte Simulation!
-        Für echte Planung sollte entweder:
-        - Das World Model für Vorhersagen verwendet werden
-        - Oder Isaac Sim online verbunden sein
+        HINWEIS: Dies ist eine vereinfachte Placeholder-Simulation!
+        Im Offline-Modus passiert die eigentliche Vorhersage im World Model,
+        nicht hier. Diese Methode gibt nur Dummy-Werte zurück.
         
         Args:
-            action: Auszuführende Aktion
+            action: Auszuführende Aktion (beliebige Dimension)
             
         Returns:
-            obs: Neue Observation
-            state: Neuer State
+            obs: Dummy-Observation
+            state: Aktueller State (unverändert)
         """
-        # Vereinfachte Kinematik-Simulation
-        # (In Realität würde hier Isaac Sim oder ein Physik-Modell stehen)
-        
         if self._current_state is None:
             state = np.zeros(self.state_dim, dtype=np.float32)
         else:
             state = self._current_state.copy()
             
-            # Sehr vereinfacht: Joint-Kommandos beeinflussen EE-Position
-            # (Echte Vorwärtskinematik wäre hier nötig)
-            joint_cmd = action[:7]
-            state[7:14] = joint_cmd  # Update joint positions
+            # Im Offline-Modus: Verwende Action um EE-Position zu aktualisieren
+            # Action Format kann variieren (6D EE-pos oder 9D joints)
+            action = np.atleast_1d(action).flatten()
             
-            # Placeholder für EE-Update
-            # In Realität: Vorwärtskinematik berechnen
+            if action.shape[0] >= 6:
+                # EE-Position Format: [x_start, y_start, z_start, x_end, y_end, z_end]
+                # Verwende end-position als neue EE-Position
+                state[:3] = action[3:6] if action.shape[0] >= 6 else action[:3]
         
         obs = self._create_dummy_observation(state)
         return obs, state

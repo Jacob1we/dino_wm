@@ -1,43 +1,15 @@
-# Hydra Config für Franka Cube Stacking Dataset (Rope-Format)
-# Verwendung: python train.py env=franka_cube_stack
-# 
-# Erwartetes Format (Rope-kompatibel):
-#   data_path/
-#   ├── cameras/
-#   │   ├── intrinsic.npy
-#   │   └── extrinsic.npy
-#   ├── 000000/
-#   │   ├── obses.pth          # (T, H, W, C) uint8
-#   │   ├── 00.h5              # Timestep 0
-#   │   ├── 01.h5              # Timestep 1
-#   │   └── ...
-#   ├── 000001/
-#   │   └── ...
-#   └── ...
+# Franka Cube Stack Environment für DINO WM
 name: franka_cube_stack
+
 args: []
 kwargs: {}
 
-load_dir: ""
-
+# Dataset
 dataset:
-  _target_: "datasets.franka_cube_stack_dset.load_franka_cube_stack_slice_train_val"
-  n_rollout: null  # null = alle verfügbaren Rollouts laden
-  normalize_action: ${normalize_action}
-  # data_path: Pfad zum Datensatz-Ordner (enthält Episode-Ordner 000000/, 000001/, ...)
-  # WICHTIG: Muss auf den Ordner zeigen, der die Episode-Ordner enthält!
-  # data_path: "/media/tsp_jw/fc8bca1b-cab8-4522-81d0-06172d2beae8/fcs_datasets/2026_01_14_1639_fcs_dset"
-  # data_path: ${oc.env:DATASET_DIR,./data}/franka_cube_stack
-  data_path: "/home/tsp_jw/Desktop/fcs_datasets/NEps50_ActInt10_RobOpac10_NCams1_NCube1__Steps152/"
-  split_ratio: 0.9
-  transform:
-    _target_: "datasets.img_transforms.default_transform"
-    img_size: ${img_size}
-  # Optional: Weitere Parameter
-  num_hist: 0      # Anzahl Historien-Frames für Kontext
-  num_pred: 0      # Anzahl zu prädizierender Frames
-  frameskip: 1     # Frame-Subsampling (1 = alle Frames)
+  _target_: datasets.franka_cube_stack_dset.get_franka_cube_stack_dset
+  data_path: ${oc.env:FRANKA_DATA_PATH,/path/to/plain_data}
+  img_size: [224, 224]
+  train_ratio: 0.8
 
+# Optional: Decoder-Pfad
 decoder_path: null
-num_workers: 4
-

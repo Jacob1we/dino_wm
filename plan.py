@@ -458,8 +458,8 @@ def planning_main(cfg_dict):
     )
     model = load_model(model_ckpt, model_cfg, num_action_repeat, device=device)
 
-    # use dummy vector env for wall and deformable envs
-    if model_cfg.env.name == "wall" or model_cfg.env.name == "deformable_env":
+    # use dummy vector env for wall, deformable, and franka_cube_stack envs
+    if model_cfg.env.name in ["wall", "deformable_env", "franka_cube_stack"]:
         from env.serial_vector_env import SerialVectorEnv
         env = SerialVectorEnv(
             [

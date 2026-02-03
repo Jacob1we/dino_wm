@@ -9,8 +9,8 @@ hydra:
   run:
     dir: plan_outputs/${now:%Y%m%d%H%M%S}_franka_gH${goal_H}
 
-# Modell-Pfad (ANPASSEN!)
-ckpt_base_path: ./
+# Modell-Pfad
+ckpt_base_path: .
 model_name: null  # z.B. 2026-02-02/10-04-17
 model_epoch: latest
 

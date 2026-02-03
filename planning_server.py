@@ -110,17 +110,21 @@ print("Warte auf Client...\n")
 
 goal_obs = None
 
-def preprocess_image(img, preprocessor):
+def prepare_obs_for_planner(img: np.ndarray) -> dict:
     """
-    Konvertiert ein RGB uint8 Bild (H, W, 3) in das Format für den Planner.
+    Bereitet ein RGB-Bild für den Planner vor.
     
-    Der preprocessor.transform (aus dem Dataset) erwartet:
-    - PIL Image oder numpy array
-    - Konvertiert zu Tensor und normalisiert
+    Der Planner erwartet via preprocessor.transform_obs():
+      - visual: (B, T, H, W, C) mit C=3 (RGB), Werte 0-255, dtype float/uint8
+      - proprio: (B, T, proprio_dim)
+    
+    Die transform_obs() Methode macht dann:
+      1. rearrange zu (B, T, C, H, W)  
+      2. /255.0 normalisieren
+      3. transform (Normalize) anwenden
+    
+    Also: Wir geben einfach das uint8 Bild in (1, 1, H, W, 3) Format!
     """
-    import torchvision.transforms.functional as TF
-    from PIL import Image
-    
     # Sicherstellen dass es uint8 ist
     if img.dtype != np.uint8:
         if img.max() <= 1.0:
@@ -128,25 +132,18 @@ def preprocess_image(img, preprocessor):
         else:
             img = img.astype(np.uint8)
     
-    # Zu PIL konvertieren (transform erwartet das oft)
-    pil_img = Image.fromarray(img)
+    # Shape: (B=1, T=1, H, W, C=3)
+    visual = img[np.newaxis, np.newaxis, ...]  # (1, 1, H, W, 3)
     
-    # Transform anwenden (normalisiert und konvertiert zu Tensor)
-    if preprocessor.transform is not None:
-        transformed = preprocessor.transform(pil_img)
-        # Zurück zu numpy für obs dict
-        if isinstance(transformed, torch.Tensor):
-            img_processed = transformed.numpy()
-        else:
-            img_processed = np.array(transformed)
-    else:
-        # Fallback: Manuell normalisieren
-        img_processed = img.astype(np.float32) / 255.0
-        # Channel-first falls nötig: (H, W, C) -> (C, H, W)
-        if img_processed.ndim == 3 and img_processed.shape[-1] == 3:
-            img_processed = np.transpose(img_processed, (2, 0, 1))
+    # Proprio: (B=1, T=1, proprio_dim=3)
+    proprio = np.zeros((1, 1, 3), dtype=np.float32)
     
-    return img_processed
+    obs = {
+        "visual": visual.astype(np.float32),  # transform_obs erwartet float-kompatibel
+        "proprio": proprio,
+    }
+    
+    return obs
 
 while True:
     conn, addr = server.accept()
@@ -168,45 +165,42 @@ while True:
             cmd = msg.get("cmd")
             
             if cmd == "set_goal":
-                # Goal speichern im Format für planner.plan()
+                # Goal im Format für planner.plan()
                 img = np.array(msg["image"])
-                print(f"  [Goal] Raw image shape: {img.shape}, dtype: {img.dtype}")
+                print(f"  [Goal] Raw image: shape={img.shape}, dtype={img.dtype}")
                 
-                # Bild vorverarbeiten
-                img_processed = preprocess_image(img, preprocessor)
-                print(f"  [Goal] Processed shape: {img_processed.shape}, dtype: {img_processed.dtype}")
+                # Obs-Dict erstellen (preprocessor.transform_obs macht den Rest)
+                goal_obs = prepare_obs_for_planner(img)
+                print(f"  [Goal] Prepared: visual={goal_obs['visual'].shape}, proprio={goal_obs['proprio'].shape}")
                 
-                goal_obs = {
-                    "visual": img_processed[np.newaxis, np.newaxis, ...],  # (1, 1, C, H, W) oder (1, 1, H, W, C)
-                    "proprio": np.zeros((1, 1, 3), dtype=np.float32),
-                }
-                print(f"  [Goal] Final visual shape: {goal_obs['visual'].shape}")
                 response = {"status": "ok"}
                 print(f"  Goal gesetzt ✓")
                 
             elif cmd == "plan":
-                # Current obs
-                img = np.array(msg["image"])
-                print(f"  [Plan] Raw image shape: {img.shape}, dtype: {img.dtype}")
-                
-                # Bild vorverarbeiten
-                img_processed = preprocess_image(img, preprocessor)
-                print(f"  [Plan] Processed shape: {img_processed.shape}")
-                
-                cur_obs = {
-                    "visual": img_processed[np.newaxis, np.newaxis, ...],
-                    "proprio": np.zeros((1, 1, 3), dtype=np.float32),
-                }
-                
-                # Planen (genau wie in PlanWorkspace.perform_planning)
-                print(f"  [Plan] Running CEM planner...")
-                with torch.no_grad():
-                    actions, _ = planner.plan(obs_0=cur_obs, obs_g=goal_obs)
-                
-                # Erste Aktion denormalisieren und zurückgeben
-                action = preprocessor.denormalize_actions(actions[0, 0:1]).numpy().squeeze()
-                response = {"status": "ok", "action": action.tolist()}
-                print(f"  [Plan] Action: {action[:3]} ✓")
+                if goal_obs is None:
+                    print(f"  [ERROR] Kein Goal gesetzt!")
+                    response = {"status": "error", "msg": "No goal set"}
+                else:
+                    # Current obs
+                    img = np.array(msg["image"])
+                    print(f"  [Plan] Raw image: shape={img.shape}, dtype={img.dtype}")
+                    
+                    # Obs-Dict erstellen
+                    cur_obs = prepare_obs_for_planner(img)
+                    print(f"  [Plan] Prepared: visual={cur_obs['visual'].shape}")
+                    
+                    # Planen
+                    print(f"  [Plan] Running CEM planner...")
+                    with torch.no_grad():
+                        actions, _ = planner.plan(obs_0=cur_obs, obs_g=goal_obs)
+                    
+                    # Erste Aktion denormalisieren und zurückgeben
+                    # actions: (B, T, action_dim) = (1, horizon, 12)
+                    print(f"  [Plan] Actions shape: {actions.shape}")
+                    action = preprocessor.denormalize_actions(actions[0, 0:1]).numpy().squeeze()
+                    print(f"  [Plan] Denormalized action shape: {action.shape}")
+                    response = {"status": "ok", "action": action.tolist()}
+                    print(f"  [Plan] Action: {action[:6]} ✓")
                 
             elif cmd == "reset":
                 # Goal zurücksetzen für neue Episode

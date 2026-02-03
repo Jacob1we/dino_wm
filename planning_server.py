@@ -28,15 +28,27 @@ Architektur:
     └─────────────────────────────────┘
 """
 
+import os
+import sys
+
+# DINO WM Pfad setzen BEVOR andere imports
+dino_wm_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, dino_wm_dir)
+
 import socket
 import pickle
 import numpy as np
 import argparse
-import os
-import sys
+from pathlib import Path
 
 from omegaconf import OmegaConf
 import torch
+import hydra
+
+# Imports aus plan.py
+from plan import load_model, load_ckpt
+from planning.cem import CEMPlanner
+from planning.objectives import create_objective_fn
 
 # Args
 parser = argparse.ArgumentParser(description="DINO WM Planning Server")
@@ -55,8 +67,6 @@ args = parser.parse_args()
 print("=" * 60)
 print("DINO WM Planning Server")
 print("=" * 60)
-
-dino_wm_dir = os.path.dirname(os.path.abspath(__file__))
 print(f"DINO WM Dir: {dino_wm_dir}")
 print(f"Lade Modell: {args.model_name}")
 
@@ -71,23 +81,21 @@ if not os.path.exists(cfg_path):
 with open(cfg_path, "r") as f:
     model_cfg = OmegaConf.load(f)
 
-# Checkpoint laden
-from models.world_model import WorldModel
-from planning.cem import CEMPlanner
-from planning.objectives import create_objective_fn
-
-ckpt_path = os.path.join(model_path, "checkpoints", "model_latest.pth")
-if not os.path.exists(ckpt_path):
+# Checkpoint laden (wie in plan.py)
+ckpt_path = Path(model_path) / "checkpoints" / "model_latest.pth"
+if not ckpt_path.exists():
     print(f"FEHLER: Checkpoint nicht gefunden: {ckpt_path}")
     sys.exit(1)
 
 print(f"Lade Checkpoint: {ckpt_path}")
-checkpoint = torch.load(ckpt_path, map_location="cuda")
 
-model = WorldModel(model_cfg)
-model.load_state_dict(checkpoint["model"])
+# num_action_repeat berechnen (wie in plan.py)
+num_action_repeat = model_cfg.frameskip // model_cfg.training.get("action_skip", model_cfg.frameskip)
+
+# Model laden (verwendet hydra.utils.instantiate intern)
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+model = load_model(ckpt_path, model_cfg, num_action_repeat, device)
 model.eval()
-model.cuda()
 
 print("✓ Modell geladen!")
 

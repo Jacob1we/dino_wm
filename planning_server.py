@@ -107,11 +107,14 @@ objective_fn = create_objective_fn(alpha=0.5, base=2, mode="last")
 action_dim = model_cfg.env.get("action_dim", 6)
 print(f"Action dim: {action_dim}")
 
-planner = CEMPlanner(
-    action_dim=action_dim,
-    horizon=args.goal_H,
-    **OmegaConf.to_container(planner_cfg)
-)
+# Config zu Dict konvertieren und horizon überschreiben
+planner_kwargs = OmegaConf.to_container(planner_cfg)
+planner_kwargs.pop("_target_", None)  # _target_ entfernen
+planner_kwargs.pop("name", None)       # name entfernen
+planner_kwargs["horizon"] = args.goal_H  # horizon aus args überschreiben
+planner_kwargs["action_dim"] = action_dim
+
+planner = CEMPlanner(**planner_kwargs)
 
 print(f"✓ Planner bereit (horizon={args.goal_H}, action_dim={model_cfg.env.action_dim})")
 

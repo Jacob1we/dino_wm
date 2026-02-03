@@ -103,8 +103,12 @@ print("✓ Modell geladen!")
 planner_cfg = OmegaConf.load(os.path.join(dino_wm_dir, "conf/planner/cem.yaml"))
 objective_fn = create_objective_fn(alpha=0.5, base=2, mode="last")
 
+# action_dim: Fallback für franka_cube_stack (6 = EE-Position)
+action_dim = model_cfg.env.get("action_dim", 6)
+print(f"Action dim: {action_dim}")
+
 planner = CEMPlanner(
-    action_dim=model_cfg.env.action_dim,
+    action_dim=action_dim,
     horizon=args.goal_H,
     **OmegaConf.to_container(planner_cfg)
 )

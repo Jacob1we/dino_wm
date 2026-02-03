@@ -4,6 +4,11 @@ name: franka_cube_stack
 args: []
 kwargs: {}
 
+# Dimensionen (für Planner)
+action_dim: 6  # EE positions: [x_start, y_start, z_start, x_end, y_end, z_end]
+state_dim: 14  # EEF states
+proprio_dim: 3 # EEF position (x, y, z)
+
 # Dataset
 dataset:
   # Merged: combined fields from both branches

@@ -110,6 +110,44 @@ print("Warte auf Client...\n")
 
 goal_obs = None
 
+def preprocess_image(img, preprocessor):
+    """
+    Konvertiert ein RGB uint8 Bild (H, W, 3) in das Format für den Planner.
+    
+    Der preprocessor.transform (aus dem Dataset) erwartet:
+    - PIL Image oder numpy array
+    - Konvertiert zu Tensor und normalisiert
+    """
+    import torchvision.transforms.functional as TF
+    from PIL import Image
+    
+    # Sicherstellen dass es uint8 ist
+    if img.dtype != np.uint8:
+        if img.max() <= 1.0:
+            img = (img * 255).astype(np.uint8)
+        else:
+            img = img.astype(np.uint8)
+    
+    # Zu PIL konvertieren (transform erwartet das oft)
+    pil_img = Image.fromarray(img)
+    
+    # Transform anwenden (normalisiert und konvertiert zu Tensor)
+    if preprocessor.transform is not None:
+        transformed = preprocessor.transform(pil_img)
+        # Zurück zu numpy für obs dict
+        if isinstance(transformed, torch.Tensor):
+            img_processed = transformed.numpy()
+        else:
+            img_processed = np.array(transformed)
+    else:
+        # Fallback: Manuell normalisieren
+        img_processed = img.astype(np.float32) / 255.0
+        # Channel-first falls nötig: (H, W, C) -> (C, H, W)
+        if img_processed.ndim == 3 and img_processed.shape[-1] == 3:
+            img_processed = np.transpose(img_processed, (2, 0, 1))
+    
+    return img_processed
+
 while True:
     conn, addr = server.accept()
     print(f"[+] Client: {addr}")
@@ -132,29 +170,43 @@ while True:
             if cmd == "set_goal":
                 # Goal speichern im Format für planner.plan()
                 img = np.array(msg["image"])
+                print(f"  [Goal] Raw image shape: {img.shape}, dtype: {img.dtype}")
+                
+                # Bild vorverarbeiten
+                img_processed = preprocess_image(img, preprocessor)
+                print(f"  [Goal] Processed shape: {img_processed.shape}, dtype: {img_processed.dtype}")
+                
                 goal_obs = {
-                    "visual": img[np.newaxis, np.newaxis, ...],
+                    "visual": img_processed[np.newaxis, np.newaxis, ...],  # (1, 1, C, H, W) oder (1, 1, H, W, C)
                     "proprio": np.zeros((1, 1, 3), dtype=np.float32),
                 }
+                print(f"  [Goal] Final visual shape: {goal_obs['visual'].shape}")
                 response = {"status": "ok"}
-                print(f"  Goal gesetzt")
+                print(f"  Goal gesetzt ✓")
                 
             elif cmd == "plan":
                 # Current obs
                 img = np.array(msg["image"])
+                print(f"  [Plan] Raw image shape: {img.shape}, dtype: {img.dtype}")
+                
+                # Bild vorverarbeiten
+                img_processed = preprocess_image(img, preprocessor)
+                print(f"  [Plan] Processed shape: {img_processed.shape}")
+                
                 cur_obs = {
-                    "visual": img[np.newaxis, np.newaxis, ...],
+                    "visual": img_processed[np.newaxis, np.newaxis, ...],
                     "proprio": np.zeros((1, 1, 3), dtype=np.float32),
                 }
                 
                 # Planen (genau wie in PlanWorkspace.perform_planning)
+                print(f"  [Plan] Running CEM planner...")
                 with torch.no_grad():
                     actions, _ = planner.plan(obs_0=cur_obs, obs_g=goal_obs)
                 
                 # Erste Aktion denormalisieren und zurückgeben
                 action = preprocessor.denormalize_actions(actions[0, 0:1]).numpy().squeeze()
-                response = {"status": "ok", "action": action}
-                print(f"  Action: {action[:3]}")
+                response = {"status": "ok", "action": action.tolist()}
+                print(f"  [Plan] Action: {action[:3]} ✓")
                 
             elif cmd == "reset":
                 # Goal zurücksetzen für neue Episode

@@ -6,10 +6,21 @@ kwargs: {}
 
 # Dataset
 dataset:
-  _target_: datasets.franka_cube_stack_dset.get_franka_cube_stack_dset
-  data_path: ${oc.env:FRANKA_DATA_PATH,/path/to/plain_data}
+  # Merged: combined fields from both branches
+  _target_: "datasets.franka_cube_stack_dset.load_franka_cube_stack_slice_train_val"
+  n_rollout: null  # null = alle verfügbaren Rollouts laden
+  normalize_action: ${normalize_action}
+  # data_path: If FRANKA_DATA_PATH env var is set, use it; otherwise fallback to local path
+  data_path: ${oc.env:FRANKA_DATA_PATH,/home/tsp_jw/Desktop/fcs_datasets/NEps200_ActInt10_RobOpac10_NCams4_NCube1/}
   img_size: [224, 224]
-  train_ratio: 0.8
+  split_ratio: 0.9
+  transform:
+    _target_: "datasets.img_transforms.default_transform"
+    img_size: ${img_size}
+  # Optional: Weitere Parameter
+  num_hist: 2      # Anzahl Historien-Frames für Kontext
+  num_pred: 1      # Anzahl zu prädizierender Frames
+  frameskip: 2     # Frame-Subsampling (1 = alle Frames)
 
 # Optional: Decoder-Pfad
 decoder_path: null

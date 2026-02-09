@@ -1,20 +1,31 @@
-"""
-DINO WM Planning Server - Minimale Version
+"""  
+DINO WM Planning Server
 
 Nutzt plan.py Setup und ruft planner.plan() in einer Loop auf.
+
+Modi:
+  --mode online   Reduzierte CEM-Parameter fuer Echtzeit (MPC-Loop)
+  --mode offline  Volle CEM-Parameter fuer bestmoegliche Qualitaet (Open-Loop)
 
 Verwendung:
     cd ~/Desktop/dino_wm
     conda activate dino_wm
-    python planning_server.py --model_name 2026-02-02/22-50-30
+    
+    # Online (schnell, fuer MPC):
+    python planning_server.py --model_name 2026-02-09/08-12-44
+    
+    # Offline (beste Qualitaet, fuer Evaluation):
+    python planning_server.py --model_name 2026-02-09/08-12-44 --mode offline
 """
 
 import os
 import sys
 import socket
 import pickle
+import time
 import numpy as np
 import argparse
+from einops import rearrange
 
 # DINO WM Pfad
 dino_wm_dir = os.path.dirname(os.path.abspath(__file__))
@@ -36,6 +47,15 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--model_name", type=str, required=True)
 parser.add_argument("--port", type=int, default=5555)
 parser.add_argument("--goal_H", type=int, default=5)
+parser.add_argument("--mode", type=str, default="online", choices=["online", "offline"],
+                    help="online: reduzierte CEM-Params fuer MPC | offline: volle cem.yaml Params fuer Evaluation")
+# CEM-Parameter Overrides (nur relevant im Online-Modus)
+parser.add_argument("--num_samples", type=int, default=None,
+                    help="CEM Samples pro Iteration (online-default: 64, offline: aus cem.yaml)")
+parser.add_argument("--opt_steps", type=int, default=None,
+                    help="CEM Optimierungsschritte (online-default: 5, offline: aus cem.yaml)")
+parser.add_argument("--topk", type=int, default=None,
+                    help="CEM Top-K Eliten (online-default: 10, offline: aus cem.yaml)")
 args = parser.parse_args()
 
 # =============================================================================
@@ -92,6 +112,32 @@ preprocessor = Preprocessor(
 # Planner erstellen (wie in PlanWorkspace)
 objective_fn = hydra.utils.call({"_target_": "planning.objectives.create_objective_fn", "alpha": 0.5, "base": 2, "mode": "last"})
 planner_cfg = OmegaConf.load(f"{dino_wm_dir}/conf/planner/cem.yaml")
+
+frameskip = model_cfg.frameskip
+base_action_dim = dset.action_dim
+
+if args.mode == "offline":
+    # Volle cem.yaml Parameter fuer bestmoegliche Qualitaet
+    # Nur ueberschreiben wenn explizit per CLI angegeben
+    if args.num_samples is not None:
+        planner_cfg.num_samples = args.num_samples
+    if args.opt_steps is not None:
+        planner_cfg.opt_steps = args.opt_steps
+    if args.topk is not None:
+        planner_cfg.topk = args.topk
+    print(f"Modus: OFFLINE (Open-Loop, volle CEM-Qualitaet)")
+    print(f"CEM-Parameter: num_samples={planner_cfg.num_samples}, opt_steps={planner_cfg.opt_steps}, topk={planner_cfg.topk}")
+    print(f"  Geschaetzte DINO-Passes pro plan(): {planner_cfg.num_samples} x {planner_cfg.opt_steps} = {planner_cfg.num_samples * planner_cfg.opt_steps}")
+    print(f"  ACHTUNG: Kann mehrere Minuten pro plan() dauern!")
+else:
+    # Reduzierte Parameter fuer Echtzeit-MPC
+    planner_cfg.num_samples = args.num_samples or 64
+    planner_cfg.opt_steps = args.opt_steps or 5
+    planner_cfg.topk = args.topk or 10
+    print(f"Modus: ONLINE (MPC, reduzierte CEM-Params)")
+    print(f"CEM-Parameter: num_samples={planner_cfg.num_samples}, opt_steps={planner_cfg.opt_steps}, topk={planner_cfg.topk}")
+    print(f"  Geschaetzte DINO-Passes pro plan(): {planner_cfg.num_samples} x {planner_cfg.opt_steps} = {planner_cfg.num_samples * planner_cfg.opt_steps}")
+
 planner = hydra.utils.instantiate(
     planner_cfg,
     horizon=args.goal_H,
@@ -199,19 +245,60 @@ while True:
                     print(f"  [Plan] Prepared: visual={cur_obs['visual'].shape}")
                     
                     # Planen
-                    print(f"  [Plan] Running CEM planner...")
+                    print(f"  [Plan] Running CEM planner (samples={args.num_samples}, steps={args.opt_steps})...")
+                    t_start = time.time()
                     with torch.no_grad():
                         actions, _ = planner.plan(obs_0=cur_obs, obs_g=goal_obs)
+                    t_plan = time.time() - t_start
                     
                     # Erste Aktion denormalisieren und zurückgeben
                     # actions: (B, T, action_dim) = (1, horizon, 12) auf CUDA
-                    print(f"  [Plan] Actions shape: {actions.shape}")
+                    print(f"  [Plan] Actions shape: {actions.shape} (took {t_plan:.1f}s)")
                     # Wichtig: Actions von CUDA auf CPU holen vor Denormalisierung
                     action = preprocessor.denormalize_actions(actions[0, 0:1].cpu()).numpy().squeeze()
                     print(f"  [Plan] Denormalized action shape: {action.shape}")
                     response = {"status": "ok", "action": action.tolist()}
                     print(f"  [Plan] Action: {action[:6]} ✓")
-                
+            elif cmd == "plan_all":
+                # OFFLINE-Modus: Plane einmal, gib ALLE Aktionen zurueck
+                if goal_obs is None:
+                    print(f"  [ERROR] Kein Goal gesetzt!")
+                    response = {"status": "error", "msg": "No goal set"}
+                else:
+                    img = np.array(msg["image"])
+                    print(f"  [PlanAll] Raw image: shape={img.shape}, dtype={img.dtype}")
+                    
+                    cur_obs = prepare_obs_for_planner(img)
+                    print(f"  [PlanAll] Prepared: visual={cur_obs['visual'].shape}")
+                    
+                    # Plane mit vollen CEM-Parametern
+                    print(f"  [PlanAll] Running CEM planner (samples={planner_cfg.num_samples}, steps={planner_cfg.opt_steps})...")
+                    print(f"  [PlanAll] Horizon={args.goal_H}, frameskip={frameskip} -> {args.goal_H * frameskip} Einzel-Actions")
+                    t_start = time.time()
+                    with torch.no_grad():
+                        actions, _ = planner.plan(obs_0=cur_obs, obs_g=goal_obs)
+                    t_plan = time.time() - t_start
+                    
+                    # Alle Aktionen denormalisieren und in Einzel-Steps auffaechern
+                    # actions: (1, horizon, action_dim*frameskip) z.B. (1, 5, 12)
+                    print(f"  [PlanAll] Raw actions shape: {actions.shape} (took {t_plan:.1f}s)")
+                    all_actions = preprocessor.denormalize_actions(actions[0].cpu())  # (horizon, 12)
+                    # Reshape: (horizon, frameskip*base_dim) -> (horizon*frameskip, base_dim)
+                    all_actions = rearrange(all_actions, "t (f d) -> (t f) d", f=frameskip)  # (10, 6)
+                    all_actions_np = all_actions.numpy()
+                    
+                    n_actions = all_actions_np.shape[0]
+                    print(f"  [PlanAll] {n_actions} Einzel-Actions (shape: {all_actions_np.shape})")
+                    print(f"  [PlanAll] Erste Action: {all_actions_np[0]}")
+                    print(f"  [PlanAll] Letzte Action: {all_actions_np[-1]}")
+                    
+                    response = {
+                        "status": "ok",
+                        "actions": all_actions_np.tolist(),
+                        "n_actions": n_actions,
+                        "plan_time": t_plan,
+                    }
+                    print(f"  [PlanAll] {n_actions} Actions in {t_plan:.1f}s \u2713")
             elif cmd == "reset":
                 # Goal zurücksetzen für neue Episode
                 goal_obs = None

@@ -11,9 +11,10 @@
 3. [Schnittstellen und Datenfluss](#3-schnittstellen-und-datenfluss)
 4. [Environment Wrapper Interface](#4-environment-wrapper-interface)
 5. [CEM Planner im Detail](#5-cem-planner-im-detail)
-6. [Integration mit Isaac Sim](#6-integration-mit-isaac-sim)
-7. [Konfiguration und Start](#7-konfiguration-und-start)
-8. [Troubleshooting](#8-troubleshooting)
+6. [Online vs. Offline Planning: Computational Bottlenecks](#6-online-vs-offline-planning-computational-bottlenecks)
+7. [Integration mit Isaac Sim](#7-integration-mit-isaac-sim)
+8. [Konfiguration und Start](#8-konfiguration-und-start)
+9. [Troubleshooting](#9-troubleshooting)
 
 ---
 
@@ -487,9 +488,238 @@ def plan(self, obs_0, obs_g, actions=None):
 
 ---
 
-## 6. Integration mit Isaac Sim
+## 6. Online vs. Offline Planning: Computational Bottlenecks
 
-### 6.1 Architektur für Isaac Sim Integration
+> **Kernproblem:** Der CEM-Planner ist für Offline-Evaluation konzipiert und nicht direkt für Echtzeit-Robotersteuerung geeignet. Dieses Kapitel dokumentiert die identifizierten Engpässe, deren Ursachen und die notwendigen Anpassungen für Online-Planning.
+
+### 6.1 Problemstellung: Timeout bei Online-Planning
+
+Beim ersten Versuch, den CEM-Planner über die Planning-Server/Client-Architektur (Socket-Kommunikation) mit Isaac Sim zu verbinden, trat folgendes Problem auf:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    BEOBACHTETES TIMEOUT-PROBLEM                              │
+│                                                                             │
+│  Isaac Sim Client                           DINO WM Server                  │
+│  (planning_client.py)                       (planning_server.py)            │
+│                                                                             │
+│  1. set_goal(image) ─────────────────────►  Goal encodiert ✓               │
+│     ◄──────────────── "ok" ────────────────                                │
+│                                                                             │
+│  2. plan(image) ─────────────────────────►  CEM läuft...                   │
+│     ...                                     ...                             │
+│     ... 120s Timeout ...                    ... (noch nicht fertig)         │
+│     TimeoutError: timed out ✗              ... (rechnet weiter)            │
+│                                                                             │
+│  Client gibt auf, Server rechnet noch.                                     │
+│  → Keine Aktion zurückgegeben                                               │
+│  → Episode abgebrochen                                                      │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 6.2 Ursachenanalyse: Wo geht die Rechenzeit hin?
+
+#### 6.2.1 Der DINO-Encoder als Hauptengpass
+
+Der CEM-Planner führt in jeder Optimierungsiteration einen **World-Model-Rollout** durch. Dieser Rollout beinhaltet drei Schritte:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                  WM.ROLLOUT() - KOSTEN PRO AUFRUF                           │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  1. DINO-Encoder (ViT): obs_0 → z_obs_0                                    │
+│     ┌────────────────────────────────────────────────────────────────┐      │
+│     │  TEUER! Kompletter Vision Transformer Forward-Pass             │      │
+│     │  - 224×224 Bild → Patch-Embedding → Self-Attention Layers     │      │
+│     │  - DINOv2 ViT-Base: 86M Parameter                            │      │
+│     │  - Geschätzt: ~5-15ms pro Bild (GPU)                          │      │
+│     └────────────────────────────────────────────────────────────────┘      │
+│                                                                             │
+│  2. Action-Encoder: action → act_emb                                        │
+│     ┌────────────────────────────────────────────────────────────────┐      │
+│     │  GÜNSTIG! Nur 1D-Convolution                                   │      │
+│     │  - Conv1d(12, 10, kernel_size=1)                               │      │
+│     │  - Geschätzt: <0.1ms                                           │      │
+│     └────────────────────────────────────────────────────────────────┘      │
+│                                                                             │
+│  3. Predictor: z_concat → z_pred                                            │
+│     ┌────────────────────────────────────────────────────────────────┐      │
+│     │  MITTEL: Transformer-basierte Vorhersage im Latent-Space       │      │
+│     │  - Arbeitet auf Patch-Embeddings, nicht auf Pixeln             │      │
+│     │  - Geschätzt: ~2-5ms                                           │      │
+│     └────────────────────────────────────────────────────────────────┘      │
+│                                                                             │
+│  PROBLEM: Der DINO-Encoder wird für JEDES Sample JEDE Iteration            │
+│  aufgerufen, obwohl obs_0 sich NICHT ändert!                                │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### 6.2.2 Quantifizierung: CEM mit Offline-Parametern
+
+Die CEM-Konfiguration in `conf/planner/cem.yaml` ist für **Offline-Evaluation** optimiert:
+
+```yaml
+# conf/planner/cem.yaml (Original-Defaults)
+num_samples: 300    # Aktionssequenzen pro Iteration
+opt_steps: 30       # Optimierungsiterationen  
+topk: 30            # Eliten für Verteilungs-Update
+```
+
+**Rechenaufwand pro `plan()`-Aufruf (n_evals=1, Online-Fall):**
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│            KOSTENRECHNUNG: CEM MIT OFFLINE-PARAMETERN                        │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  Pro Iteration (opt_step):                                                  │
+│    Pro Trajektorie (n_evals=1 für Online):                                  │
+│      - 300 Samples werden generiert                                         │
+│      - wm.rollout() wird 1× mit Batch=300 aufgerufen                       │
+│      - Intern: DINO-Encoder für 300 obs_0-Kopien → 300 ViT-Passes         │
+│      - Intern: 300 × horizon Predictor-Passes                              │
+│                                                                             │
+│  Gesamt-DINO-Encoder-Passes:                                                │
+│    num_samples × opt_steps = 300 × 30 = 9.000 ViT-Forward-Passes          │
+│                                                                             │
+│  Geschätzte Laufzeit (RTX 3090):                                            │
+│    9.000 × ~10ms = ~90 Sekunden (nur Encoder!)                             │
+│    + Predictor, Objective, Sampling: ~30-60s zusätzlich                     │
+│    ≈ 120-150 Sekunden pro plan()-Aufruf                                    │
+│                                                                             │
+│  → WEIT ÜBER dem Client-Timeout von 120s!                                  │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### 6.2.3 Redundanz: Gleiche Observation, unterschiedliche Encodings
+
+Der Code in `planning/cem.py` zeigt das Kernproblem:
+
+```python
+# planning/cem.py - Zeile ~75-110 (vereinfacht)
+
+def plan(self, obs_0, obs_g, actions=None):
+    # obs_0 wird EINMAL transformiert (CPU→GPU, Normalize) ✓
+    trans_obs_0 = self.preprocessor.transform_obs(obs_0)  
+    
+    for i in range(self.opt_steps):        # 30 Iterationen
+        for traj in range(n_evals):        # 1 Trajektorie (Online)
+            # obs_0 wird auf num_samples KOPIERT
+            cur_trans_obs_0 = {
+                key: repeat(arr[traj], "... -> n ...", n=self.num_samples)  # 300×
+                for key, arr in trans_obs_0.items()
+            }
+            
+            # wm.rollout() ruft intern wm.encode() auf
+            # → wm.encode() ruft DINO-Encoder für ALLE 300 Kopien auf!
+            i_z_obses, _ = self.wm.rollout(
+                obs_0=cur_trans_obs_0,  # 300 identische Bilder werden encodiert
+                act=action,
+            )
+```
+
+**Das identische Bild `obs_0` wird 300 × 30 = 9.000 Mal durch den DINO-Encoder geschickt!**
+
+### 6.3 Offline vs. Online: Zwei unterschiedliche Anforderungsprofile
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│              OFFLINE VS. ONLINE PLANNING - VERGLEICH                         │
+├─────────────────┬──────────────────────────┬────────────────────────────────┤
+│                 │     OFFLINE (plan.py)     │   ONLINE (planning_server.py) │
+├─────────────────┼──────────────────────────┼────────────────────────────────┤
+│ Zweck           │ Modell-Evaluation,       │ Echtzeit-Robotersteuerung     │
+│                 │ Metriken, Paper          │ in Isaac Sim                  │
+├─────────────────┼──────────────────────────┼────────────────────────────────┤
+│ Zeitbudget      │ Unbegrenzt               │ < 30s pro Aktion              │
+│ pro plan()      │ (Minuten OK)             │ (idealerweise < 10s)          │
+├─────────────────┼──────────────────────────┼────────────────────────────────┤
+│ n_evals         │ 5 (parallel evaluieren)  │ 1 (ein Roboter)               │
+├─────────────────┼──────────────────────────┼────────────────────────────────┤
+│ num_samples     │ 300                      │ 32-64                         │
+├─────────────────┼──────────────────────────┼────────────────────────────────┤
+│ opt_steps       │ 30                       │ 3-5                           │
+├─────────────────┼──────────────────────────┼────────────────────────────────┤
+│ topk            │ 30                       │ 10                            │
+├─────────────────┼──────────────────────────┼────────────────────────────────┤
+│ DINO-Passes     │ 300 × 30 = 9.000        │ 64 × 5 = 320                  │
+├─────────────────┼──────────────────────────┼────────────────────────────────┤
+│ Geschätzte      │ ~120-150s                │ ~5-15s                        │
+│ Laufzeit        │                          │                               │
+├─────────────────┼──────────────────────────┼────────────────────────────────┤
+│ Evaluator       │ Ja (eval_actions)        │ Nein (nur plan)               │
+├─────────────────┼──────────────────────────┼────────────────────────────────┤
+│ Qualität        │ Bestmöglich              │ Ausreichend für               │
+│                 │                          │ geschlossene Regelschleife    │
+├─────────────────┼──────────────────────────┼────────────────────────────────┤
+│ Kommentar       │ cem.yaml unverändert     │ CLI-Overrides im Server       │
+│                 │                          │ (--num_samples, --opt_steps)  │
+└─────────────────┴──────────────────────────┴────────────────────────────────┘
+```
+
+**Wichtiger Tradeoff:** Die Online-Parameter liefern suboptimalere Aktionspläne als die Offline-Parameter. Dies wird jedoch durch die **geschlossene Regelschleife** (MPC-Modus) kompensiert: Nach jeder ausgeführten Aktion wird mit frischem Kamerabild neu geplant, sodass Fehler korrigiert werden können.
+
+### 6.4 Implementierte Lösung: Parametrisierter Planning Server
+
+Anstatt den CEM-Planner oder das World Model zu modifizieren, werden die CEM-Parameter im `planning_server.py` über CLI-Argumente überschrieben:
+
+```python
+# planning_server.py - CLI-Overrides
+parser.add_argument("--num_samples", type=int, default=64)   # statt 300
+parser.add_argument("--opt_steps", type=int, default=5)      # statt 30
+parser.add_argument("--topk", type=int, default=10)          # statt 30
+
+# Override der cem.yaml-Werte vor Instanziierung
+planner_cfg = OmegaConf.load("conf/planner/cem.yaml")
+planner_cfg.num_samples = args.num_samples
+planner_cfg.opt_steps = args.opt_steps
+planner_cfg.topk = args.topk
+```
+
+Zudem wurde Timing-Instrumentierung hinzugefügt, um die Planungsdauer pro Aufruf zu messen.
+
+### 6.5 Empfohlene Konfigurationen
+
+```bash
+# ─── SCHNELL (< 10s) ─── Für Debugging und schnelle Iterationen
+python planning_server.py --model_name 2026-02-09/08-12-44 \
+    --num_samples 32 --opt_steps 3 --topk 5
+
+# ─── STANDARD (10-30s) ─── Empfohlen für Online-Planning
+python planning_server.py --model_name 2026-02-09/08-12-44 \
+    --num_samples 64 --opt_steps 5 --topk 10
+
+# ─── QUALITÄT (30-60s) ─── Wenn Zeit weniger kritisch ist
+python planning_server.py --model_name 2026-02-09/08-12-44 \
+    --num_samples 128 --opt_steps 10 --topk 20
+
+# ─── OFFLINE (plan.py) ─── Verwendet cem.yaml Defaults direkt
+python plan.py --config-name plan_franka model_name=2026-02-09/08-12-44
+```
+
+### 6.6 Mögliche zukünftige Optimierungen
+
+Die aktuelle Lösung (Parameter-Reduktion) ist die einfachste, aber nicht die einzige Option. Für weiterführende Arbeiten wären folgende Optimierungen am CEM-Planner oder World Model denkbar:
+
+| Optimierung | Beschreibung | Erwarteter Speedup | Aufwand |
+|-------------|-------------|-------------------|---------|
+| **Observation Pre-Encoding** | DINO-Encoder 1× aufrufen, Embedding cachen, `rollout_from_z()` nutzen | ~10-30× (eliminiert redundante ViT-Passes) | Mittel (neue Methoden in VWorldModel + CEM) |
+| **Warm-Starting** | μ der vorherigen plan()-Runde als Initialisierung für die nächste | ~2× (weniger opt_steps nötig) | Gering |
+| **Batched CEM** | Alle n_evals-Trajektorien parallel statt sequentiell | ~n_evals× | Gering (Reshape-Logik) |
+| **ONNX/TensorRT Export** | World Model für Inferenz optimieren | ~2-5× | Hoch |
+| **Gradient-basiertes Planning** | GDPlanner statt CEM (weniger Forward-Passes nötig) | ~3-10× | Gering (bereits implementiert in planning/gd.py) |
+
+**Observation Pre-Encoding** wäre die wirkungsvollste Einzeloptimierung, da sie das Kernproblem (redundante DINO-Encoder-Aufrufe) direkt adressiert, ohne die Optimierungsqualität zu beeinträchtigen.
+
+---
+
+## 7. Integration mit Isaac Sim
+
+### 7.1 Architektur für Isaac Sim Integration
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -523,7 +753,7 @@ def plan(self, obs_0, obs_g, actions=None):
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 6.2 FrankaCubeStackWrapper Implementierung
+### 7.2 FrankaCubeStackWrapper Implementierung
 
 Der `FrankaCubeStackWrapper` in `env/franka_cube_stack/franka_cube_stack_wrapper.py` implementiert die erforderliche Schnittstelle:
 
@@ -554,7 +784,7 @@ env = create_franka_env_for_planning(
 )
 ```
 
-### 6.3 Isaac Sim Interface (zu implementieren)
+### 7.3 Isaac Sim Interface (zu implementieren)
 
 ```python
 # Beispiel-Struktur für Isaac Sim Interface
@@ -627,9 +857,9 @@ class IsaacSimInterface:
 
 ---
 
-## 7. Konfiguration und Start
+## 8. Konfiguration und Start
 
-### 7.1 Konfigurations-Dateien
+### 8.1 Konfigurations-Dateien
 
 ```
 conf/
@@ -650,7 +880,7 @@ conf/
     └── franka_cube_stack.yaml  # Environment-Konfiguration
 ```
 
-### 7.2 Wichtige Parameter in plan.yaml
+### 8.2 Wichtige Parameter in plan.yaml
 
 ```yaml
 # conf/plan.yaml - Haupt-Konfiguration
@@ -682,7 +912,7 @@ objective:
   alpha: 0.1           # Gewichtung proprio vs. visual
 ```
 
-### 7.3 Planning starten
+### 8.3 Planning starten
 
 ```bash
 # Basis-Befehl
@@ -709,7 +939,7 @@ python plan.py outputs/2026-01-31/23-03-37/checkpoints \
     goal_source=random_state
 ```
 
-### 7.4 Environment registrieren
+### 8.4 Environment registrieren
 
 Füge zu `env/__init__.py` hinzu:
 
@@ -725,9 +955,9 @@ register(
 
 ---
 
-## 8. Troubleshooting
+## 9. Troubleshooting
 
-### 8.1 MuJoCo Fehler
+### 9.1 MuJoCo Fehler
 
 **Problem:**
 ```
@@ -746,7 +976,7 @@ except Exception:
     _HAS_MUJOCO = False
 ```
 
-### 8.2 Checkpoint nicht gefunden
+### 9.2 Checkpoint nicht gefunden
 
 **Problem:**
 ```
@@ -760,7 +990,7 @@ ls outputs/2026-01-31/23-03-37/checkpoints/
 # Sollte model_X.pth Dateien zeigen
 ```
 
-### 8.3 CUDA Out of Memory
+### 9.3 CUDA Out of Memory
 
 **Problem:**
 ```
@@ -773,7 +1003,7 @@ Reduziere `num_samples` in der Planner-Konfiguration:
 python plan.py ... planner.num_samples=128
 ```
 
-### 8.4 Environment nicht gefunden
+### 9.4 Environment nicht gefunden
 
 **Problem:**
 ```
@@ -787,7 +1017,7 @@ from env.franka_cube_stack.franka_cube_stack_wrapper import create_franka_env_fo
 env = create_franka_env_for_planning(n_envs=5)
 ```
 
-### 8.5 ⚠️ KRITISCH: Actions sehen aus wie Pixelkoordinaten (Multi-Robot Grid Offset Problem)
+### 9.5 ⚠️ KRITISCH: Actions sehen aus wie Pixelkoordinaten (Multi-Robot Grid Offset Problem)
 
 **Problem:**
 Der CEM Planner gibt Actions zurück, die unrealistisch große Werte haben:
@@ -895,4 +1125,4 @@ print('⚠️  Wenn X/Y mean > 1.0 oder std > 1.0: Grid-Offset Problem!')
 
 ---
 
-*Dokumentation erstellt am 01.02.2026*
+*Dokumentation erstellt am 01.02.2026, aktualisiert am 09.02.2026*

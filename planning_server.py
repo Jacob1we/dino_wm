@@ -339,14 +339,20 @@ while True:
                     # Loss-Zusammenfassung
                     print(f"  [Plan] {wandb_run.get_loss_summary()} ({t_plan:.1f}s)")
                     
-                    # Erste Aktion denormalisieren und zurueckgeben
+                    # Erste Horizon-Aktion in frameskip Sub-Steps aufteilen (wie plan_all)
                     print(f"  [Plan] Actions shape: {actions.shape}")
                     mu_norm = actions[0].norm().item()
                     print(f"  [Plan] mu L2-Norm (normalized): {mu_norm:.4f} (0=Mittelwert, >1=signifikant)")
                     
-                    action = preprocessor.denormalize_actions(actions[0, 0:1].cpu()).numpy().squeeze()
-                    print(f"  [Plan] Denormalized action: {action}")
-                    response = {"status": "ok", "action": action.tolist()}
+                    # Split: (1, action_dim*frameskip) -> (frameskip, action_dim)
+                    all_actions_h0 = preprocessor.denormalize_actions(actions[0, 0:1].cpu())  # (1, 12)
+                    all_actions_h0 = rearrange(all_actions_h0, "t (f d) -> (t f) d", f=frameskip)  # (2, 6)
+                    all_actions_np = all_actions_h0.numpy()
+                    n_sub = all_actions_np.shape[0]
+                    print(f"  [Plan] {n_sub} Sub-Actions (frameskip={frameskip}):")
+                    for i, a in enumerate(all_actions_np):
+                        print(f"    sub {i}: [{', '.join(f'{v:.4f}' for v in a)}]")
+                    response = {"status": "ok", "actions": all_actions_np.tolist(), "n_actions": n_sub}
             elif cmd == "plan_all":
                 # OFFLINE-Modus: Plane einmal, gib ALLE Aktionen zurueck
                 if goal_obs is None:

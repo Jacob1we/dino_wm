@@ -787,15 +787,18 @@ from env.franka_cube_stack.franka_cube_stack_wrapper import create_franka_env_fo
 env = create_franka_env_for_planning(n_envs=5)
 ```
 
-### 8.5 ⚠️ KRITISCH: Actions sehen aus wie Pixelkoordinaten (Multi-Robot Grid Offset Problem)
+### 8.5 ✅ BEHOBEN: Actions sahen aus wie Pixelkoordinaten (Multi-Robot Grid Offset Problem)
 
-**Problem:**
-Der CEM Planner gibt Actions zurück, die unrealistisch große Werte haben:
+> **Status: BEHOBEN** (Commit `a9af071`, 03.02.2026)  
+> **Verifiziert: 09.02.2026** — Beide Logger (`min_data_logger.py`, `primitive_data_logger.py`) subtrahieren `env_offset` korrekt.
+
+**Ursprüngliches Problem:**
+Der CEM Planner gab Actions zurück, die unrealistisch große Werte hatten:
 ```python
 # Erwartete Franka Panda Koordinaten (in Metern):
 #   X: 0.3 - 0.8 m, Y: -0.5 - 0.5 m, Z: 0.0 - 0.6 m
 
-# Tatsächliche denormalisierte Actions:
+# Tatsächliche denormalisierte Actions (vor dem Fix):
 action = [6.95, 3.98, 0.17, 6.95, 3.98, 0.17]  # ❌ Viel zu groß!
 ```
 
@@ -821,7 +824,7 @@ Der Franka Cube Stack Datensatz wurde mit **mehreren parallel simulierten Robote
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-**Analyse der Rohdaten:**
+**Analyse der Rohdaten (vor dem Fix):**
 ```
 Episode 0:  X = 0.429,  Y = 0.045   → Grid (0, 0)
 Episode 1:  X = 5.429,  Y = 0.045   → Grid (5, 0)  
@@ -831,35 +834,60 @@ Episode 4:  X = 0.429,  Y = 5.045   → Grid (0, 5)
 ...
 ```
 
-**Konsequenz für die Normalisierung:**
+**Konsequenz für die Normalisierung (vor dem Fix):**
 ```python
 # Berechnet aus allen Episoden (mit unterschiedlichen Grid-Offsets):
 action_mean = [6.96, 3.98, 0.17, 6.96, 3.98, 0.17]  # ← Durchschnitt über Grid!
 action_std  = [5.44, 3.83, 0.07, 5.44, 3.83, 0.07]  # ← Hohe Varianz durch Offsets!
 
-# Nach Korrektur der Offsets wären die korrekten lokalen Statistiken:
+# Nach Korrektur der Offsets die korrekten lokalen Statistiken:
 local_action_mean = [0.48, 0.01, 0.18, 0.48, 0.01, 0.18]  # ✓ Realistisch!
 local_action_std  = [0.12, 0.15, 0.07, 0.12, 0.15, 0.07]  # ✓ Realistisch!
 ```
 
-**Warum das ein Problem ist:**
+**Warum das ein Problem war:**
 1. Das World Model wurde mit den **falschen globalen Koordinaten** trainiert
 2. Der CEM Planner optimiert im normalisierten Space und gibt z.B. `normalized=0` aus
 3. Denormalisierung: `0 * 5.44 + 6.96 = 6.96` → **Keine gültige Roboterposition!**
 4. Der Roboter kann diese Position nicht anfahren → **Planning schlägt fehl**
 
-**Lösungsoptionen:**
+**Implementierter Fix (Commit `a9af071`):**
 
-| Option | Aufwand | Beschreibung |
-|--------|---------|--------------|
-| **A) Daten neu generieren** | Hoch | Actions relativ zum Roboter-Base speichern |
-| **B) Daten nachträglich korrigieren** | Mittel | Grid-Offset pro Episode subtrahieren |
-| **C) Delta-Actions verwenden** | Mittel | `action = [dx, dy, dz]` statt absoluter Position |
-| **D) Runtime-Korrektur** | Niedrig | Im Planning Server Offset dynamisch korrigieren |
+Beide Data Logger subtrahieren nun den Grid-Offset **vor** dem Speichern aller Koordinaten:
 
-**Empfehlung:** Option B oder C - die Daten sollten korrigiert werden, da das World Model sonst keine sinnvolle Aktions-Repräsentation lernen kann.
+```python
+# min_data_logger.py — Offset wird bei start_episode() gespeichert:
+if env_offset is not None:
+    self.env_offset = np.asarray(env_offset, dtype=np.float64).flatten()[:3]
+else:
+    self.env_offset = np.zeros(3, dtype=np.float64)
 
-**Schnelle Diagnose:**
+# In log_step() wird der Offset von allen Koordinaten abgezogen:
+ee_pos_local = ee_pos.astype(np.float64) - self.env_offset  # EE-Position
+corrected = (cp[0] - self.env_offset[0],                     # Cube-Positionen
+             cp[1] - self.env_offset[1],
+             cp[2] - self.env_offset[2])
+action = np.concatenate([prev_ee_pos_local, ee_pos_local])    # Actions
+```
+
+```python
+# primitive_data_logger.py — Offset in beiden Segmentierungs-Modi:
+env_offset = ep.get("env_offset", np.zeros(3))
+start_pos_local = start_data["ee_pos"] - env_offset  # Fixed-Mode
+end_pos_local = end_data["ee_pos"] - env_offset
+action = np.concatenate([start_pos_local, end_pos_local])
+```
+
+**Korrigierte Daten (alle 4 Komponenten):**
+
+| Komponente | Vor Fix | Nach Fix |
+|-----------|---------|----------|
+| EE-Position | Globale Sim-Koordinaten (0–15m) | Lokale Robot-Base-Koordinaten (0.3–0.75m) |
+| Cube-Positionen | Globale Sim-Koordinaten | Lokale Koordinaten relativ zum Robot |
+| Actions (ee_pos) | `[x_global_start, ..., x_global_end]` | `[x_local_start, ..., x_local_end]` |
+| EEF-States | Globale Positionen | Lokale Positionen |
+
+**Diagnose-Kommando (Validierung):**
 ```bash
 cd ~/Desktop/dino_wm
 python -c "
@@ -874,9 +902,135 @@ dset = dset['valid']
 print(f'action_mean: {dset.action_mean.numpy()}')
 print(f'action_std:  {dset.action_std.numpy()}')
 print()
-print('⚠️  Wenn X/Y mean > 1.0 oder std > 1.0: Grid-Offset Problem!')
+print('✅ Wenn X/Y mean < 1.0 und std < 0.5: Grid-Offset korrekt subtrahiert!')
+print('⚠️  Wenn X/Y mean > 1.0 oder std > 1.0: Datensatz muss neu generiert werden!')
 "
 ```
+
+**⚠️ Wichtig:** Datensätze, die **vor** Commit `a9af071` generiert wurden, enthalten noch die falschen globalen Koordinaten und müssen **neu generiert** werden!
+
+---
+
+### 8.6 ✅ KEIN PROBLEM: Pixel-Space (Referenzdatensatz) vs. Meter-Space (Franka)
+
+> **Status: KEIN PROBLEM** — Architektur-Analyse bestätigt am 09.02.2026  
+> **Fazit: Die DINO-WM-Architektur ist vollständig einheitsagnostisch.**
+
+**Ursprüngliche Befürchtung:**
+
+Die Referenz-Datensätze (Rope, Push-T, Wall, Point-Maze) verwenden **unterschiedliche Koordinatensysteme** als der Franka Cube Stacking Datensatz. Die Frage war, ob das DINO World Model überhaupt mit Meter-Koordinaten funktionieren kann, wenn es primär mit Pixel-Koordinaten entwickelt und getestet wurde.
+
+**Analyse der Referenz-Datensätze:**
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    KOORDINATENSYSTEME DER DATENSÄTZE                         │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  ROPE (Deformable):                                                         │
+│  ──────────────────                                                         │
+│  Action: [x_start, z_start, x_end, z_end] — 4D                             │
+│  Raum:   Physik-Simulator-Einheiten (FleX), Wertebereich ca. ±4            │
+│  NICHT Pixel-Space! Sondern Sim-Koordinaten (≈ Meter-Skala)               │
+│                                                                             │
+│  PUSH-T:                                                                    │
+│  ──────────────────                                                         │
+│  Action: [dx, dy] — 2D relative Verschiebungen                             │
+│  Raum:   Pixel-Space (512×512 pymunk Window), geteilt durch 100            │
+│  Effektiver Wertebereich: ca. ±0.2                                         │
+│                                                                             │
+│  WALL:                                                                      │
+│  ──────────────────                                                         │
+│  Action: [a1, a2] — 2D                                                      │
+│  Raum:   Eigener Sim-Space, mean ≈ 0, std ≈ 0.44–0.47                     │
+│                                                                             │
+│  FRANKA CUBE STACKING:                                                      │
+│  ──────────────────────                                                     │
+│  Action: [x_start, y_start, z_start, x_end, y_end, z_end] — 6D            │
+│  Raum:   Meter-Space (Isaac Sim), EE-Pos ≈ 0.3–0.75m                      │
+│  Effektiver Wertebereich: ca. 0.0–0.8                                      │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Vergleich der Action-Statistiken (alle nach Offset-Korrektur):**
+
+| Datensatz | Action-Dim | Roh-Wertebereich | Nach Z-Score |
+|-----------|-----------|-------------------|--------------|
+| Rope | 4 | ca. ±4 (Sim-Einheiten) | ~N(0, 1) |
+| Push-T | 2 | ca. ±0.2 (Pixel/100) | ~N(0, 1) |
+| Wall | 2 | ca. ±0.5 (Sim-Einheiten) | ~N(0, 1) |
+| **Franka** | **6** | **ca. 0.0–0.8 (Meter)** | **~N(0, 1)** |
+
+**Warum das KEIN Problem ist — 4 architektonische Gründe:**
+
+**1. Z-Score-Normalisierung als universelle Brücke:**
+```python
+# Jeder Dataset-Loader normalisiert Actions VOR dem Modell:
+normalized_action = (raw_action - action_mean) / action_std
+
+# Egal ob raw_action in Pixeln, Metern, oder Sim-Einheiten:
+# → Das Modell sieht IMMER ~N(0, 1)-verteilte Werte
+# → Die physikalische Einheit ist nach Normalisierung irrelevant
+```
+
+**2. Lernbarer Action Encoder macht Einheiten bedeutungslos:**
+```python
+# models/proprio.py — ProprioceptiveEmbedding:
+self.patch_embed = nn.Conv1d(
+    in_chans=action_dim,    # 4 bei Rope, 6 bei Franka
+    out_chans=action_emb_dim,  # z.B. 10
+    kernel_size=1, stride=1
+)
+# → Lineare Projektion lernt beliebige Skalierung
+# → Keine Annahme über physikalische Einheiten
+```
+
+**3. Loss-Funktion ignoriert Actions komplett:**
+```python
+# Der Embedding-Prediction-Loss berechnet sich NUR über visuelle Patches:
+loss = MSE(z_pred[:, :num_visual_patches], z_target[:, :num_visual_patches])
+#          └── Action-Embedding-Dims werden NICHT einbezogen ──┘
+
+# Actions dienen ausschließlich als Conditioning-Signal für den Predictor.
+# Ihre absolute Skala hat keinen Einfluss auf den Gradienten.
+```
+
+**4. Die Referenz-Datensätze sind selbst NICHT einheitlich:**
+```
+Rope:    ±4.0 Sim-Einheiten  ─┐
+Push-T:  ±0.2 Pixel/100       ├── SCHON HETEROGEN!
+Wall:    ±0.5 Sim-Einheiten  ─┘
+Franka:  0.0–0.8 Meter       ─── Passt problemlos dazu
+```
+Die Architektur wurde **von Anfang an** so designed, dass sie mit beliebigen Koordinatensystemen funktioniert.
+
+**Zusammenfassung als Diagramm:**
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                 WARUM PIXEL VS. METER KEIN PROBLEM IST                      │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  Rope Actions (±4 Sim)  ──┐                                                │
+│  Push-T Actions (±0.2 px) ├──► Z-Score ──► ~N(0,1) ──► nn.Linear ──► Emb  │
+│  Wall Actions (±0.5 Sim)  │    Norm.        (alle      (lernbar)     (10D)  │
+│  Franka Actions (0-0.8m) ─┘               identisch)                       │
+│                                                                             │
+│  ═══════════════════════════════════════════════════════════════════════════  │
+│  Voraussetzungen (beide erfüllt ✅):                                       │
+│  1. action_dim ist korrekt konfiguriert (franka: 6)                        │
+│  2. action_mean/action_std werden korrekt berechnet (lokale Meter-Werte)   │
+│  ═══════════════════════════════════════════════════════════════════════════  │
+│                                                                             │
+│  ❌ NICHT erforderlich:                                                     │
+│  - Konvertierung Meter→Pixel                                               │
+│  - Anpassung der Action-Skala                                              │
+│  - Sonderbehandlung im Modell                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Einzige echte Voraussetzung:** Der Grid-Offset muss korrekt subtrahiert sein (→ siehe 8.5). Wenn das der Fall ist, funktioniert die Pipeline mit Meter-Koordinaten genauso wie mit Pixel-Koordinaten.
 
 ---
 

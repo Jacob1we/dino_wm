@@ -1468,6 +1468,65 @@ Training wird automatisch zu W&B geloggt:
 
 ---
 
+## 8.5 Klarstellung: Pixel-Space vs. Meter-Space — Kein Problem für das Training
+
+> **Analyse vom 09.02.2026** — Die DINO-WM-Architektur ist vollständig einheitsagnostisch.
+
+### Hintergrund der Fragestellung
+
+Beim Vergleich des Franka Cube Stacking Datensatzes mit den Referenz-Datensätzen (Rope, Push-T, Wall) fiel auf, dass diese **unterschiedliche Koordinatensysteme** verwenden. Die Befürchtung: Kann das DINO World Model mit Meter-Koordinaten trainiert werden, wenn es mit Pixel-/Sim-Koordinaten entwickelt wurde?
+
+### Analyse der Action-Räume aller Datensätze
+
+| Datensatz | Action-Dimensionen | Koordinatensystem | Roh-Wertebereich |
+|-----------|-------------------|-------------------|------------------|
+| **Rope** (Referenz) | 4D: `[x_start, z_start, x_end, z_end]` | FleX-Simulator-Einheiten | ca. ±4 |
+| **Push-T** (Referenz) | 2D: `[dx, dy]` | Pixel-Space (÷100) | ca. ±0.2 |
+| **Wall** (Referenz) | 2D: `[a1, a2]` | Eigener Sim-Space | ca. ±0.5 |
+| **Franka** (unserer) | 6D: `[x_s, y_s, z_s, x_e, y_e, z_e]` | Meter (Isaac Sim, lokal) | ca. 0.0–0.8 |
+
+**Zentrale Erkenntnis:** Schon die Referenz-Datensätze sind untereinander **nicht einheitlich** — Rope nutzt Sim-Einheiten (±4), Push-T nutzt skalierte Pixel (±0.2), Wall nutzt wieder andere Sim-Einheiten (±0.5). Die Architektur wurde **bewusst** so designed, dass das Koordinatensystem keine Rolle spielt.
+
+### Warum die Einheit irrelevant ist — Der Datenfluss
+
+```
+Schritt 1: Z-Score-Normalisierung (im Dataset-Loader)
+──────────────────────────────────────────────────────
+Rohdaten (beliebige Einheit)  →  normalized = (raw - mean) / std  →  ~N(0, 1)
+
+  Rope:   [-3.2, 1.1, -2.8, 0.5] → norm. ≈ [-0.8, 0.3, -0.7, 0.1]
+  Franka: [0.45, 0.02, 0.35, 0.51, -0.01, 0.38] → norm. ≈ [-0.2, 0.1, 0.9, 0.3, -0.1, 0.6]
+  → Für das Modell sehen BEIDE wie ~N(0,1)-verteilte Vektoren aus!
+
+Schritt 2: Action Encoder (lernbar)
+──────────────────────────────────────────────────────
+normalized_action (action_dim) → nn.Conv1d → action_embedding (10D)
+  → Lineare Projektion, lernt beliebige Skalierung
+  → Keine hardcodierten Annahmen über Einheiten
+
+Schritt 3: Predictor (ViT)
+──────────────────────────────────────────────────────
+[visual_patches, proprio_emb, action_emb] → ViT Predictor → predicted_patches
+  → Action-Embedding ist nur Conditioning-Signal
+  → Loss wird NUR auf visuellen Patches berechnet
+  → Action-Skala hat keinen Einfluss auf den Gradienten
+```
+
+### Voraussetzungen (beide erfüllt ✅)
+
+1. **`action_dim` korrekt konfiguriert:** In `conf/env/franka_cube_stack.yaml` ist `action_dim` passend zum Datensatz-Format gesetzt (6 für `ee_pos`-Format, 4 für `delta_pose`).
+
+2. **`action_mean`/`action_std` korrekt berechnet:** Der `FrankaCubeStackDataset`-Loader berechnet Z-Score-Statistiken on-the-fly aus allen Episoden. Seit dem Grid-Offset-Fix (Commit `a9af071`) enthalten die Daten korrekte lokale Meter-Werte → Mean/Std sind realistisch.
+
+### Was NICHT nötig ist
+
+- ❌ Konvertierung Meter → Pixel
+- ❌ Anpassung der Action-Skala an Referenz-Datensätze
+- ❌ Sonderbehandlung im Modell oder Preprocessor
+- ❌ Änderung der Loss-Funktion
+
+---
+
 ## 9. Glossar
 
 | Begriff | Erklärung |

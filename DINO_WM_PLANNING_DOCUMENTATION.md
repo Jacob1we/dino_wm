@@ -41,6 +41,14 @@
 9. [Troubleshooting](#9-troubleshooting)
    - 9.5 [BEHOBEN: Multi-Robot Grid Offset Problem](#95--behoben-actions-sahen-aus-wie-pixelkoordinaten-multi-robot-grid-offset-problem)
    - 9.6 [KEIN PROBLEM: Pixel-Space vs. Meter-Space](#96--kein-problem-pixel-space-referenzdatensatz-vs-meter-space-franka)
+10. [WM Sanity-Check: Vorhersagequalität mit GT-Aktionen](#10-wm-sanity-check-vorhersagequalität-mit-gt-aktionen) ← NEU (09.02.2026)
+    - 10.1 [Motivation und Problemstellung](#101-motivation-und-problemstellung)
+    - 10.2 [Methodik des Sanity-Checks](#102-methodik-des-sanity-checks)
+    - 10.3 [Implementierung: wm_sanity_check.py](#103-implementierung-wm_sanity_checkpy)
+    - 10.4 [Ergebnisse: Quantitative Analyse](#104-ergebnisse-quantitative-analyse)
+    - 10.5 [Diagnose und Interpretation](#105-diagnose-und-interpretation)
+    - 10.6 [Kritischer Fund: Visuelle Diskrepanz Training vs. Planning](#106-kritischer-fund-visuelle-diskrepanz-training-vs-planning)
+    - 10.7 [Konsequenzen und Handlungsempfehlungen](#107-konsequenzen-und-handlungsempfehlungen)
 
 ---
 
@@ -2135,6 +2143,373 @@ Die Architektur wurde **von Anfang an** so designed, dass sie mit beliebigen Koo
 
 ---
 
+## 10. WM Sanity-Check: Vorhersagequalität mit GT-Aktionen
+
+> **Datum:** 09.02.2026 | **Skript:** `wm_sanity_check.py` | **Model:** `2026-02-09/08-12-44`
+
+### 10.1 Motivation und Problemstellung
+
+Nach mehreren MPC-Planning-Tests mit dem Franka-Roboter in Isaac Sim zeigte sich ein wiederkehrendes Muster (**"Muster 2: Divergierende Starts"**):
+
+```
+Planning-Ergebnisse (128 Samples, 10 Opt-Steps, topk=25, H=5):
+  Plan 1 (cold): Start-Loss 3.980 → Final-Loss 2.289 (−42.5%)
+  Plan 2 (warm): Start-Loss 2.945 → Final-Loss 2.510 (−14.8%)
+  Plan 3 (warm): Start-Loss 3.097 → Final-Loss 2.878 (−7.1%)
+  Plan 4 (warm): Start-Loss 3.398 → Final-Loss 2.778 (−18.3%)
+  Plan 5 (warm): Start-Loss 3.116 → ...
+
+  ⚠️ Start-Losses STEIGEN trotz Warm-Start (2.945 → 3.097 → 3.398)
+  ⚠️ CEM-Reduktion wird immer kleiner (42% → 14% → 7%)
+```
+
+**Kernfrage:** Liegt das Problem an der CEM-Parametrisierung oder am World Model selbst?
+
+Die Hypothese: Wenn die WM-Vorhersagen mit Ground-Truth-Aktionen bereits schlecht sind, dann sind CEM-optimierte Aktionen zwangsläufig kontraproduktiv — der Planner optimiert gegen ein fehlerhaftes Modell.
+
+**Zusätzlicher Kontext:** Das Franka-Modell wurde mit **200 Episoden** trainiert. Die Referenz-Datensätze im DINO-WM-Paper verwenden **1000 Episoden** (Rope, Wall) bzw. **18.500 Trajektorien** (Push-T).
+
+### 10.2 Methodik des Sanity-Checks
+
+Der WM Sanity-Check prüft die Vorhersagequalität des World Models, indem er **Ground-Truth-Aktionen aus dem Trainingsdatensatz** durch das Modell rollt und die vorhergesagten Bilder mit den tatsächlichen vergleicht:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                     WM SANITY-CHECK METHODIK                                 │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  Für jede Test-Episode aus dem Validierungs-Set:                           │
+│                                                                             │
+│  1. RECONSTRUCTION-TEST (Basislinie):                                       │
+│     ┌───────┐    DINO      ┌───────┐    VQVAE     ┌───────┐               │
+│     │ Bild  │ ──Encoder──► │Latent │ ──Decoder──► │ Bild' │               │
+│     │  (GT) │              │ Space │              │(Recon)│               │
+│     └───────┘              └───────┘              └───────┘               │
+│     → Misst: Wie gut rekonstruiert der Decoder?                            │
+│                                                                             │
+│  2. PREDICTION-TEST (Kerntest):                                             │
+│     ┌───────┐    Encode     ┌───────┐   Predict    ┌───────┐  Decode      │
+│     │obs_0  │ ──────────► │ z_0   │ ──────────► │z_pred │ ──────►Bild   │
+│     │(2 Hist│    + GT     │       │  ViT-Trans- │       │  VQVAE        │
+│     │Frames)│  Actions    └───────┘  former      └───────┘               │
+│     └───────┘                                                              │
+│     → Misst: Wie gut sagt das WM den nächsten Zustand vorher?              │
+│                                                                             │
+│  3. HORIZONT-ANALYSE:                                                       │
+│     Wiederhole Prediction über mehrere Schritte (autoregressive Rollout)   │
+│     → Misst: Wie schnell akkumulieren Vorhersagefehler?                    │
+│                                                                             │
+│  Metriken:                                                                  │
+│  - MSE im normalisierten Bildraum ([-1, 1])                               │
+│  - PSNR (Peak Signal-to-Noise Ratio) in dB                                │
+│  - Prediction/Reconstruction Ratio (Schlüsselmetrik)                       │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Wichtig:** Der Test verwendet **ausschließlich Validierungs-Episoden** (20 Episoden, 10% Split) — das Modell hat diese Daten nie gesehen.
+
+### 10.3 Implementierung: wm_sanity_check.py
+
+**Datei:** `dino_wm/wm_sanity_check.py`
+
+**Aufruf:**
+```bash
+conda activate dino_wm
+python wm_sanity_check.py --model_name 2026-02-09/08-12-44 --n_episodes 5 --rollout_len 5
+```
+
+**CLI-Parameter:**
+
+| Parameter | Default | Beschreibung |
+|-----------|---------|--------------|
+| `--model_name` | (required) | Checkpoint-Name (z.B. `2026-02-09/08-12-44`) |
+| `--n_episodes` | 5 | Anzahl zu testender Validierungs-Episoden |
+| `--rollout_len` | 5 | Anzahl Vorhersage-Schritte nach `num_hist` |
+
+**Technische Details der Implementierung:**
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                     DATENFLUSS IM SANITY-CHECK                               │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  Dataset (Validierung, 20 Episoden)                                         │
+│    │                                                                        │
+│    ├── obses.pth: (T, H, W, C) float32 BGR 0-255                          │
+│    ├── H5-Files:  actions (6D, z-normalisiert), eef_states (14D)           │
+│    │                                                                        │
+│    ▼                                                                        │
+│  get_frames(idx, frame_indices)                                             │
+│    │  Frame-Indizes: [0, fs, 2*fs, ...] mit fs=frameskip=2                 │
+│    │  → obs['visual']: (T, C, H, W) normalisiert + transformiert           │
+│    │  → act: (T, 6) z-normalisiert                                         │
+│    │                                                                        │
+│    ▼                                                                        │
+│  Action-Concatenation für Frameskip:                                        │
+│    Einzelaktionen (6D) → je frameskip=2 concateniert → (12D)               │
+│    WM-Step i: act[i*2] ∥ act[i*2+1] → (12,)                               │
+│    │                                                                        │
+│    ▼  (Action-Encoder erwartet Conv1d(12, 10, kernel_size=1))              │
+│                                                                             │
+│  WM.rollout(obs_0, all_acts)                                               │
+│    │  obs_0: (1, num_hist=2, 3, 224, 224) — erste 2 Frames                │
+│    │  all_acts: (1, total_steps, 12) — concatenierte GT-Aktionen           │
+│    │                                                                        │
+│    ├── z = encode(obs_0, act_0)        [DINO + Action Encoder]             │
+│    ├── for each step:                                                       │
+│    │   ├── z_pred = predict(z[-2:])    [ViT Transformer]                   │
+│    │   ├── z_new = replace_actions(z_pred, action_t)                       │
+│    │   └── z = cat(z, z_new)                                               │
+│    └── final predict → z_final                                              │
+│    │                                                                        │
+│    ▼                                                                        │
+│  decode_obs(z) → predicted images                                           │
+│    │  VQVAE Decoder: latent → (B, T, 3, 224, 224) normalisiert             │
+│    │                                                                        │
+│    ▼                                                                        │
+│  Vergleich: predicted vs. GT (MSE, PSNR)                                   │
+│  Visualisierung: 3-Zeilen Side-by-Side (GT | Prediction | Differenz)       │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Output-Verzeichnis:** `wm_sanity_outputs/<model_name>/`
+- `episode_XXXX.png` — Side-by-Side-Vergleich pro Episode (3 Zeilen × T Spalten)
+- `mse_over_horizon.png` — MSE-Verlauf über Vorhersage-Horizont (aggregiert)
+- `metrics.json` — Alle Metriken als strukturiertes JSON
+
+### 10.4 Ergebnisse: Quantitative Analyse
+
+**Testbedingungen:**
+- Model: `2026-02-09/08-12-44` (Epoch 50, 200 Episoden, frameskip=2, num_hist=2)
+- 5 Validierungs-Episoden, je 5 Vorhersage-Schritte + 1 Extra
+- Device: NVIDIA RTX A5000 (24 GB)
+
+#### Reconstruction-Qualität (Basislinie)
+
+| Metrik | Wert | Bewertung |
+|--------|------|-----------|
+| **Ø MSE** | 0.0035 | Gut |
+| **Ø PSNR** | 30.5 dB | Akzeptabel |
+
+→ Der VQVAE-Decoder rekonstruiert Bilder aus DINO-Embeddings recht gut. Die Encoder→Decoder-Pipeline (ohne Prediction) funktioniert.
+
+#### Prediction-Qualität mit GT-Aktionen
+
+| Horizont-Schritt | Ø MSE | Ø PSNR (dB) | Degradation vs. Recon |
+|------------------|-------|-------------|----------------------|
+| Reconstruction | 0.0035 | 30.5 | (Basislinie) |
+| **pred_1** | 0.0088 | 26.6 | 2.5× |
+| **pred_2** | 0.0116 | 25.4 | 3.3× |
+| **pred_3** | 0.0133 | 24.8 | 3.8× |
+| **pred_4** | 0.0107 | 25.7 | 3.1× |
+| **pred_5** | 0.0145 | 24.4 | 4.1× |
+| **pred_6** | 0.0159 | 24.0 | 4.5× |
+
+**Gesamt:**
+| Metrik | Wert |
+|--------|------|
+| Ø Prediction MSE | 0.0125 |
+| Ø Prediction PSNR | 25.1 dB |
+| **Prediction/Reconstruction Ratio** | **3.52×** |
+
+#### MSE-Verlauf über Horizont
+
+```
+MSE
+  │
+  0.016 ─┤                                          ╱ pred_6
+  0.014 ─┤                              ╱──────────╱  pred_5
+  0.012 ─┤                   ╱─────────╱
+  0.010 ─┤           ╱──────╱              pred_3, pred_4
+  0.008 ─┤     ╱────╱   pred_1, pred_2
+  0.006 ─┤    ╱
+  0.004 ─┤───╱  recon (Basislinie: 0.0035)
+  0.002 ─┤
+  0.000 ─┼──────┬──────┬──────┬──────┬──────┬──────┬──────
+          0      1      2      3      4      5      6
+              Vorhersage-Schritt (0 = Reconstruction)
+```
+
+#### Ergebnisse pro Episode (Detail)
+
+| Episode | Recon MSE | Pred_1 MSE | Pred_5 MSE | Trend |
+|---------|-----------|------------|------------|-------|
+| Ep 0 | 0.0100 | 0.0184 | 0.0078 | Schwankend |
+| Ep 4 | 0.0021 | 0.0046 | 0.0126 | Steigend |
+| Ep 8 | 0.0026 | 0.0080 | 0.0279 | Stark steigend |
+| Ep 12 | 0.0015 | 0.0067 | 0.0181 | Steigend |
+| Ep 16 | 0.0015 | 0.0061 | 0.0061 | Stabil |
+
+→ **Hohe Varianz** zwischen Episoden: Manche (Ep 8) degradieren stark, andere (Ep 16) bleiben stabil.
+
+### 10.5 Diagnose und Interpretation
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         DIAGNOSE-ZUSAMMENFASSUNG                             │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  Prediction/Reconstruction MSE Ratio: 3.52×                                 │
+│                                                                             │
+│  ⚠️  BEWERTUNG: MODERATE DEGRADATION                                       │
+│                                                                             │
+│  Interpretation:                                                            │
+│  ──────────────                                                             │
+│  • Ratio < 2.0×: ✅ WM gut trainiert — Problem liegt woanders              │
+│  • Ratio 2.0–5.0×: ⚠️ Moderate Degradation — WM hat teilweise gelernt     │
+│  • Ratio > 5.0×: ❌ WM schlecht — kann Dynamik nicht vorhersagen           │
+│                                                                             │
+│  Mit 3.52× liegt das Franka-Modell im mittleren Bereich.                   │
+│                                                                             │
+│  Was bedeutet das für CEM-Planning?                                         │
+│  ─────────────────────────────────                                          │
+│  1. Der ViT-Predictor (Transformer) ist die Schwachstelle,                 │
+│     NICHT der VQVAE-Decoder (Reconstruction ist gut)                       │
+│                                                                             │
+│  2. Selbst mit PERFEKTEN GT-Aktionen ist die Vorhersage schon              │
+│     2.5× schlechter als Reconstruction — bei Schritt 1!                    │
+│                                                                             │
+│  3. Für CEM-Planning ist das fatal:                                         │
+│     - CEM vergleicht vorhergesagte Bilder mit Zielbildern                  │
+│     - Bei MSE ~0.01-0.02 ist die Vorhersage zu unscharf                    │
+│     - CEM kann feine Aktionsunterschiede nicht diskriminieren              │
+│     - Optimierte Aktionen sind daher quasi zufällig                        │
+│                                                                             │
+│  4. Fehlerakkumulation über den Horizont:                                   │
+│     MSE verdoppelt sich von Schritt 1 (0.009) zu Schritt 6 (0.016)        │
+│     → Längere Horizonte (H>3) sind unzuverlässig                           │
+│                                                                             │
+│  Hauptursache: Unzureichende Trainingsdaten                                │
+│  ─────────────────────────────────────────                                  │
+│  • Franka: 200 Episoden (aktuell)                                          │
+│  • DINO-WM Paper Referenz: 1000 Episoden (Rope, Wall)                     │
+│  • DINO-WM Paper Referenz: 18.500 Trajektorien (Push-T)                   │
+│  → Das Modell hat die Franka-Dynamik noch nicht ausreichend gelernt        │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 10.6 Kritischer Fund: Visuelle Diskrepanz Training vs. Planning
+
+Bei der Analyse des Sanity-Checks wurde eine **zweite, unabhängige Problemquelle** identifiziert: Die visuelle Umgebung im Planning Client (Isaac Sim) unterscheidet sich **erheblich** von der Trainingsumgebung.
+
+#### Vergleich: Trainings-Szene vs. Planning-Szene
+
+| Szenenkomponente | Training (fcs_main_parallel.py) | Planning (planning_client.py) | Status |
+|------------------|-------------------------------|-------------------------------|--------|
+| **Default Ground Plane** | ✅ Vorhanden | ✅ Vorhanden | ✅ Match |
+| **Custom Bodenplatte** | ✅ 0.60m × 0.75m Quad vor Robot | ❌ **FEHLT** | 🔴 **MISMATCH** |
+| **Material-Randomisierung** | ✅ 7 Materialien (Stahl, Holz, Gummi, ...) | ❌ Keine | 🔴 **MISMATCH** |
+| **Beleuchtung** | ✅ Randomisierte SphereLight (5500–7000) | ❌ Nur Default-Licht | 🟡 MISMATCH |
+| **Roboter-Sichtbarkeit** | ✅ Opacity 1.0 | ✅ Opacity 1.0 | ✅ Match |
+| **Würfel-Farben** | ✅ Randomisierte Farben | ⚠️ Festes Rot | 🟡 Minor |
+| **Kamera-Position** | ✅ Aus camera_configs.py | ✅ Aus camera_configs.py | ✅ Match |
+| **Bildformat** | ✅ 224×224 BGR | ✅ 224×224 BGR | ✅ Match |
+
+#### Das Bodenplatten-Problem im Detail
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│              VISUELLE DISKREPANZ: BODENPLATTE                                │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  TRAINING (fcs_main_parallel.py → min_data_logger.py):                     │
+│  ┌─────────────────────────────────────────┐                               │
+│  │          Kamera-Blick                    │                               │
+│  │  ┌─────────────────────────────────┐    │                               │
+│  │  │  ████████████████████████████   │    │  ← Farbige Bodenplatte        │
+│  │  │  ███ Würfel auf Platte ██████   │    │    (Stahl/Holz/Gummi/...)     │
+│  │  │  ████████████████████████████   │    │    0.60m × 0.75m              │
+│  │  └─────────────────────────────────┘    │                               │
+│  │        Grauer Isaac Sim Ground           │                               │
+│  └─────────────────────────────────────────┘                               │
+│                                                                             │
+│  PLANNING (planning_client.py → MinimalFrankaEnv):                         │
+│  ┌─────────────────────────────────────────┐                               │
+│  │          Kamera-Blick                    │                               │
+│  │                                          │                               │
+│  │       Würfel auf grauem Ground           │  ← KEINE Bodenplatte!        │
+│  │                                          │    Nur Default Ground Plane   │
+│  │                                          │                               │
+│  └─────────────────────────────────────────┘                               │
+│                                                                             │
+│  KONSEQUENZ FÜR DINO ENCODER:                                              │
+│  Der DINOv2-Encoder erzeugt für diese visuell verschiedenen Szenen         │
+│  UNTERSCHIEDLICHE Embeddings — auch bei identischer Roboter/Würfel-Pose.   │
+│  → Das trainierte World Model bekommt Input aus einer anderen Verteilung   │
+│  → "Distribution Shift" führt zu schlechten Vorhersagen beim Planning      │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Relevanter Code
+
+**Training** (`min_data_logger.py` → `add_or_update_plane()`):
+```python
+def add_or_update_plane(self, seed):
+    # Erstellt 0.60m × 0.75m Quad vor Robot-Base
+    mesh = UsdGeom.Mesh.Define(self.stage, f"{self.task_root}/Plane")
+    # Wählt zufälliges Material (7 Optionen):
+    ALLOWED_AREA_MATS = ["Steel", "Aluminum", "Oak_Wood", "Birch_Plywood",
+                          "Black_HDPE", "Rubber_Mat", "Frosted_Acrylic"]
+    material = self.materials[random_material_index]
+    UsdShade.MaterialBindingAPI(plane_prim).Bind(material)
+```
+
+**Planning** (`planning_client.py` → `MinimalFrankaEnv.setup()`):
+```python
+def setup(self):
+    self.world = World(stage_units_in_meters=1.0)
+    self.world.scene.add_default_ground_plane()  # ← NUR default ground!
+    self._add_franka()
+    self._add_cubes()
+    self._add_camera()
+    # KEIN add_or_update_plane() — keine Bodenplatte!
+```
+
+### 10.7 Konsequenzen und Handlungsempfehlungen
+
+Es gibt **zwei unabhängige Probleme**, die beide zur schlechten Planning-Performance beitragen:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                   ZWEI UNABHÄNGIGE PROBLEME                                  │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  PROBLEM 1: UNZUREICHENDE TRAININGSDATEN (WM-Qualität)                     │
+│  ══════════════════════════════════════════════════════                     │
+│  Symptom:   Prediction/Reconstruction Ratio = 3.52×                        │
+│  Ursache:   200 Episoden vs. Paper-Referenz 1000                           │
+│  Wirkung:   WM kann Franka-Dynamik nicht genau vorhersagen                 │
+│  Lösung:    Mehr Trainingsdaten sammeln (Ziel: 1000 Episoden)              │
+│  Priorität: HOCH — aber zeitaufwändig                                      │
+│                                                                             │
+│  PROBLEM 2: VISUELLE DISKREPANZ (Distribution Shift)                       │
+│  ══════════════════════════════════════════════════════                     │
+│  Symptom:   Planning-Bilder sehen anders aus als Trainingsbilder           │
+│  Ursache:   MinimalFrankaEnv hat keine Bodenplatte + Default-Licht         │
+│  Wirkung:   DINO-Encoder erzeugt andere Embeddings → WM-Vorhersagen       │
+│             basieren auf falscher Eingabeverteilung                         │
+│  Lösung:    Bodenplatte + Beleuchtung im Planning Client nachbauen         │
+│  Priorität: KRITISCH — schnell umsetzbar, großer Impact                   │
+│                                                                             │
+│  EMPFOHLENE REIHENFOLGE:                                                    │
+│  ─────────────────────                                                      │
+│  1. ✅ Bodenplatte im Planning Client hinzufügen (sofort umsetzbar)        │
+│  2. ✅ Beleuchtung im Planning Client anpassen                             │
+│  3. 🔄 Erneut testen mit korrekter visueller Umgebung                      │
+│  4. 📊 Sanity-Check wiederholen zur Basislinie                             │
+│  5. 📈 Falls immer noch schlecht: Mehr Trainingsdaten sammeln              │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Zusammenfassung:** Das WM-Training mit 200 Episoden zeigt moderate Vorhersagequalität (3.52× Degradation vs. Reconstruction). Das ist ein bekanntes Symptom für untertrainierte World Models. **Zusätzlich** wurde die fehlende Bodenplatte im Planning Client als kritische visuelle Diskrepanz identifiziert, die zu einem Distribution Shift im DINO-Encoder führt. Beide Probleme müssen adressiert werden, aber die Bodenplatte ist der schnellere Fix.
+
+---
+
 ## Anhang: Wichtige Code-Referenzen
 
 | Konzept | Datei | Zeilen |
@@ -2145,9 +2520,10 @@ Die Architektur wurde **von Anfang an** so designed, dass sie mit beliebigen Koo
 | World Model Rollout | models/visual_world_model.py | rollout() |
 | Environment Interface | env/deformable_env/FlexEnvWrapper.py | Alle |
 | SerialVectorEnv | env/serial_vector_env.py | Alle |
+| WM Sanity-Check | wm_sanity_check.py | Alle |
 | Preprocessor | preprocessor.py | Normalisierung |
 | FrankaCubeStackWrapper | env/franka_cube_stack/franka_cube_stack_wrapper.py | Alle |
 
 ---
 
-*Dokumentation erstellt am 01.02.2026, aktualisiert am 09.02.2026 (Sektion 6.7: Strategische MPC-Entscheidung, Sektion 8.5: Startbefehl-Übersicht mit Diagnose)*
+*Dokumentation erstellt am 01.02.2026, aktualisiert am 09.02.2026 (Sektion 6.7: Strategische MPC-Entscheidung, Sektion 8.5: Startbefehl-Übersicht, Sektion 10: WM Sanity-Check mit Bodenplatten-Analyse)*

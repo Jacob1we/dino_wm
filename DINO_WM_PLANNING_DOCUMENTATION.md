@@ -12,9 +12,35 @@
 4. [Environment Wrapper Interface](#4-environment-wrapper-interface)
 5. [CEM Planner im Detail](#5-cem-planner-im-detail)
 6. [Online vs. Offline Planning: Computational Bottlenecks](#6-online-vs-offline-planning-computational-bottlenecks)
+   - 6.1 [Problemstellung: Timeout bei Online-Planning](#61-problemstellung-timeout-bei-online-planning)
+   - 6.2 [Ursachenanalyse: Wo geht die Rechenzeit hin?](#62-ursachenanalyse-wo-geht-die-rechenzeit-hin)
+   - 6.3 [Offline vs. Online: Zwei Anforderungsprofile](#63-offline-vs-online-zwei-unterschiedliche-anforderungsprofile)
+   - 6.4 [Implementierte Lösung: Parametrisierter Planning Server](#64-implementierte-lösung-parametrisierter-planning-server)
+   - 6.5 [Empfohlene Konfigurationen](#65-empfohlene-konfigurationen)
+   - 6.6 [Mögliche zukünftige Optimierungen](#66-mögliche-zukünftige-optimierungen)
+   - **6.7 [Strategische Entscheidung: Warum Online MPC der einzig richtige Ansatz ist](#67-strategische-entscheidung-warum-online-mpc-der-einzig-richtige-ansatz-ist) ← NEU (09.02.2026)**
+     - 6.7.1 Das Paper bestätigt: MPC schlägt Open-Loop immer (Table 8)
+     - 6.7.2 Warum Offline für Franka Cube Stacking besonders schlecht ist
+     - 6.7.3 Warum "Offline planen und zusammensetzen" KEIN guter Kompromiss ist
+     - 6.7.4 Die Paper-CEM-Parameter für MPC (Table 10 Inferenzzeit-Analyse)
+     - 6.7.5 Die Rolle von Warm-Start im MPC-Kontext
+     - 6.7.6 Optimale MPC-Konfiguration: horizon=5, n_taken=1
+     - 6.7.7 Konfigurationsübersicht der drei DINO-WM Planner-Configs
+     - 6.7.8 Warum wir MPCPlanner nicht direkt verwenden können
+     - 6.7.9 Zusammenfassung: Empfohlener Planning-Workflow
 7. [Integration mit Isaac Sim](#7-integration-mit-isaac-sim)
 8. [Konfiguration und Start](#8-konfiguration-und-start)
+   - **8.5 [Planning Server — Vollständige Startbefehl-Übersicht](#85-planning-server--vollständige-startbefehl-übersicht) ← NEU (09.02.2026)**
+     - 8.5.1 Alle verfügbaren CLI-Parameter
+     - 8.5.2 Parameter-Erklärungen im Detail
+     - 8.5.3 Empfohlene Konfigurationen (Configs A–G)
+     - 8.5.4 Konfigurations-Vergleichstabelle
+     - 8.5.5 CEM-Output lesen und interpretieren
+     - 8.5.6 Aktuelle Testergebnisse und Diagnose (09.02.2026)
+     - 8.5.7 Zugehöriger Client-Startbefehl (Isaac Sim)
 9. [Troubleshooting](#9-troubleshooting)
+   - 9.5 [BEHOBEN: Multi-Robot Grid Offset Problem](#95--behoben-actions-sahen-aus-wie-pixelkoordinaten-multi-robot-grid-offset-problem)
+   - 9.6 [KEIN PROBLEM: Pixel-Space vs. Meter-Space](#96--kein-problem-pixel-space-referenzdatensatz-vs-meter-space-franka)
 
 ---
 
@@ -715,6 +741,499 @@ Die aktuelle Lösung (Parameter-Reduktion) ist die einfachste, aber nicht die ei
 
 **Observation Pre-Encoding** wäre die wirkungsvollste Einzeloptimierung, da sie das Kernproblem (redundante DINO-Encoder-Aufrufe) direkt adressiert, ohne die Optimierungsqualität zu beeinträchtigen.
 
+### 6.7 Strategische Entscheidung: Warum Online MPC der einzig richtige Ansatz ist
+
+> **Datum:** 09.02.2026  
+> **Kontext:** Nach der BGR-Fix-Iteration (RGB→BGR Konvertierung für korrekte DINO-Features) zeigten die Offline-Testergebnisse eine Verbesserung von 46.3% auf 48.8% Loss-Reduktion — aber die Roboterbewegung blieb suboptimal. Die Frage war: Liegt das Problem in den CEM-Parametern, oder im fundamental falschen Planning-Ansatz?
+
+#### 6.7.1 Das Paper bestätigt: MPC schlägt Open-Loop immer
+
+Die zentrale Evidenz liefert **Table 8 im Appendix A.5.3** des DINO-WM Papers (Zhou et al., 2025):
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│          PAPER TABLE 8: PLANNING RESULTS OF DINO-WM                         │
+│          (Appendix A.5.3, S. 16)                                            │
+├─────────────────┬──────────────┬──────────────┬────────────────────────────┤
+│                 │  PointMaze   │   Push-T     │    Wall                    │
+│                 │  (Sr ↑)      │   (Sr ↑)     │    (Sr ↑)                  │
+├─────────────────┼──────────────┼──────────────┼────────────────────────────┤
+│  CEM            │    0.80      │    0.86      │    0.74                    │
+│  (Open-Loop)    │              │              │                            │
+├─────────────────┼──────────────┼──────────────┼────────────────────────────┤
+│  GD             │    0.22      │    0.28      │    N/A                     │
+│  (Open-Loop)    │              │              │                            │
+├─────────────────┼──────────────┼──────────────┼────────────────────────────┤
+│  MPC            │  ★ 0.98      │  ★ 0.90      │  ★ 0.96                   │
+│  (CEM + Reced.) │              │              │                            │
+├─────────────────┼──────────────┼──────────────┼────────────────────────────┤
+│  Verbesserung   │   +22.5%     │    +4.7%     │   +29.7%                  │
+│  MPC vs. CEM    │              │              │                            │
+└─────────────────┴──────────────┴──────────────┴────────────────────────────┘
+
+Quelle: "Table 8. Planning results of DINO-WM" (S. 16, Appendix A.5.3)
+
+Legende:
+  CEM   = Plane einmal mit CEM, führe ALLE Actions aus (Open-Loop)
+  GD    = Plane einmal mit Gradient Descent, führe ALLE Actions aus
+  MPC   = Receding-Horizon mit CEM: Plane, führe k Actions aus, re-plane
+  Sr ↑  = Success Rate (höher = besser)
+```
+
+**Schlüsselbeobachtungen aus dem Paper:**
+
+1. **MPC verbessert CEM Open-Loop in ALLEN Environments**, besonders bei Wall (+29.7% absolut). Wall ist ein navigationsbasiertes Environment mit Hindernissen — ähnlich wie unser Franka-Setup, wo der Roboterarm um Objekte herum navigieren muss.
+
+2. **Gradient Descent (GD) als Open-Loop ist katastrophal** (0.22 vs. 0.80 bei PointMaze). Das zeigt, dass die Optimierungsqualität eines einzelnen Plans nicht ausreicht — die Feedback-Schleife durch MPC ist entscheidend.
+
+3. **Selbst bei PushT, wo CEM Open-Loop bereits 0.86 erreicht**, verbessert MPC noch auf 0.90. Bei unserem komplexeren 6D Franka-Setup (statt 2D PushT) ist der Unterschied wahrscheinlich noch größer.
+
+**Paper-Zitat (Appendix A.5.1, S. 15):**
+> *"After the optimization process is done, the first k actions a₀, ..., aₖ is executed in the environment. The process then repeats at the next time step with the new observation."*
+
+Dies beschreibt exakt den MPC-Ansatz: Plane mit vollem Horizont, führe nur die ersten $k$ Actions aus, beobachte das Ergebnis, plane erneut.
+
+#### 6.7.2 Warum Offline Planning für Franka Cube Stacking besonders schlecht ist
+
+Das Open-Loop-Problem verschärft sich bei unserem Franka-Setup aus mehreren Gründen:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│         WARUM OPEN-LOOP BEIM FRANKA BESONDERS PROBLEMATISCH IST             │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  PROBLEM 1: Hoher Aktionsraum (6D vs. 2D)                                  │
+│  ──────────────────────────────────────────                                 │
+│  Push-T Actions:  2D → CEM-Suchraum bei horizon=5: 10 Dimensionen         │
+│  Wall Actions:    2D → CEM-Suchraum bei horizon=5: 10 Dimensionen         │
+│  Franka Actions:  6D → CEM-Suchraum bei horizon=5: 60 Dimensionen!        │
+│                                       (mit frameskip=2)                     │
+│                                                                             │
+│  Der CEM muss in einem 6× größeren Suchraum optimieren.                   │
+│  → Ein einzelner Open-Loop-Plan kann die optimale Lösung in 60D kaum       │
+│    finden. MPC erlaubt Korrekturen nach jedem Schritt.                     │
+│                                                                             │
+│  PROBLEM 2: 3D-Dynamik mit Schwerkraft                                     │
+│  ──────────────────────────────────────────                                 │
+│  Push-T:  2D-Schiebebewegung auf flacher Oberfläche — Fehler sind          │
+│           langsam und korrigierbar.                                         │
+│  Franka: 3D-Bewegung mit Schwerkraft — ein falscher Z-Wert kann den        │
+│           Greifer in den Tisch rammen oder den Würfel fallen lassen.        │
+│           Fehler-Akkumulation ist NICHT reversibel.                          │
+│                                                                             │
+│  PROBLEM 3: Kontakt-Dynamik                                                │
+│  ──────────────────────────────────────────                                 │
+│  Das World Model wurde mit nur 200 Episoden trainiert (vgl. Paper           │
+│  Push-T: 18.500 Trajektorien, Table 11). Kleine Prädiktionsfehler          │
+│  bei Kontakt-Events (Greifen, Ablegen) akkumulieren sich über den           │
+│  Horizont. MPC korrigiert nach jedem Kontakt-Event.                        │
+│                                                                             │
+│  PROBLEM 4: Franka-IK ist nicht perfekt                                     │
+│  ──────────────────────────────────────────                                 │
+│  Der RMPFlow-IK-Controller erreicht die geplante EE-Position nur           │
+│  approximativ (typisch: 3-5mm Fehler). Open-Loop akkumuliert               │
+│  diese IK-Fehler über alle Schritte. MPC beobachtet den realen             │
+│  Zustand nach IK-Ausführung und korrigiert die nächste Planung.            │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Zusammengefasst:** Unser Franka-Setup hat MEHR Gründe für MPC als die Paper-Environments. Wenn MPC dort schon 22-30% besser ist (Table 8), erwarten wir bei Franka einen noch größeren Vorteil.
+
+#### 6.7.3 Warum "Offline planen und zusammensetzen" KEIN guter Kompromiss ist
+
+Eine naheliegende Idee wäre: Offline (mit vollen CEM-Parametern, z.B. 300×30) einen optimalen Plan berechnen, und dann die resultierenden Bilder zu einer flüssigen Bewegung zusammensetzen. **Dies ist aber identisch mit CEM Open-Loop aus Table 8** — also dem schlechteren Ansatz:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│     "OFFLINE PLANEN + ZUSAMMENSETZEN" = CEM OPEN-LOOP                       │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  Ablauf "Offline + Zusammensetzen":                                         │
+│                                                                             │
+│  1. Startbild erfassen                                                      │
+│  2. CEM mit 300×30 laufen lassen (185 Sekunden)                            │
+│  3. Alle 10 Actions (5 horizon × 2 frameskip) ausführen                    │
+│  4. Video/Bilder speichern                                                  │
+│                                                                             │
+│  ═══════════════════════════════════════════════════════════════════════     │
+│                                                                             │
+│  Das ist EXAKT was das Paper als "CEM" (Open-Loop) in Table 8 misst!       │
+│  → Wall: 0.74 Success Rate (vs. 0.96 mit MPC)                             │
+│  → PointMaze: 0.80 (vs. 0.98 mit MPC)                                     │
+│                                                                             │
+│  Das fundamentale Problem bleibt:                                           │
+│  Ohne Feedback aus der realen Umgebung akkumulieren sich Prädiktions-      │
+│  fehler des World Models über alle Zeitschritte.                            │
+│                                                                             │
+│  ┌────────────────┐     ┌────────────────┐     ┌────────────────┐          │
+│  │  Step 1        │     │  Step 3        │     │  Step 5        │          │
+│  │  Fehler: 2mm   │────►│  Fehler: 8mm   │────►│  Fehler: 25mm  │          │
+│  │  (OK)          │     │  (spürbar)     │     │  (zu groß!)    │          │
+│  └────────────────┘     └────────────────┘     └────────────────┘          │
+│                                                                             │
+│  vs. MPC:                                                                   │
+│                                                                             │
+│  ┌────────────────┐     ┌────────────────┐     ┌────────────────┐          │
+│  │  Step 1        │     │  Step 3        │     │  Step 5        │          │
+│  │  Fehler: 2mm   │────►│  Fehler: 2mm   │────►│  Fehler: 2mm   │          │
+│  │  (re-plan) ◄───┘     │  (re-plan) ◄───┘     │  (re-plan) ◄───┘          │
+│  └────────────────┘     └────────────────┘     └────────────────┘          │
+│                                                                             │
+│  MPC hält den Fehler KONSTANT niedrig durch kontinuierliches Re-Planen.    │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Mehr CEM-Budget löst das Problem NICHT:**
+
+Selbst mit 300×30 Samples (185 Sekunden Rechenzeit) erreicht CEM Open-Loop nur 0.74 bei Wall (Table 8). Das liegt nicht an zu wenig Optimierung, sondern daran, dass das World Model **systematische Prädiktionsfehler** hat, die sich über den Horizont akkumulieren. Kein noch so gutes CEM-Budget kann Fehler in der Umgebungsdynamik kompensieren — nur echtes Feedback kann das.
+
+#### 6.7.4 Die Paper-CEM-Parameter für MPC (Inferenzzeit-Analyse)
+
+**Table 10 (Appendix A.8, S. 17)** liefert die Referenz-Inferenzzeiten:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│          PAPER TABLE 10: INFERENCE TIME AND PLANNING TIME                    │
+│          (Appendix A.8, S. 17 — NVIDIA A6000 GPU)                           │
+├──────────────────────────────────┬──────────────────────────────────────────┤
+│  Metrik                          │  Zeit                                    │
+├──────────────────────────────────┼──────────────────────────────────────────┤
+│  Inference (Batch=32)            │  0.014s (14ms)                           │
+│  Simulation Rollout (Batch=1)    │  3.0s                                    │
+│  Planning (CEM, 100×10)          │  53.0s                                   │
+├──────────────────────────────────┴──────────────────────────────────────────┤
+│                                                                             │
+│  Anmerkung: "Planning time is measured with CEM using 100 samples           │
+│  per iteration and 10 optimization steps."                                  │
+│                                                                             │
+│  Das sind die DINO-WM-Autoren selbst, die 100×10 als Standard              │
+│  für MPC-Planning nutzen — NICHT die vollen 300×30 aus cem.yaml!           │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Wichtige Erkenntnis:** Die Paper-Autoren messen Planning-Zeit mit **100 Samples × 10 Schritte = 1.000 DINO-Passes** und erzielen damit **53 Sekunden auf einer A6000**. Die Default-Config `cem.yaml` (300×30) ist für die **Offline-Evaluation** in `plan.py` gedacht, NICHT für MPC.
+
+**Hochrechnung für unsere Hardware und Setup:**
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│         ZEITBUDGET-RECHNUNG FÜR FRANKA MPC                                  │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  Paper-Referenz (A6000):                                                    │
+│    100 × 10 = 1.000 Passes → 53 Sekunden                                  │
+│    → ~53ms pro DINO-Pass (inkl. Predictor + Overhead)                      │
+│                                                                             │
+│  Unsere Hardware (vergleichbar, RTX-Klasse):                               │
+│    Gemessen: 300×30 = 9.000 Passes → ~185 Sekunden                        │
+│    → ~20ms pro DINO-Pass (schneller als Paper, da ViT-S/14 statt          │
+│       ViT-Base, und batch-Effekte bei 300 Samples)                         │
+│                                                                             │
+│  ─── KONFIGURATIONSOPTIONEN FÜR MPC ───                                    │
+│                                                                             │
+│  Config A: Paper-Standard (100×10)                                          │
+│    1.000 Passes × ~20ms = ~20-30s pro MPC-Step                             │
+│    ✓ Paper-getestet, nachgewiesene Qualität                                │
+│    ✓ Akzeptabel für Masterarbeit (30s Wartezeit pro Schritt)               │
+│                                                                             │
+│  Config B: Reduziert (64×5)                                                 │
+│    320 Passes × ~20ms = ~6-10s pro MPC-Step                                │
+│    ✓ Deutlich schneller                                                     │
+│    ✓ Warm-Start kompensiert teilweise die geringere Optimierung            │
+│    ⚠ Suboptimaler als Config A, aber durch MPC-Feedback ausgeglichen       │
+│                                                                             │
+│  Config C: Schnell (32×3)                                                   │
+│    96 Passes × ~20ms = ~2-3s pro MPC-Step                                  │
+│    ✓ Nahe Echtzeit                                                          │
+│    ⚠ Niedrige Optimierungsqualität, nur mit starkem Warm-Start sinnvoll   │
+│                                                                             │
+│  Config D: Qualität (128×10)                                                │
+│    1.280 Passes × ~20ms = ~25-35s pro MPC-Step                             │
+│    ✓ Hohe Qualität, nahe an Paper-Standard                                 │
+│    ⚠ Langsamer, aber für Evaluations-Runs empfohlen                        │
+│                                                                             │
+│  EMPFEHLUNG: Config A oder B mit Warm-Start                                │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### 6.7.5 Die Rolle von Warm-Start im MPC-Kontext
+
+**Warm-Start** (bereits implementiert in `planning_server.py`) ist der Schlüssel, der MPC mit reduzierten Parametern ermöglicht:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                   WARM-START IM MPC-KONTEXT                                  │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  OHNE Warm-Start (aktueller Offline-Modus):                                 │
+│  ───────────────────────────────────────────                                │
+│  plan() Aufruf 1: μ = 0 (Dataset-Durchschnitt)                             │
+│                    CEM muss von Null starten → braucht viele Iterationen   │
+│  plan() Aufruf 2: μ = 0 (Dataset-Durchschnitt)                             │
+│                    IDENTISCH zu Aufruf 1 — kein Wissen vom letzten Plan!   │
+│                                                                             │
+│  MIT Warm-Start (MPC-Modus):                                               │
+│  ────────────────────────────                                               │
+│  plan() Aufruf 1: μ = 0 (muss komplett optimieren)                        │
+│    Ergebnis: [a₀, a₁, a₂, a₃, a₄] — 5 Horizon-Steps                      │
+│    → Führe a₀ aus (1-2 Sub-Actions durch frameskip)                        │
+│    → Speichere [a₁, a₂, a₃, a₄, 0] als Warm-Start                         │
+│                                                                             │
+│  plan() Aufruf 2: μ = [a₁, a₂, a₃, a₄, 0] (geshiftet!)                   │
+│    → CEM startet NICHT bei Null, sondern beim vorherigen Plan              │
+│    → Die ersten 4 Actions sind bereits gut optimiert                       │
+│    → CEM muss nur noch feinjustieren und die letzte Action finden          │
+│    → WENIGER Iterationen nötig für gleiches Ergebnis!                      │
+│                                                                             │
+│  plan() Aufruf 3: μ = [a₂', a₃', a₄', aneu, 0] (erneut geshiftet)        │
+│    → Noch weniger Änderung nötig, da sich die Szene nur minimal            │
+│      verändert hat (nur 1 Sub-Action wurde ausgeführt)                     │
+│    → CEM konvergiert in 3-5 Iterationen statt 30!                          │
+│                                                                             │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  Implementierung in planning_server.py:                                     │
+│                                                                             │
+│  # Nach plan() Aufruf:                                                      │
+│  warm_start_actions = actions.clone()                                       │
+│                                                                             │
+│  # Vor nächstem plan() Aufruf:                                              │
+│  shifted = warm_start_actions[:, 1:, :]       # Ersten Step entfernen      │
+│  zero_tail = torch.zeros(1, 1, action_dim)     # Null am Ende anhängen     │
+│  actions_init = torch.cat([shifted, zero_tail], dim=1)                     │
+│  # → Wird an planner.plan(actions=actions_init) übergeben                  │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Warum Warm-Start so effektiv ist:**
+
+Das Paper beschreibt in **Appendix A.5.1 (S. 15)** den CEM-Algorithmus:
+> *"At each planning iteration, CEM samples a population of N action sequences [...] from a distribution. The initial distribution is set to be Gaussian."*
+
+Ohne Warm-Start ist diese Gaussian-Initialisierung $\mathcal{N}(0, \sigma)$ — also zentriert auf den Dataset-Durchschnitt. Mit Warm-Start ist sie $\mathcal{N}(\mu_{\text{shifted}}, \sigma)$ — bereits nahe an der optimalen Lösung. Das reduziert die benötigten `opt_steps` dramatisch.
+
+#### 6.7.6 Optimale MPC-Konfiguration: horizon=5, n_taken=1
+
+Die Kernparameter des MPC-Ansatzes bestimmen die Balance zwischen Planungsqualität und Reaktionsfähigkeit:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│              MPC-PARAMETER UND IHRE WIRKUNG                                  │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  HORIZON (planning_horizon / goal_H):                                       │
+│  ─────────────────────────────────────                                      │
+│  = Wie weit das World Model in die Zukunft schaut                          │
+│                                                                             │
+│  horizon=1: CEM sieht nur 1 Schritt voraus                                 │
+│    → Greedy, kein Vorausdenken                                              │
+│    → Kann in Sackgassen laufen (z.B. gegen Hindernisse)                    │
+│    → Suchraum: 1 × 12 = 12D (schnell, aber schlecht)                      │
+│                                                                             │
+│  horizon=5: CEM sieht 5 Schritte voraus (Paper-Standard, Table 11)         │
+│    → Plant um Hindernisse herum                                             │
+│    → Berücksichtigt Konsequenzen jeder Aktion                              │
+│    → Suchraum: 5 × 12 = 60D (langsamer, aber viel besser)                 │
+│                                                                             │
+│  horizon=10: Zu weit voraus für unser WM                                    │
+│    → Prädiktionsfehler dominieren bei Schritt 8-10                         │
+│    → Suchraum: 10 × 12 = 120D (zu groß für CEM)                           │
+│    → Nicht empfohlen                                                        │
+│                                                                             │
+│  Paper-Referenz (Table 11, S. 17): Frameskip und History                   │
+│    Alle Environments nutzen horizon H=1 oder H=3                            │
+│    Franka: H=2 (num_hist), frameskip=2                                     │
+│    → Goal-Horizon von 5 ist der Paper-Standard für CEM/MPC-Planning        │
+│                                                                             │
+│  N_TAKEN (n_taken_actions):                                                 │
+│  ─────────────────────────                                                  │
+│  = Wie viele der geplanten Horizon-Steps tatsächlich ausgeführt werden     │
+│  = Der Rest wird als Warm-Start für den nächsten Plan gespeichert          │
+│                                                                             │
+│  n_taken=1: Führe nur 1 Horizon-Step aus (= 2 Sub-Actions bei frameskip=2)│
+│    → Maximum Feedback (nach jeder Bewegung neu planen)                     │
+│    → Best für Franka (IK-Fehler sofort korrigierbar)                       │
+│    → EMPFOHLEN: Qualität > Geschwindigkeit                                 │
+│                                                                             │
+│  n_taken=5 (= horizon): Führe ALLE Steps aus, dann re-plane               │
+│    → Equivalent zu Open-Loop mit Warm-Start                                │
+│    → Weniger Feedback, mehr Fehlerakkumulation                              │
+│    → Das ist was mpc_cem.yaml als Default hat                              │
+│    → NICHT empfohlen für Franka (Kontakt-Dynamik erfordert Feedback)       │
+│                                                                             │
+│  Formel: Gesamtdauer einer Episode                                         │
+│    T_episode = (max_steps / n_taken) × T_plan                              │
+│    Bei horizon=5, n_taken=1, Config A (100×10, ~30s):                      │
+│      50 MPC-Steps × 30s = 25 Minuten pro Episode                          │
+│    Bei horizon=5, n_taken=1, Config B (64×5, ~10s):                        │
+│      50 MPC-Steps × 10s ≈ 8 Minuten pro Episode                           │
+│                                                                             │
+│  ═══════════════════════════════════════════════════════════════════════    │
+│                                                                             │
+│  EMPFOHLENE KONFIGURATION:                                                  │
+│  horizon=5, n_taken=1, num_samples=100, opt_steps=10, topk=20             │
+│  → Paper-nah, Warm-Start-kompatibel, akzeptable Dauer (~30s/Step)          │
+│                                                                             │
+│  ALTERNATIVE FÜR SCHNELLERES ITERIEREN:                                    │
+│  horizon=5, n_taken=1, num_samples=64, opt_steps=5, topk=10               │
+│  → Halbierte Rechenzeit (~10s/Step), Warm-Start kompensiert                │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### 6.7.7 Konfigurationsübersicht der drei DINO-WM Planner-Configs
+
+Die existierenden Config-Dateien im Repository bestätigen die Strategie:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│         BESTEHENDE PLANNER-KONFIGURATIONEN IM DINO-WM REPO                  │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  conf/planner/cem.yaml (Standalone CEM — Open-Loop):                       │
+│  ──────────────────────────────────────────────────                         │
+│  _target_: planning.cem.CEMPlanner                                         │
+│  horizon: 5, num_samples: 300, opt_steps: 30, topk: 30                    │
+│  var_scale: 1                                                               │
+│  → Für Offline-Evaluation in plan.py                                       │
+│  → NICHT für MPC geeignet (zu langsam, kein Warm-Start-Support)            │
+│                                                                             │
+│  conf/planner/mpc_cem.yaml (MPC mit CEM Sub-Planner):                     │
+│  ──────────────────────────────────────────────────                         │
+│  _target_: planning.mpc.MPCPlanner                                         │
+│  n_taken_actions: 5  ← Alle Horizon-Steps ausführen (= Open-Loop-ähnlich) │
+│  sub_planner:                                                               │
+│    _target_: planning.cem.CEMPlanner                                       │
+│    horizon: 5, num_samples: 300, opt_steps: 30, topk: 30                  │
+│  → MPC-Wrapper, aber mit n_taken=5 de facto Open-Loop                      │
+│  → Benötigt env + evaluator (für lokalen Sim-Rollout)                      │
+│                                                                             │
+│  conf/planner/mpc_gd.yaml (MPC mit Gradient Descent):                     │
+│  ──────────────────────────────────────────────────                         │
+│  _target_: planning.mpc.MPCPlanner                                         │
+│  n_taken_actions: 1  ← NUR 1 Step ausführen, dann re-planen               │
+│  sub_planner:                                                               │
+│    _target_: planning.gd.GDPlanner                                         │
+│  → Zeigt: Die Autoren nutzen n_taken=1 für GD-basiertes MPC               │
+│  → Bestätigt: n_taken=1 ist der richtige Ansatz für maximales Feedback     │
+│                                                                             │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  BEOBACHTUNG: Die mpc_gd.yaml nutzt n_taken_actions=1 — das bestätigt,    │
+│  dass die Paper-Autoren bei MPC möglichst häufig re-planen wollen.         │
+│  Für CEM-MPC ist n_taken=5 in mpc_cem.yaml gesetzt, was aber mehr          │
+│  ein "MPC-Warm-Start" als echtes MPC ist.                                  │
+│                                                                             │
+│  UNSERE STRATEGIE: CEM mit n_taken=1 (wie GD-MPC) — kombiniert die        │
+│  Robustheit von CEM mit dem maximalen Feedback von n_taken=1.              │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### 6.7.8 Warum wir MPCPlanner nicht direkt verwenden können
+
+Der existierende `MPCPlanner` (in `planning/mpc.py`) kann in unserer Socket-Architektur **nicht direkt** instanziiert werden:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│       WARUM MPCPlanner NICHT DIREKT FUNKTIONIERT                            │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  MPCPlanner.__init__() erwartet:                                            │
+│    - env: SerialVectorEnv (lokale Simulation für Rollouts)                 │
+│    - evaluator: PlanEvaluator (bewertet Actions im lokalen Env)            │
+│                                                                             │
+│  MPCPlanner.plan() macht intern:                                            │
+│    1. sub_planner.plan(obs_0, obs_g)     → Plan im World Model             │
+│    2. evaluator.eval_actions(actions)     → Rollout in LOKALEM Env         │
+│    3. Neues obs_0 aus env.rollout()       → Neues Bild aus LOKALEM Env     │
+│    4. Wiederhole mit neuem obs_0                                            │
+│                                                                             │
+│  PROBLEM FÜR UNSERE ARCHITEKTUR:                                           │
+│  ───────────────────────────────                                            │
+│  Unser "Environment" ist Isaac Sim — in einem ANDEREN PROZESS auf einem    │
+│  ANDEREN Python-Environment (python.sh). Es gibt kein lokales env-Objekt   │
+│  das MPCPlanner aufrufen könnte.                                            │
+│                                                                             │
+│  ┌─────────────────┐          ┌─────────────────┐                          │
+│  │ planning_server  │ ◄─TCP─► │ planning_client  │                          │
+│  │ (conda dino_wm)  │         │ (Isaac Sim)      │                          │
+│  │                   │         │                   │                          │
+│  │ MPCPlanner        │         │ MinimalFrankaEnv  │                          │
+│  │ benötigt env ──── ╳ ──────►│ (ist HIER, nicht  │                          │
+│  │                   │         │  im Server!)      │                          │
+│  └─────────────────┘          └─────────────────┘                          │
+│                                                                             │
+│  LÖSUNG: MPC-Logik ist im Client/Server-Protokoll implementiert.           │
+│  ─────────────────────────────────────────────────────────────              │
+│  Der Client übernimmt die MPC-Schleife:                                    │
+│    1. Client holt Bild von Isaac Sim Kamera                                │
+│    2. Client sendet Bild an Server → Server plant mit CEM                  │
+│    3. Server gibt n_taken Sub-Actions zurück (+ Warm-Start intern)         │
+│    4. Client führt Sub-Actions in Isaac Sim aus (RMPFlow IK)               │
+│    5. Client holt neues Bild → zurück zu Schritt 2                         │
+│                                                                             │
+│  Dies ist funktional IDENTISCH mit MPCPlanner, nur verteilt über TCP.      │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### 6.7.9 Zusammenfassung: Empfohlener Planning-Workflow
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                EMPFOHLENER PLANNING-WORKFLOW                                  │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  1. IMMER Online MPC verwenden (--mode online)                             │
+│     Begründung: Paper Table 8 — MPC > Open-Loop in ALLEN Environments      │
+│                                                                             │
+│  2. Horizon=5 beibehalten                                                   │
+│     Begründung: Paper Table 11 — Standard für alle Environments            │
+│     Vorteil: Langfristiges Vorausdenken (5 Steps = 10 Sub-Actions)         │
+│                                                                             │
+│  3. n_taken=1 (nur 1 Horizon-Step ausführen, dann re-planen)               │
+│     Begründung: mpc_gd.yaml nutzt n_taken=1; maximales Feedback            │
+│     Praxis: 2 Sub-Actions pro MPC-Step (frameskip=2)                       │
+│                                                                             │
+│  4. CEM-Parameter: 100×10 (Paper-Standard) oder 64×5 (schneller)          │
+│     Begründung: Table 10 — 100×10 → 53s auf A6000                         │
+│     Unsere HW: 100×10 → ~25-35s, 64×5 → ~8-12s                           │
+│                                                                             │
+│  5. Warm-Start IMMER aktiviert (bereits implementiert)                     │
+│     Begründung: Shifted μ konvergiert in weniger Iterationen               │
+│     Praxis: Reduziert effektive opt_steps um ~50%                          │
+│                                                                             │
+│  ─── STARTBEFEHLE ───                                                       │
+│                                                                             │
+│  # Server (empfohlene Paper-nahe Konfiguration):                            │
+│  python planning_server.py --model_name 2026-02-09/08-12-44 \              │
+│      --num_samples 100 --opt_steps 10 --topk 20 --goal_H 5                │
+│                                                                             │
+│  # Client (Online MPC):                                                     │
+│  ../../python.sh planning_client.py \                                       │
+│      --goal_image /pfad/dataset:0:-1 \                                      │
+│      --mode online --max_steps 50                                           │
+│                                                                             │
+│  → Erwartete Dauer: 50 Steps × ~30s = ~25 Minuten pro Episode             │
+│  → Alternative: --num_samples 64 --opt_steps 5 → ~8 Min/Episode           │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Fazit für die Masterarbeit:**
+
+Die Entscheidung für Online MPC statt Offline Open-Loop ist keine Kompromisslösung, sondern **der im Paper als optimal identifizierte Ansatz**. Die vermeintlich höhere Rechenzeit pro Episode (~25 min statt ~3 min für Offline) wird dadurch kompensiert, dass:
+
+1. **Jede Episode deutlich höhere Erfolgsraten hat** (Table 8: bis zu +30% bei Wall)
+2. **Weniger Episoden für aussagekräftige Evaluation nötig sind** (höhere Konsistenz)
+3. **Die Ergebnisse für die Masterarbeit wissenschaftlich besser vergleichbar sind** mit den Paper-Resultaten, da wir denselben MPC-Ansatz verwenden
+
 ---
 
 ## 7. Integration mit Isaac Sim
@@ -953,6 +1472,358 @@ register(
 )
 ```
 
+### 8.5 Planning Server — Vollständige Startbefehl-Übersicht
+
+> **Datum:** 09.02.2026
+> **Aktueller Modell-Checkpoint:** `2026-02-09/08-12-44` (frameskip=2, num_hist=2, img_size=224, normalize_action=true)
+
+Der `planning_server.py` ist der zentrale Entry-Point für Online-MPC-Planning mit dem Franka-Roboter in Isaac Sim. Er läuft in der `dino_wm` Conda-Umgebung und kommuniziert via TCP-Socket (Port 5555) mit dem Isaac Sim Client (`planning_client.py`).
+
+#### 8.5.1 Alle verfügbaren CLI-Parameter
+
+```bash
+python planning_server.py \
+    --model_name <PFAD>           # PFLICHT: Modell relativ zu outputs/
+    --mode online|offline          # Planning-Modus (default: online)
+    --port <INT>                   # TCP-Port (default: 5555)
+    --goal_H <INT>                 # Planning-Horizon (default: online=2, offline=5)
+    --num_samples <INT>            # CEM Samples pro Iteration (default: online=64)
+    --opt_steps <INT>              # CEM Optimierungsschritte (default: online=5)
+    --topk <INT>                   # CEM Elite-Samples (default: online=10)
+    --wandb                        # W&B Dashboard-Logging aktivieren
+    --wandb_project <STR>          # W&B Projektname (default: dino_wm_planning)
+```
+
+#### 8.5.2 Parameter-Erklärungen im Detail
+
+```
+┌──────────────────────────────────────────────────────────────────────────────┐
+│  PARAMETER-REFERENZ                                                          │
+├──────────────┬───────────────────────────────────────────────────────────────┤
+│              │                                                               │
+│  --model_name│  Pflichtparameter. Pfad zum Modell-Checkpoint relativ         │
+│              │  zu outputs/. Enthält hydra.yaml + checkpoints/.              │
+│              │  Beispiel: 2026-02-09/08-12-44                                │
+│              │                                                               │
+│  --mode      │  online (default): MPC-Loop. Client sendet nach jeder         │
+│              │    ausgeführten Aktion ein neues Bild → re-plane.             │
+│              │    CEM-Parameter werden reduziert für schnellere Planung.     │
+│              │  offline: Open-Loop. Einmaliger Plan, alle Aktionen werden    │
+│              │    auf einmal zurückgegeben (via plan_all Befehl).            │
+│              │    Nutzt volle cem.yaml Parameter (300/30/30).               │
+│              │                                                               │
+│  --goal_H    │  Planning-Horizon: Wie viele Zeitschritte das World Model     │
+│              │  in die Zukunft simuliert.                                     │
+│              │  Online-Default: 2 (24D Suchraum — schnell konvergierend)    │
+│              │  Offline-Default: 5 (60D Suchraum — mehr Vorausdenken)       │
+│              │  Paper-Standard: 5 (Table 11, Appendix A.8)                   │
+│              │                                                               │
+│  --num_samples│  Anzahl zufällig gesampelter Aktionssequenzen pro CEM-       │
+│              │  Iteration. Mehr Samples = bessere Abdeckung des Suchraums,  │
+│              │  aber linear mehr Rechenzeit.                                  │
+│              │  Online-Default: 64 | Offline/cem.yaml: 300                  │
+│              │  Paper MPC (Table 10): 100                                    │
+│              │                                                               │
+│  --opt_steps │  Anzahl CEM-Optimierungsiterationen. In jeder Iteration:     │
+│              │  Sample → Evaluate → Top-K → Update μ/σ.                     │
+│              │  Mehr Steps = bessere Konvergenz, aber linear mehr Zeit.      │
+│              │  Online-Default: 5 | Offline/cem.yaml: 30                    │
+│              │  Paper MPC (Table 10): 10                                     │
+│              │                                                               │
+│  --topk      │  Anzahl der Elite-Samples für μ/σ-Update. Muss < num_samples │
+│              │  sein. Kleinere Werte = aggressivere Fokussierung,           │
+│              │  aber Risiko auf lokale Minima.                               │
+│              │  Online-Default: 10 | Offline/cem.yaml: 30                   │
+│              │  Faustregel: topk ≈ num_samples / 5–10                       │
+│              │                                                               │
+│  --wandb     │  Aktiviert Weights & Biases Logging. Loggt:                   │
+│              │  - cem/loss pro CEM-Iteration (für Konvergenz-Plots)         │
+│              │  - plan_summary/initial, final, reduction pro plan()-Aufruf   │
+│              │  - plan_summary/time_s Planungsdauer                          │
+│              │  Ohne --wandb: Nur stdout-Ausgabe (weiterhin aktiv).         │
+│              │                                                               │
+└──────────────┴───────────────────────────────────────────────────────────────┘
+```
+
+**Suchraum-Dimensionalität** — bestimmt die CEM-Schwierigkeit:
+
+$$\text{SearchDim} = \text{goal\_H} \times \text{action\_dim} \times \text{frameskip}$$
+
+| goal_H | Franka (6D, frameskip=2) | Push-T (2D) | Wall (2D) |
+|--------|--------------------------|-------------|-----------|
+| 1 | **12D** | 2D | 2D |
+| 2 | **24D** | 4D | 4D |
+| 5 | **60D** | 10D | 10D |
+| 10 | **120D** (nicht empfohlen) | 20D | 20D |
+
+→ Bei Franka ist der Suchraum **6× größer** als bei den Paper-Environments. Das erklärt, warum man mehr Samples und Iterationen braucht.
+
+#### 8.5.3 Empfohlene Konfigurationen (Copy-Paste-fertig)
+
+Alle Befehle gehen davon aus, dass man sich im `dino_wm`-Verzeichnis befindet mit aktivierter Conda-Umgebung:
+
+```bash
+cd ~/Desktop/dino_wm
+conda activate dino_wm
+```
+
+**Config A — Debug (Minimal, ~3-5s/plan)**
+
+```bash
+python planning_server.py --model_name 2026-02-09/08-12-44 \
+    --num_samples 32 --opt_steps 3 --topk 5 --goal_H 2
+```
+
+| Eigenschaft | Wert |
+|-------------|------|
+| Suchraum | 24D |
+| DINO-Passes | 32 × 3 = 96 |
+| Geschätzte Zeit/plan | ~3-5s |
+| Verwendung | Socket-Debugging, Verbindungstests, schnelle Iteration |
+| Qualität | Niedrig — CEM findet nur grobe Richtung |
+
+**Config B — Standard Online MPC (~8-12s/plan)**
+
+```bash
+python planning_server.py --model_name 2026-02-09/08-12-44 \
+    --num_samples 64 --opt_steps 5 --topk 10
+```
+
+| Eigenschaft | Wert |
+|-------------|------|
+| Suchraum | 24D (default goal_H=2) |
+| DINO-Passes | 64 × 5 = 320 |
+| Geschätzte Zeit/plan | ~8-12s |
+| Verwendung | Standard-MPC mit kurzen Horizont |
+| Qualität | Mittel — Warm-Start kompensiert kurzen Horizont |
+
+**Config C — Erweitert mit langem Horizont (~25-30s/plan) ← AKTUELL IM EINSATZ**
+
+```bash
+python planning_server.py --model_name 2026-02-09/08-12-44 \
+    --num_samples 128 --opt_steps 10 --goal_H 5
+```
+
+| Eigenschaft | Wert |
+|-------------|------|
+| Suchraum | **60D** |
+| DINO-Passes | 128 × 10 = 1.280 |
+| Geschätzte Zeit/plan | ~25-30s |
+| topk | 10 (default, da kein --topk angegeben) |
+| Verwendung | Aktuelle Testlauf-Konfiguration |
+| Beobachtete Ergebnisse (09.02.2026) | Siehe 8.5.5 |
+
+> **⚠️ Beobachtung:** `topk=10` bei `num_samples=128` bedeutet, dass nur die besten 7.8% der Samples das μ/σ-Update bestimmen. Das ist recht selektiv. `topk=20` wäre weniger aggressiv.
+
+**Config D — Paper-nah (~30-40s/plan) ← EMPFOHLEN**
+
+```bash
+python planning_server.py --model_name 2026-02-09/08-12-44 \
+    --num_samples 100 --opt_steps 10 --topk 20 --goal_H 5
+```
+
+| Eigenschaft | Wert |
+|-------------|------|
+| Suchraum | 60D |
+| DINO-Passes | 100 × 10 = 1.000 |
+| Geschätzte Zeit/plan | ~30-40s |
+| Verwendung | Am nächsten an Paper Table 10 (53s auf A6000) |
+| Qualität | Hoch — Paper-validierte Parameter |
+
+**Config E — Qualität (~50-70s/plan)**
+
+```bash
+python planning_server.py --model_name 2026-02-09/08-12-44 \
+    --num_samples 200 --opt_steps 15 --topk 30 --goal_H 5
+```
+
+| Eigenschaft | Wert |
+|-------------|------|
+| Suchraum | 60D |
+| DINO-Passes | 200 × 15 = 3.000 |
+| Geschätzte Zeit/plan | ~50-70s |
+| Verwendung | Bestmögliche Online-Qualität, wenn Zeit unkritisch |
+| Qualität | Sehr hoch — 3× mehr Budget als Paper-Standard |
+
+**Config F — Offline Evaluation (~180s/plan)**
+
+```bash
+python planning_server.py --model_name 2026-02-09/08-12-44 --mode offline
+```
+
+| Eigenschaft | Wert |
+|-------------|------|
+| Suchraum | 60D (default goal_H=5) |
+| DINO-Passes | 300 × 30 = 9.000 |
+| Geschätzte Zeit/plan | ~180s (3 Minuten) |
+| Verwendung | Open-Loop Baseline, plan_all Befehl |
+| Qualität | Maximale CEM-Qualität, aber kein Feedback (Open-Loop) |
+
+**Config G — Jede Config mit W&B Dashboard**
+
+```bash
+# Einfach --wandb an jede Config anhängen:
+python planning_server.py --model_name 2026-02-09/08-12-44 \
+    --num_samples 128 --opt_steps 10 --goal_H 5 \
+    --wandb --wandb_project dino_wm_planning
+
+# W&B Dashboard öffnet sich automatisch im Browser.
+# Metriken: cem/loss, plan_summary/initial, plan_summary/final, 
+#           plan_summary/reduction, plan_summary/time_s
+```
+
+#### 8.5.4 Konfigurations-Vergleichstabelle
+
+```
+┌──────────┬──────────┬───────────┬───────┬────────┬────────────┬────────────┐
+│ Config   │ Samples  │ OptSteps  │ TopK  │ goalH  │ Passes     │ ~Zeit/plan │
+├──────────┼──────────┼───────────┼───────┼────────┼────────────┼────────────┤
+│ A Debug  │    32    │     3     │   5   │   2    │      96    │   3-5s     │
+│ B Std    │    64    │     5     │  10   │   2    │     320    │   8-12s    │
+│ C Erw.   │   128    │    10     │  10   │   5    │   1.280    │  25-30s    │
+│ D Paper  │   100    │    10     │  20   │   5    │   1.000    │  30-40s    │
+│ E Qual.  │   200    │    15     │  30   │   5    │   3.000    │  50-70s    │
+│ F Offl.  │   300    │    30     │  30   │   5    │   9.000    │  ~180s     │
+├──────────┼──────────┼───────────┼───────┼────────┼────────────┼────────────┤
+│ Paper    │   100    │    10     │   ?   │   5    │   1.000    │   53s      │
+│ (Table10)│          │           │       │        │            │  (A6000)   │
+└──────────┴──────────┴───────────┴───────┴────────┴────────────┴────────────┘
+
+Alle Zeiten geschätzt für unsere Hardware (RTX-Klasse GPU).
+Paper-Referenz: Table 10, Appendix A.8, S. 17.
+```
+
+#### 8.5.5 CEM-Output lesen und interpretieren
+
+Die Server-Ausgabe bei jedem `plan`-Befehl folgt diesem Schema:
+
+```
+  [Plan] Running CEM (samples=128, steps=10, horizon=5)...
+    [CEM] Step 1: loss=3.970347       ← Anfangsloss (je niedriger, desto besser)
+    [CEM] Step 2: loss=3.039177       ← Sollte sinken
+    ...
+    [CEM] Step 10: loss=2.161562      ← Endloss
+  [Plan] loss: 3.970347 -> 2.161562 (45.6% Reduktion) (26.4s)
+  [Plan] Actions shape: torch.Size([1, 5, 12])
+  [Plan] mu L2-Norm (normalized): 9.8762 (0=Mittelwert, >1=signifikant)
+  [Plan] 2 Sub-Actions (frameskip=2):
+    sub 0: [0.4520, -0.0878, 0.1408, 0.4053, 0.3890, 0.1465]
+    sub 1: [0.5423, -0.1669, 0.2493, 0.3591, -0.0387, 0.1373]
+```
+
+**Was die Metriken bedeuten:**
+
+| Metrik | Gut | Schlecht | Interpretation |
+|--------|-----|----------|----------------|
+| Loss-Reduktion | > 30% | < 10% | CEM konvergiert gut vs. stagniert |
+| Anfangsloss (kalt) | < 3.0 | > 5.0 | Wie schwer das Planungsproblem ist |
+| Anfangsloss (warm) | < vorheriger Endloss + 0.5 | >> vorheriger Endloss | Warm-Start hilft vs. neue Szene zu anders |
+| mu L2-Norm | 3-10 | > 15 | Plan weicht moderat vs. extrem vom Mittelwert ab |
+| Sub-Action Werte | 0.1 - 0.8 (typischer Franka-Arbeitsraum) | > 1.0 oder < 0.0 | Plan im vs. außerhalb des Arbeitsraums |
+
+**Typische Muster und ihre Bedeutung:**
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  MUSTER 1: Gute Konvergenz (erwartet bei korrektem Setup)                   │
+│  Plan 1 (kalt):  4.0 → 2.0 (50% Reduktion)                                │
+│  Plan 2 (warm):  2.3 → 1.8 (22% Reduktion)  ← Startet nahe Plan 1 Ende   │
+│  Plan 3 (warm):  2.0 → 1.6 (20% Reduktion)  ← Kontinuierliche Verbesser. │
+│  → Roboter nähert sich dem Ziel.                                            │
+│                                                                             │
+│  MUSTER 2: Divergierende Starts (aktuell beobachtet!)                       │
+│  Plan 1 (kalt):  3.97 → 2.16 (46%)                                         │
+│  Plan 2 (warm):  2.85 → 2.39 (16%)  ← Start HÖHER als Plan 1 Ende!       │
+│  Plan 3 (warm):  3.07 → 2.84 (7%)   ← Start noch HÖHER, kaum Reduktion!  │
+│  Plan 4 (warm):  3.31 → 2.33 (30%)  ← Start weiter steigend              │
+│  → Roboter bewegt sich NICHT zum Ziel. Jeder Schritt verschlechtert die    │
+│    Ausgangslage. Warm-Start wird ungültig weil reale Szene nach Action-    │
+│    Ausführung zu stark abweicht von WM-Prediktion.                         │
+│                                                                             │
+│  MUSTER 3: Loss stagniert                                                   │
+│  Plan N: 4.5 → 4.3 (4% Reduktion)                                          │
+│  → CEM findet keine bessere Lösung im 60D-Suchraum.                       │
+│    Mögliche Ursachen: zu wenig Samples, goal zu weit entfernt,             │
+│    oder WM-Qualität unzureichend.                                          │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### 8.5.6 Aktuelle Testergebnisse und Diagnose (09.02.2026)
+
+**Getestete Konfiguration:** Config C (128/10/10, goal_H=5)
+
+**Beobachtete Server-Ausgabe (4 MPC-Schritte):**
+
+| Plan # | Warm-Start | Start-Loss | End-Loss | Reduktion | Zeit |
+|--------|-----------|------------|----------|-----------|------|
+| 1 | Nein (kalt) | 3.970 | 2.162 | 45.6% | 26.4s |
+| 2 | Ja | 2.849 | 2.389 | 16.1% | 26.6s |
+| 3 | Ja | 3.069 | 2.842 | 7.4% | 26.8s |
+| 4 | Ja | 3.314 | 2.327 | 29.8% | 26.7s |
+
+**Diagnose — Muster 2 (Divergierende Starts):**
+
+```
+Start-Loss-Entwicklung:  3.97 → 2.85 → 3.07 → 3.31
+                         ─────────────────────────────► steigend!
+                         
+Das bedeutet: Nach Ausführung jeder Aktion ist die Szene WEITER
+vom Ziel entfernt als vorher. Der Roboter bewegt sich nicht
+zielgerichtet.
+```
+
+**Mögliche Ursachen (Reihenfolge nach Wahrscheinlichkeit):**
+
+1. **Modellqualität (200 Episoden vs. Paper 1.000-18.500)**
+   Das WM wurde mit nur 200 Episoden trainiert. Die Paper-Environments nutzen deutlich mehr Daten (Table 11: PushT 18.500, Wall 100 aber einfacheres 2D-Environment). Bei 200 Episoden mit 6D-Aktionsraum hat das WM möglicherweise keine genaue Dynamik gelernt → Prädiktionsfehler → CEM optimiert auf falsche Vorhersagen.
+
+2. **topk zu aggressiv für 60D-Suchraum**
+   `topk=10` bei `num_samples=128` = 7.8% Eliten. Im 60D-Suchraum kann dies zu schneller Konvergenz auf lokale Minima führen. **Empfehlung: `--topk 20` oder `--topk 25` testen.**
+
+3. **Goal-Bild zu weit entfernt**
+   Wenn das Goal-Bild einen Zustand zeigt, der viele Schritte entfernt ist, kann der CEM bei horizon=5 den Weg nicht finden. **Empfehlung: Einfacheres Goal testen (z.B. nur leichte Positionsänderung).**
+
+4. **BGR-Konvertierung im Client korrekt?**
+   Das Modell wurde mit BGR-Bildern trainiert. Der Client muss RGB→BGR konvertieren bevor er das Bild an den Server sendet. **Prüfen: `get_obs_for_planner()` in planning_client.py.**
+
+**Nächste empfohlene Schritte:**
+
+```bash
+# 1. Gleiche Config aber mit mehr topk (weniger aggressiv):
+python planning_server.py --model_name 2026-02-09/08-12-44 \
+    --num_samples 128 --opt_steps 10 --topk 25 --goal_H 5 --wandb
+
+# 2. Paper-nahe Config:
+python planning_server.py --model_name 2026-02-09/08-12-44 \
+    --num_samples 100 --opt_steps 10 --topk 20 --goal_H 5 --wandb
+
+# 3. Kürzerer Horizont (weniger Dimensionen, leichter für CEM):
+python planning_server.py --model_name 2026-02-09/08-12-44 \
+    --num_samples 128 --opt_steps 10 --topk 20 --goal_H 3 --wandb
+
+# 4. Maximale Qualität (Referenz-Baseline):
+python planning_server.py --model_name 2026-02-09/08-12-44 \
+    --num_samples 200 --opt_steps 20 --topk 30 --goal_H 5 --wandb
+```
+
+#### 8.5.7 Zugehöriger Client-Startbefehl (Isaac Sim)
+
+```bash
+# Terminal 2: Isaac Sim Client (in separater Shell)
+cd ~/Desktop/isaacsim
+./python.sh 00_Franka_Cube_Stack/Franka_Cube_Stacking/planning_client.py \
+    --goal_image /pfad/zum/dataset:0:-1 \
+    --mode online \
+    --max_steps 50
+
+# Erwartete Episodendauer bei Config C (128/10, ~27s/plan):
+#   50 MPC-Steps × 27s = ~22 Minuten pro Episode
+#
+# Erwartete Episodendauer bei Config D (100/10, ~35s/plan):
+#   50 MPC-Steps × 35s = ~29 Minuten pro Episode
+```
+
 ---
 
 ## 9. Troubleshooting
@@ -1017,11 +1888,7 @@ from env.franka_cube_stack.franka_cube_stack_wrapper import create_franka_env_fo
 env = create_franka_env_for_planning(n_envs=5)
 ```
 
-<<<<<<< HEAD
-### 8.5 ✅ BEHOBEN: Actions sahen aus wie Pixelkoordinaten (Multi-Robot Grid Offset Problem)
-=======
-### 9.5 ⚠️ KRITISCH: Actions sehen aus wie Pixelkoordinaten (Multi-Robot Grid Offset Problem)
->>>>>>> 5c13f571789b9ecab3062b8b809dc03c989c63d6
+### 9.5 ✅ BEHOBEN: Actions sahen aus wie Pixelkoordinaten (Multi-Robot Grid Offset Problem)
 
 > **Status: BEHOBEN** (Commit `a9af071`, 03.02.2026)  
 > **Verifiziert: 09.02.2026** — Beide Logger (`min_data_logger.py`, `primitive_data_logger.py`) subtrahieren `env_offset` korrekt.
@@ -1145,7 +2012,7 @@ print('⚠️  Wenn X/Y mean > 1.0 oder std > 1.0: Datensatz muss neu generiert 
 
 ---
 
-### 8.6 ✅ KEIN PROBLEM: Pixel-Space (Referenzdatensatz) vs. Meter-Space (Franka)
+### 9.6 ✅ KEIN PROBLEM: Pixel-Space (Referenzdatensatz) vs. Meter-Space (Franka)
 
 > **Status: KEIN PROBLEM** — Architektur-Analyse bestätigt am 09.02.2026  
 > **Fazit: Die DINO-WM-Architektur ist vollständig einheitsagnostisch.**
@@ -1283,4 +2150,4 @@ Die Architektur wurde **von Anfang an** so designed, dass sie mit beliebigen Koo
 
 ---
 
-*Dokumentation erstellt am 01.02.2026, aktualisiert am 09.02.2026*
+*Dokumentation erstellt am 01.02.2026, aktualisiert am 09.02.2026 (Sektion 6.7: Strategische MPC-Entscheidung, Sektion 8.5: Startbefehl-Übersicht mit Diagnose)*

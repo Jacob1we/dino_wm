@@ -22,7 +22,10 @@ Verwendung:
     python planning_server.py --model_name 2026-02-09/08-12-44
     
     # Online mit mehr Budget:
-    python planning_server.py --model_name 2026-02-09/08-12-44 --num_samples 128 --opt_steps 10
+    python planning_server.py --model_name 2026-02-09/08-12-44 --num_samples 128 --opt_steps 10 --goal_H 5
+    
+    # Mit Weights & Biases Logging:
+    python planning_server.py --model_name 2026-02-09/08-12-44 --num_samples 128 --opt_steps 10 --goal_H 5 --wandb
     
     # Offline (beste Qualitaet, fuer Evaluation):
     python planning_server.py --model_name 2026-02-09/08-12-44 --mode offline
@@ -54,14 +57,26 @@ from utils import seed, cfg_to_dict
 
 
 class LoggingWandbRun:
-    """Ersetzt DummyWandbRun: Gibt CEM-Loss auf stdout aus.
+    """CEM-Loss auf stdout UND optional an echtes Weights & Biases weiterleiten.
     
-    Kritisch fuer Debugging! Ohne Loss-Logging kann man nicht sehen,
-    ob CEM konvergiert oder im 60D-Suchraum verloren ist.
+    Ohne --wandb: Nur stdout-Ausgabe (wie bisher).
+    Mit --wandb: Zusaetzlich an wandb.ai geloggt fuer Dashboard-Analyse.
+    
+    W&B Metriken:
+      - cem/loss:              CEM-Loss pro Iteration (innerhalb eines plan()-Aufrufs)
+      - cem/iteration:         CEM-Iterationsschritt (1..opt_steps)
+      - plan_summary/initial:  Anfangsloss jedes plan()-Aufrufs
+      - plan_summary/final:    Endloss jedes plan()-Aufrufs
+      - plan_summary/reduction: Prozentuale Loss-Reduktion
+      - plan_summary/time_s:   Planungsdauer in Sekunden
+      - plan_count:            Laufende Nummer des plan()-Aufrufs
     """
-    def __init__(self):
+    def __init__(self, real_wandb_run=None):
         self.mode = "logging"
         self._step_losses = []
+        self._real_run = real_wandb_run
+        self._plan_count = 0
+        self._global_step = 0
     
     def log(self, data, *args, **kwargs):
         # CEM loggt: {"plan_0/loss": float, "step": int}
@@ -71,22 +86,52 @@ class LoggingWandbRun:
                 self._step_losses.append(value)
                 # Kompakte Ausgabe: Loss pro CEM-Iteration
                 print(f"    [CEM] Step {step}: loss={value:.6f}", flush=True)
+        
+        # An echtes W&B weiterleiten (mit globalem Step-Counter)
+        if self._real_run is not None:
+            self._global_step += 1
+            wb_data = {}
+            for key, value in data.items():
+                if key == "step":
+                    wb_data["cem/iteration"] = value
+                elif "loss" in key:
+                    wb_data["cem/loss"] = value
+                else:
+                    wb_data[key] = value
+            wb_data["plan_count"] = self._plan_count
+            self._real_run.log(wb_data, step=self._global_step)
     
-    def get_loss_summary(self):
+    def get_loss_summary(self, plan_time=None):
         """Gibt Loss-Verlauf zurueck fuer Konvergenz-Diagnose."""
         if not self._step_losses:
             return "keine Daten"
         first = self._step_losses[0]
         last = self._step_losses[-1]
         reduction = (1 - last/first) * 100 if first > 0 else 0
+        
+        # Plan-Summary an W&B loggen
+        if self._real_run is not None:
+            summary = {
+                "plan_summary/initial": first,
+                "plan_summary/final": last,
+                "plan_summary/reduction": reduction,
+                "plan_summary/plan_id": self._plan_count,
+            }
+            if plan_time is not None:
+                summary["plan_summary/time_s"] = plan_time
+            self._real_run.log(summary, step=self._global_step)
+        
         return f"loss: {first:.6f} -> {last:.6f} ({reduction:.1f}% Reduktion)"
     
     def reset_losses(self):
         self._step_losses.clear()
+        self._plan_count += 1
     
     def watch(self, *args, **kwargs): pass
     def config(self, *args, **kwargs): pass
-    def finish(self): pass
+    def finish(self):
+        if self._real_run is not None:
+            self._real_run.finish()
 
 # Args
 parser = argparse.ArgumentParser()
@@ -103,6 +148,11 @@ parser.add_argument("--opt_steps", type=int, default=None,
                     help="CEM Optimierungsschritte (online-default: 5, offline: aus cem.yaml)")
 parser.add_argument("--topk", type=int, default=None,
                     help="CEM Top-K Eliten (online-default: 10, offline: aus cem.yaml)")
+# W&B Logging
+parser.add_argument("--wandb", action="store_true", default=False,
+                    help="Aktiviere Weights & Biases Logging (wandb.ai Dashboard)")
+parser.add_argument("--wandb_project", type=str, default="dino_wm_planning",
+                    help="W&B Projektname (default: dino_wm_planning)")
 args = parser.parse_args()
 
 # =============================================================================
@@ -198,7 +248,28 @@ else:
     print(f"  Geschaetzte DINO-Passes pro plan(): {planner_cfg.num_samples} x {planner_cfg.opt_steps} = {planner_cfg.num_samples * planner_cfg.opt_steps}")
 
 # WandbRun mit Loss-Logging (kritisch fuer CEM-Diagnose!)
-wandb_run = LoggingWandbRun()
+# Optional: Echtes W&B-Logging fuer Dashboard-Analyse
+real_wandb_run = None
+if args.wandb:
+    import wandb
+    real_wandb_run = wandb.init(
+        project=args.wandb_project,
+        config={
+            "model_name": args.model_name,
+            "mode": args.mode,
+            "num_samples": int(planner_cfg.num_samples),
+            "opt_steps": int(planner_cfg.opt_steps),
+            "topk": int(planner_cfg.topk),
+            "horizon": planning_horizon,
+            "search_dim": search_dim,
+            "frameskip": frameskip,
+            "action_dim": base_action_dim,
+            "full_action_dim": full_action_dim,
+        },
+        name=f"{args.mode}_s{planner_cfg.num_samples}_o{planner_cfg.opt_steps}_h{planning_horizon}",
+    )
+    print(f"\n✓ W&B Run gestartet: {real_wandb_run.url}")
+wandb_run = LoggingWandbRun(real_wandb_run=real_wandb_run)
 
 planner = hydra.utils.instantiate(
     planner_cfg,
@@ -337,7 +408,7 @@ while True:
                     warm_start_actions = actions.clone()
                     
                     # Loss-Zusammenfassung
-                    print(f"  [Plan] {wandb_run.get_loss_summary()} ({t_plan:.1f}s)")
+                    print(f"  [Plan] {wandb_run.get_loss_summary(plan_time=t_plan)} ({t_plan:.1f}s)")
                     
                     # Erste Horizon-Aktion in frameskip Sub-Steps aufteilen (wie plan_all)
                     print(f"  [Plan] Actions shape: {actions.shape}")
@@ -375,7 +446,7 @@ while True:
                     t_plan = time.time() - t_start
                     
                     # Loss-Zusammenfassung
-                    print(f"  [PlanAll] {wandb_run.get_loss_summary()} ({t_plan:.1f}s)")
+                    print(f"  [PlanAll] {wandb_run.get_loss_summary(plan_time=t_plan)} ({t_plan:.1f}s)")
                     mu_norm = actions[0].norm().item()
                     print(f"  [PlanAll] mu L2-Norm (normalized): {mu_norm:.4f}")
                     

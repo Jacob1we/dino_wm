@@ -6,8 +6,10 @@ kwargs: {}
 
 # Dimensionen (für Planner)
 action_dim: 6  # EE positions: [x_start, y_start, z_start, x_end, y_end, z_end]
-state_dim: 14  # EEF states
+state_dim: 14  # EEF states: [q1, q2, q3, q4, q5, q6, q7, q1', q2', q3', q4', q5', q6', q7'] (7 Gelenkwinkel_start + 7 Gelenkwinkel_end)
 proprio_dim: 3 # EEF position (x, y, z)
+
+
 
 # Dataset
 dataset:
@@ -16,16 +18,18 @@ dataset:
   n_rollout: null  # null = alle verfügbaren Rollouts laden
   normalize_action: ${normalize_action}
   # data_path: If FRANKA_DATA_PATH env var is set, use it; otherwise fallback to local path
-  data_path: ${oc.env:FRANKA_DATA_PATH,/home/tsp_jw/Desktop/fcs_datasets/NEps200_ActInt10_RobOpac10_NCams4_NCube1/}
-  img_size: [224, 224]
+  data_path: ${oc.env:FRANKA_DATA_PATH,/home/tsp_jw/Desktop/fcs_datasets/primLogger_NEps200_ActInt10_RobOpac10_NCams4_NCube1/}
+
   split_ratio: 0.9
+
   transform:
     _target_: "datasets.img_transforms.default_transform"
-    img_size: ${img_size}
-  # Optional: Weitere Parameter
-  num_hist: 2      # Anzahl Historien-Frames für Kontext
-  num_pred: 1      # Anzahl zu prädizierender Frames
-  frameskip: 2     # Frame-Subsampling (1 = alle Frames)
+    img_size: [224, 224]
+  # # Optional: Weitere Parameter
+  # num_hist: 2      # Anzahl Historien-Frames für Kontext
+  # num_pred: 1      # Anzahl zu prädizierender Frames
+  # frameskip: 2     # Frame-Subsampling (1 = alle Frames)
 
-# Optional: Decoder-Pfad
 decoder_path: null
+num_workers: 8
+

@@ -787,6 +787,97 @@ from env.franka_cube_stack.franka_cube_stack_wrapper import create_franka_env_fo
 env = create_franka_env_for_planning(n_envs=5)
 ```
 
+### 8.5 ⚠️ KRITISCH: Actions sehen aus wie Pixelkoordinaten (Multi-Robot Grid Offset Problem)
+
+**Problem:**
+Der CEM Planner gibt Actions zurück, die unrealistisch große Werte haben:
+```python
+# Erwartete Franka Panda Koordinaten (in Metern):
+#   X: 0.3 - 0.8 m, Y: -0.5 - 0.5 m, Z: 0.0 - 0.6 m
+
+# Tatsächliche denormalisierte Actions:
+action = [6.95, 3.98, 0.17, 6.95, 3.98, 0.17]  # ❌ Viel zu groß!
+```
+
+**Ursache - Multi-Robot Simulations-Grid:**
+
+Der Franka Cube Stack Datensatz wurde mit **mehreren parallel simulierten Robotern** in Isaac Sim generiert. Jeder Roboter hat einen anderen **Welt-Offset**:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    ISAAC SIM MULTI-ROBOT GRID LAYOUT                        │
+│                                                                             │
+│    Y=10 ┤  Robot    Robot    Robot    Robot                                │
+│         │  (0,10)   (5,10)   (10,10)  (15,10)                              │
+│    Y=5  ┤  Robot    Robot    Robot    Robot                                │
+│         │  (0,5)    (5,5)    (10,5)   (15,5)                               │
+│    Y=0  ┤  Robot    Robot    Robot    Robot                                │
+│         │  (0,0)    (5,0)    (10,0)   (15,0)                               │
+│         └──────┴──────┴──────┴──────┴──────►                               │
+│              X=0    X=5    X=10   X=15                                     │
+│                                                                             │
+│    Grid-Spacing: 5 Meter (!) zwischen Robotern                             │
+│    Lokaler Arbeitsraum pro Roboter: ca. 0.1-0.8m                           │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Analyse der Rohdaten:**
+```
+Episode 0:  X = 0.429,  Y = 0.045   → Grid (0, 0)
+Episode 1:  X = 5.429,  Y = 0.045   → Grid (5, 0)  
+Episode 2:  X = 10.429, Y = 0.045   → Grid (10, 0)
+Episode 3:  X = 15.429, Y = 0.045   → Grid (15, 0)
+Episode 4:  X = 0.429,  Y = 5.045   → Grid (0, 5)
+...
+```
+
+**Konsequenz für die Normalisierung:**
+```python
+# Berechnet aus allen Episoden (mit unterschiedlichen Grid-Offsets):
+action_mean = [6.96, 3.98, 0.17, 6.96, 3.98, 0.17]  # ← Durchschnitt über Grid!
+action_std  = [5.44, 3.83, 0.07, 5.44, 3.83, 0.07]  # ← Hohe Varianz durch Offsets!
+
+# Nach Korrektur der Offsets wären die korrekten lokalen Statistiken:
+local_action_mean = [0.48, 0.01, 0.18, 0.48, 0.01, 0.18]  # ✓ Realistisch!
+local_action_std  = [0.12, 0.15, 0.07, 0.12, 0.15, 0.07]  # ✓ Realistisch!
+```
+
+**Warum das ein Problem ist:**
+1. Das World Model wurde mit den **falschen globalen Koordinaten** trainiert
+2. Der CEM Planner optimiert im normalisierten Space und gibt z.B. `normalized=0` aus
+3. Denormalisierung: `0 * 5.44 + 6.96 = 6.96` → **Keine gültige Roboterposition!**
+4. Der Roboter kann diese Position nicht anfahren → **Planning schlägt fehl**
+
+**Lösungsoptionen:**
+
+| Option | Aufwand | Beschreibung |
+|--------|---------|--------------|
+| **A) Daten neu generieren** | Hoch | Actions relativ zum Roboter-Base speichern |
+| **B) Daten nachträglich korrigieren** | Mittel | Grid-Offset pro Episode subtrahieren |
+| **C) Delta-Actions verwenden** | Mittel | `action = [dx, dy, dz]` statt absoluter Position |
+| **D) Runtime-Korrektur** | Niedrig | Im Planning Server Offset dynamisch korrigieren |
+
+**Empfehlung:** Option B oder C - die Daten sollten korrigiert werden, da das World Model sonst keine sinnvolle Aktions-Repräsentation lernen kann.
+
+**Schnelle Diagnose:**
+```bash
+cd ~/Desktop/dino_wm
+python -c "
+import torch, hydra
+from omegaconf import OmegaConf
+
+cfg = OmegaConf.load('outputs/2026-02-02/22-50-30/hydra.yaml')
+_, dset = hydra.utils.call(cfg.env.dataset, num_hist=cfg.num_hist, 
+                            num_pred=cfg.num_pred, frameskip=cfg.frameskip)
+dset = dset['valid']
+
+print(f'action_mean: {dset.action_mean.numpy()}')
+print(f'action_std:  {dset.action_std.numpy()}')
+print()
+print('⚠️  Wenn X/Y mean > 1.0 oder std > 1.0: Grid-Offset Problem!')
+"
+```
+
 ---
 
 ## Anhang: Wichtige Code-Referenzen

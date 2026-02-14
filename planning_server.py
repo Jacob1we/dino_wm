@@ -55,6 +55,9 @@ parser.add_argument("--goal_H", type=int, default=None)
 parser.add_argument("--num_samples", type=int, default=None)
 parser.add_argument("--opt_steps", type=int, default=None)
 parser.add_argument("--topk", type=int, default=None)
+parser.add_argument("--chunk_size", type=int, default=None,
+                    help="Max Batch-Size pro WM Rollout (OOM-Schutz). "
+                         "None=auto (GPU-abhaengig), 0=kein Chunking.")
 args = parser.parse_args()
 
 # =============================================================================
@@ -107,6 +110,94 @@ if torch.cuda.is_available():
     alloc = torch.cuda.memory_allocated() / 1024**2
     total = torch.cuda.get_device_properties(0).total_memory / 1024**2
     print(f"  GPU: {alloc:.0f}/{total:.0f} MB")
+
+# 3b. Chunked Rollout Wrapper (OOM-Schutz fuer grosse CEM Batches)
+#
+# Problem: CEM sampelt z.B. 300 Trajektorien und schickt ALLE auf einmal
+# durch wm.rollout(). Die Self-Attention im ViT-Predictor skaliert O(N²)
+# mit N = num_hist × patches_per_frame. Bei num_hist=4 und 300 Samples
+# braucht allein die Attention-Matrix ~20 GB → OOM auf RTX A5000 (24 GB).
+#
+# Loesung: Wir wrappen das Model und splitten den Batch in Sub-Batches.
+# Der CEM-Planner sieht keinen Unterschied (gleiches Interface).
+
+class ChunkedRolloutWrapper:
+    """Transparenter Wrapper: teilt grosse Batches in GPU-sichere Chunks."""
+
+    def __init__(self, model, chunk_size):
+        self._model = model
+        self.chunk_size = chunk_size
+        # Alle Attribute des Original-Models durchreichen
+        for attr in ['num_hist', 'num_pred', 'encoder', 'predictor',
+                     'decoder', 'action_encoder', 'proprio_encoder',
+                     'concat_dim', 'num_action_repeat', 'num_proprio_repeat',
+                     'emb_dim', 'action_dim', 'proprio_dim',
+                     'encoder_transform', 'emb_criterion',
+                     'decoder_criterion', 'decoder_latent_loss_weight']:
+            if hasattr(model, attr):
+                setattr(self, attr, getattr(model, attr))
+
+    def __getattr__(self, name):
+        # Fallback: alles was nicht explizit gesetzt ist, vom Model holen
+        if name.startswith('_') or name == 'chunk_size':
+            raise AttributeError(name)
+        return getattr(self._model, name)
+
+    def rollout(self, obs_0, act):
+        B = act.shape[0]
+        if B <= self.chunk_size:
+            return self._model.rollout(obs_0, act)
+
+        all_z_obses = []
+        all_zs = []
+        for start in range(0, B, self.chunk_size):
+            end = min(start + self.chunk_size, B)
+            chunk_obs = {k: v[start:end] for k, v in obs_0.items()}
+            chunk_act = act[start:end]
+            z_obses, zs = self._model.rollout(chunk_obs, chunk_act)
+            all_z_obses.append(z_obses)
+            all_zs.append(zs)
+            # Sofort GPU-Cache freigeben zwischen Chunks
+            torch.cuda.empty_cache()
+
+        return (
+            {k: torch.cat([z[k] for z in all_z_obses], dim=0) for k in all_z_obses[0]},
+            torch.cat(all_zs, dim=0),
+        )
+
+    def encode_obs(self, obs):
+        return self._model.encode_obs(obs)
+
+    def eval(self):
+        return self._model.eval()
+
+    def train(self, mode=True):
+        return self._model.train(mode)
+
+    def parameters(self):
+        return self._model.parameters()
+
+# Chunk-Size bestimmen
+if args.chunk_size is not None and args.chunk_size == 0:
+    print(f"  Chunking: DEAKTIVIERT (--chunk_size 0)")
+else:
+    if args.chunk_size is not None:
+        chunk_size = args.chunk_size
+    else:
+        # Auto-Detect basierend auf GPU-VRAM und num_hist
+        # Attention-VRAM ∝ B × heads × (num_hist × patches)²
+        # RTX A5000 (24 GB): num_hist=2 → ~100, num_hist=4 → ~25
+        num_hist = model_cfg.num_hist
+        if torch.cuda.is_available():
+            free_mb = (total - alloc) * 0.85  # 85% des freien VRAM nutzen
+            # Empirisch: num_hist=2 → ~0.08 GB/sample, num_hist=4 → ~0.32 GB/sample
+            gb_per_sample = 0.02 * (num_hist ** 2)  # quadratische Skalierung
+            chunk_size = max(8, int(free_mb / 1024 / gb_per_sample))
+            chunk_size = min(chunk_size, 64)  # Nie mehr als 64 auf einmal
+        else:
+            chunk_size = 16
+    model = ChunkedRolloutWrapper(model, chunk_size)
+    print(f"  Chunking: {chunk_size} Samples pro Sub-Batch (num_hist={model_cfg.num_hist})")
 
 # 4. Preprocessor (wie PlanWorkspace)
 frameskip = model_cfg.frameskip
@@ -198,13 +289,25 @@ print(f"  Suchraum: {search_dim}D (H={horizon} × D={full_action_dim})")
 # HELPER: Bild → Planner-Format
 # =============================================================================
 
-def img_to_obs(img: np.ndarray) -> dict:
-    """Konvertiert uint8 Bild zu Planner-Obs-Dict."""
+def img_to_obs(img: np.ndarray, ee_pos: np.ndarray = None) -> dict:
+    """Konvertiert uint8 Bild + EEF-Position zu Planner-Obs-Dict.
+    
+    Args:
+        img: (H, W, 3) uint8 BGR Bild
+        ee_pos: (3,) EEF-Position [x, y, z] in Weltkoordinaten.
+                Wird vom Preprocessor z-normalisiert (proprio_mean/std).
+                None → Nullen (Fallback, fuehrt zu schlechten Predictions!)
+    """
     if img.dtype != np.uint8:
         img = (img * 255).astype(np.uint8) if img.max() <= 1.0 else img.astype(np.uint8)
+    if ee_pos is not None:
+        proprio = np.array(ee_pos, dtype=np.float32).reshape(1, 1, 3)
+    else:
+        print("  ⚠ WARNUNG: Kein ee_pos empfangen — Proprio ist Null!")
+        proprio = np.zeros((1, 1, 3), dtype=np.float32)
     return {
         "visual": img[np.newaxis, np.newaxis, ...].astype(np.float32),  # (1,1,H,W,3)
-        "proprio": np.zeros((1, 1, 3), dtype=np.float32),
+        "proprio": proprio,                                              # (1,1,3)
     }
 
 # =============================================================================
@@ -244,8 +347,9 @@ while True:
 
             if cmd == "set_goal":
                 img = np.array(msg["image"])
-                goal_obs = img_to_obs(img)
-                print(f"  Goal gesetzt: {img.shape} {img.dtype}")
+                ee_pos = np.array(msg["ee_pos"]) if "ee_pos" in msg else None
+                goal_obs = img_to_obs(img, ee_pos)
+                print(f"  Goal gesetzt: {img.shape} {img.dtype}, ee_pos={ee_pos}")
                 response = {"status": "ok"}
 
             elif cmd == "plan":
@@ -253,7 +357,8 @@ while True:
                     response = {"status": "error", "msg": "No goal set"}
                 else:
                     img = np.array(msg["image"])
-                    cur_obs = img_to_obs(img)
+                    ee_pos = np.array(msg["ee_pos"]) if "ee_pos" in msg else None
+                    cur_obs = img_to_obs(img, ee_pos)
 
                     # Warm-Start: vorherigen Plan shiften
                     actions_init = None
@@ -277,6 +382,9 @@ while True:
                     denorm = preprocessor.denormalize_actions(actions[0, 0:1].cpu())
                     sub_actions = rearrange(denorm, "t (f d) -> (t f) d",
                                             f=frameskip).numpy()
+                    # Diagnostik: denormalisierte Zielposition
+                    for si, sa in enumerate(sub_actions):
+                        print(f"    Sub-Action {si}: target_ee=[{sa[3]:.3f}, {sa[4]:.3f}, {sa[5]:.3f}]")
                     response = {
                         "status": "ok",
                         "actions": sub_actions.tolist(),
@@ -288,7 +396,8 @@ while True:
                     response = {"status": "error", "msg": "No goal set"}
                 else:
                     img = np.array(msg["image"])
-                    cur_obs = img_to_obs(img)
+                    ee_pos = np.array(msg["ee_pos"]) if "ee_pos" in msg else None
+                    cur_obs = img_to_obs(img, ee_pos)
 
                     wandb_run.reset()
                     t0 = time.time()

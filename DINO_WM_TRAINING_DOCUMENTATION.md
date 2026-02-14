@@ -11,10 +11,11 @@
 3. [Konfiguration und Parameter](#3-konfiguration-und-parameter)
 4. [Training-Pipeline (Chronologisch)](#4-training-pipeline-chronologisch)
 5. [Modell-Architektur](#5-modell-architektur)
-6. [Loss-Funktionen](#6-loss-funktionen)
-7. [W&B Metriken und Monitoring](#7-wb-metriken-und-monitoring)
-8. [Training starten](#8-training-starten)
-9. [Glossar](#9-glossar)
+6. [Proprioceptive Encoder — Vollständiger Trainingsablauf](#6-proprioceptive-encoder--vollständiger-trainingsablauf)
+7. [Loss-Funktionen](#7-loss-funktionen)
+8. [W&B Metriken und Monitoring](#8-wb-metriken-und-monitoring)
+9. [Training starten](#9-training-starten)
+10. [Glossar](#10-glossar)
 
 ---
 
@@ -1118,9 +1119,925 @@ DINO (Self-**DI**stillation with **NO** labels) ist ein selbstüberwachtes Visio
 
 ---
 
-## 6. Loss-Funktionen
+## 6. Proprioceptive Encoder — Vollständiger Trainingsablauf
 
-### 6.1 Übersicht aller Losses
+> **Verifiziert am 14.02.2026** — Alle Code-Pfade, Variablennamen und Tensor-Dimensionen wurden anhand des
+> Quellcodes nachvollzogen. Referenzmodell: `outputs/2026-02-09/17-59-59` (500 Episoden, frameskip=2, num_hist=4).
+
+### 6.1 Überblick: Was wird trainiert und warum?
+
+Der **Proprioceptive Encoder** (`proprio_encoder`) ist eine lernbare Projektion, die die rohe
+EE-Position (End-Effector Position, 3D) in einen kompakten Embedding-Vektor (10D) transformiert.
+Er wird **gemeinsam** mit dem Action Encoder, dem ViT Predictor und dem VQ-VAE Decoder trainiert.
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│            TRAINIERBARE vs. EINGEFRORENE KOMPONENTEN                        │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  Komponente              Trainiert?    Optimizer                   LR       │
+│  ─────────────────────   ──────────    ──────────────────────── ─────────── │
+│  DINO v2 Encoder         ✗ FROZEN     (encoder_optimizer)        1e-6 (*)  │
+│  Proprio Encoder         ✓ TRAINIERT  action_encoder_optimizer   5e-4      │
+│  Action Encoder          ✓ TRAINIERT  action_encoder_optimizer   5e-4      │
+│  ViT Predictor           ✓ TRAINIERT  predictor_optimizer        2e-4      │
+│  VQ-VAE Decoder          ✓ TRAINIERT  decoder_optimizer          1e-4      │
+│                                                                             │
+│  (*) encoder_optimizer existiert, aber .step() wird NIE aufgerufen          │
+│      weil train_encoder=False → alle Parameter haben requires_grad=False   │
+│                                                                             │
+│  WICHTIG: Proprio Encoder und Action Encoder teilen sich denselben          │
+│           Optimizer (action_encoder_optimizer) und dieselbe Learning Rate!  │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 6.2 Datensatz → Proprio-Extraktion (Schritt für Schritt)
+
+#### 6.2.1 Rohdaten im Datensatz
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  DATENSATZ-QUELLE                                                           │
+│  Pfad: fcs_datasets/primLogger_NEps500_ActInt10_RobOpac10_NCams4_NCube1/   │
+│                                                                             │
+│  Pro Episode (z.B. 000042/):                                                │
+│  ├── obses.pth         # (T, H, W, C) = (25, 256, 256, 3) BGR uint8       │
+│  ├── 00.h5             # Timestep 0                                        │
+│  │   ├── action        # (action_dim,) z.B. (6,) für ee_pos               │
+│  │   ├── eef_states    # (1, 1, 14) → 14D EEF-Zustand                     │
+│  │   │                   [ee_x, ee_y, ee_z, qx, qy, qz, qw, ...]          │
+│  │   └── info/         # action_mode Attribut                              │
+│  ├── 01.h5                                                                  │
+│  └── ...                                                                    │
+│                                                                             │
+│  500 Episoden × 25 Timesteps = 12.500 Datenpunkte                          │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### 6.2.2 Laden in `FrankaCubeStackDataset.__init__()` (franka_cube_stack_dset.py)
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  SCHRITT A: H5-Dateien lesen (pro Episode, pro Timestep)                    │
+│  ─────────────────────────────────────────────────────────────────────────  │
+│                                                                             │
+│  Code (franka_cube_stack_dset.py, __init__):                                │
+│  ──────────────────────────────────────────                                 │
+│  for t in range(episode_length):        # t = 0..24                        │
+│      with h5py.File(f"{t:02d}.h5") as f:                                   │
+│          action = f["action"][:]        # → numpy (6,)                     │
+│          eef = f["eef_states"][:]       # → numpy (1, 1, 14)               │
+│          eef_states.append(eef.flatten())  # → numpy (14,)                 │
+│                                                                             │
+│  Variablen nach dem Loop:                                                   │
+│  self.all_actions[i]    : numpy (25, 6)   # 25 Timesteps × 6D Actions     │
+│  self.all_eef_states[i] : numpy (25, 14)  # 25 Timesteps × 14D EEF        │
+│                                                                             │
+│  Konvertierung zu Tensoren:                                                 │
+│  self.actions_tensors[i] = torch.from_numpy(actions).float()  # (25, 6)    │
+│  self.eef_tensors[i]    = torch.from_numpy(eef).float()       # (25, 14)   │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  SCHRITT B: Z-Score-Normalisierungs-Statistiken berechnen                   │
+│  ─────────────────────────────────────────────────────────────────────────  │
+│                                                                             │
+│  Code (franka_cube_stack_dset.py, __init__, normalize_action=True):         │
+│  ──────────────────────────────────────────────────────────────────         │
+│                                                                             │
+│  # Alle EEF-Daten aller Episoden zusammenfassen:                            │
+│  all_eef_flat = torch.cat(self.eef_tensors, dim=0)  # (12500, 14)         │
+│                                                                             │
+│  # Proprio-Statistiken: NUR erste 3 Dimensionen (EE-Position x,y,z)       │
+│  self.proprio_mean = all_eef_flat[:, :3].mean(dim=0)  # (3,)              │
+│  self.proprio_std  = all_eef_flat[:, :3].std(dim=0) + 1e-6  # (3,)        │
+│                                                                             │
+│  Typische Werte (500 Episoden):                                             │
+│  ┌─────────────────────────────────────────────────────────────────┐        │
+│  │  proprio_mean ≈ [0.476, 0.017, 0.161]   (Meter, Weltkoord.)    │        │
+│  │  proprio_std  ≈ [0.124, 0.161, 0.072]   (Streuung in Meter)    │        │
+│  │                                                                  │        │
+│  │  Interpretation:                                                 │        │
+│  │  - x ≈ 0.476m ± 0.124m (vor/zurück)                             │        │
+│  │  - y ≈ 0.017m ± 0.161m (links/rechts, zentriert)                │        │
+│  │  - z ≈ 0.161m ± 0.072m (Höhe über Tisch)                        │        │
+│  └─────────────────────────────────────────────────────────────────┘        │
+│                                                                             │
+│  WICHTIG: Diese Statistiken werden bei Inferenz/Planning benötigt!         │
+│  Der Planner muss die gleiche Normalisierung verwenden.                    │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### 6.2.3 Proprio-Extraktion in `get_frames()` (franka_cube_stack_dset.py)
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  SCHRITT C: Proprio für einen Batch-Eintrag extrahieren                     │
+│  ─────────────────────────────────────────────────────────────────────────  │
+│                                                                             │
+│  Code (franka_cube_stack_dset.py, get_frames):                              │
+│  ─────────────────────────────────────────────                              │
+│  def get_frames(self, idx, frames):                                         │
+│      eef = self.eef_tensors[idx][frames]        # (T_slice, 14)            │
+│      proprio = (eef[:, :3] - self.proprio_mean) / self.proprio_std          │
+│      #           ↑                                                          │
+│      #  Nur erste 3 Dims: EE-Position [x, y, z]                            │
+│      #                                                                      │
+│      obs = {"visual": image, "proprio": proprio}                            │
+│      return obs, act, state, {}                                             │
+│                                                                             │
+│  Tensor-Dimensionen (Beispiel: frameskip=2, num_hist=4, num_pred=1):        │
+│  ──────────────────────────────────────────────────────────────────         │
+│  Input frames (nach TrajSlicerDataset):                                     │
+│    frames = [start, start+2, start+4, start+6, start+8]  # 5 Frames       │
+│                     ↑ frameskip=2, Schritt 2                                │
+│                                                                             │
+│  eef:    (5, 14)   ← 5 selektierte Zeitschritte, 14D EEF                  │
+│  eef[:, :3]: (5, 3)  ← NUR Position [x, y, z]                              │
+│  proprio: (5, 3)   ← z-normalisiert                                        │
+│                                                                             │
+│  Normalisierung (Element-weise):                                            │
+│  ┌─────────────────────────────────────────────────────────────────┐        │
+│  │  proprio[t] = (eef[t, :3] - proprio_mean) / proprio_std        │        │
+│  │                                                                  │        │
+│  │  Beispiel: eef = [0.45, 0.02, 0.16]                              │        │
+│  │  proprio  = ([0.45, 0.02, 0.16] - [0.476, 0.017, 0.161])        │        │
+│  │             / [0.124, 0.161, 0.072]                              │        │
+│  │           = [-0.21, 0.019, -0.014]   ← ~N(0,1) verteilt         │        │
+│  └─────────────────────────────────────────────────────────────────┘        │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### 6.2.4 Frameskip-Anwendung in `TrajSlicerDataset` (traj_dset.py)
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  SCHRITT D: Frameskip und Slicing                                           │
+│  ─────────────────────────────────────────────────────────────────────────  │
+│                                                                             │
+│  Code (traj_dset.py, TrajSlicerDataset.__getitem__):                        │
+│  ──────────────────────────────────────────────────                         │
+│  def __getitem__(self, idx):                                                │
+│      i, start, end = self.slices[idx]    # z.B. (42, 3, 13)               │
+│      obs, act, state, _ = self.dataset[i]  # Volle Episode laden          │
+│      for k, v in obs.items():                                               │
+│          obs[k] = v[start:end:self.frameskip]  # Subsampling               │
+│      # ↑ Gilt für ALLE obs-Keys: "visual" UND "proprio"!                   │
+│      state = state[start:end:self.frameskip]                                │
+│      act = act[start:end]                                                   │
+│      act = rearrange(act, "(n f) d -> n (f d)", n=self.num_frames)         │
+│      return obs, act, state                                                 │
+│                                                                             │
+│  Beispiel (frameskip=2, num_frames=5, start=3, end=13):                     │
+│  ─────────────────────────────────────────────────────                      │
+│                                                                             │
+│  Original-Sequenz der Episode:                                              │
+│  Index:  0  1  2 [3] 4 [5] 6 [7] 8 [9] 10[11] 12                          │
+│                  ↑     ↑     ↑     ↑      ↑                                │
+│  Subsampled:    F0    F1    F2    F3     F4                                 │
+│                                                                             │
+│  obs['proprio']: v[3:13:2] = v[[3, 5, 7, 9, 11]]  → (5, 3)               │
+│  obs['visual']:  v[3:13:2] = v[[3, 5, 7, 9, 11]]  → (5, 3, 224, 224)     │
+│                                                                             │
+│  act: v[3:13] = 10 Actions → rearrange zu (5, 12)                          │
+│       ↑ Alle 10 Raw-Actions, dann Reshape: (5×2, 6) → (5, 2×6=12)         │
+│       ↑ n=num_frames=5, f=frameskip=2, d=action_dim=6                      │
+│                                                                             │
+│  KRITISCH: Proprio wird mit demselben Frameskip subsampled wie Visual!      │
+│  → Proprio und Visual sind zeitlich perfekt synchron.                       │
+│  → Actions werden NICHT subsampled, sondern konkateniert (frameskip         │
+│    aufeinanderfolgende Actions → eine kombinierte Action)                   │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 6.3 Batch-Zusammenstellung — Tensoren beim Dataloader-Output
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  DATALOADER OUTPUT (1 Batch)                                                │
+│  ─────────────────────────────────────────────────────────────────────────  │
+│                                                                             │
+│  Konfiguration: B=8, num_hist=4, num_pred=1, frameskip=2, action_dim=6     │
+│                 proprio_dim=3, img_size=224                                 │
+│                                                                             │
+│  obs, act, state = next(dataloader)                                         │
+│                                                                             │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │  Variable           │ Shape                  │ Beschreibung         │   │
+│  ├─────────────────────┼────────────────────────┼──────────────────────┤   │
+│  │ obs['visual']       │ (8, 5, 3, 224, 224)    │ 5 RGB Bilder         │   │
+│  │ obs['proprio']      │ (8, 5, 3)              │ 5 EE-Positionen      │   │
+│  │ act                 │ (8, 5, 12)             │ 5 × (6×2) Actions    │   │
+│  │ state               │ (8, 5, 14)             │ 5 EEF-Zustände       │   │
+│  └─────────────────────┴────────────────────────┴──────────────────────┘   │
+│                                                                             │
+│  Wobei:                                                                     │
+│  - 5 = num_hist + num_pred = 4 + 1 = 5 Zeitschritte                       │
+│  - 12 = action_dim × frameskip = 6 × 2                                     │
+│  - 3 = proprio_dim (EE x, y, z)                                            │
+│  - 14 = eef_dim (voller EEF-Zustand)                                       │
+│                                                                             │
+│  obs['proprio'] Beispiel-Werte (z-normalisiert):                            │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │  Batch 0, Frame 0: [-0.21,  0.02, -0.01]  ← ~N(0,1)              │   │
+│  │  Batch 0, Frame 1: [-0.18,  0.05,  0.12]                          │   │
+│  │  Batch 0, Frame 2: [-0.15,  0.09,  0.25]  ← Roboter bewegt sich  │   │
+│  │  Batch 0, Frame 3: [-0.10,  0.11,  0.38]                          │   │
+│  │  Batch 0, Frame 4: [-0.05,  0.13,  0.50]  ← Target-Frame          │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 6.4 Proprio Encoder — Architektur und Forward Pass
+
+#### 6.4.1 Instanziierung in `train.py` (init_models)
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  SCHRITT E: Proprio Encoder Instanziierung                                  │
+│  ─────────────────────────────────────────────────────────────────────────  │
+│                                                                             │
+│  Code (train.py, init_models):                                              │
+│  ─────────────────────────────                                              │
+│  self.proprio_encoder = hydra.utils.instantiate(                            │
+│      self.cfg.proprio_encoder,    # → ProprioceptiveEmbedding              │
+│      in_chans=self.datasets["train"].proprio_dim,  # = 3                   │
+│      emb_dim=self.cfg.proprio_emb_dim,             # = 10                  │
+│  )                                                                          │
+│                                                                             │
+│  Hydra-Konfiguration (conf/proprio_encoder/proprio.yaml):                   │
+│  ─────────────────────────────────────────────────────────                  │
+│  _target_: models.proprio.ProprioceptiveEmbedding                           │
+│  num_frames: 2          # ← Nicht relevant (nur für pos_embed, unused)     │
+│  tubelet_size: 1        # ← kernel_size = stride = 1                       │
+│  use_3d_pos: False      # ← Kein 3D Positional Embedding                  │
+│                                                                             │
+│  Resultierende Instanz:                                                     │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │  ProprioceptiveEmbedding(                                           │   │
+│  │    in_chans = 3          # Input: EE-Position (x, y, z)            │   │
+│  │    emb_dim  = 10         # Output: Proprio-Embedding               │   │
+│  │    (patch_embed): Conv1d(                                           │   │
+│  │      in_channels  = 3,   # 3 → Proprio-Dimensionen                 │   │
+│  │      out_channels = 10,  # 10 → proprio_emb_dim                    │   │
+│  │      kernel_size  = 1,   # Punkt-weise Projektion                   │   │
+│  │      stride       = 1    # Kein Downsampling                        │   │
+│  │    )                                                                │   │
+│  │  )                                                                  │   │
+│  │                                                                     │   │
+│  │  Trainierbare Parameter:                                            │   │
+│  │  - patch_embed.weight: (10, 3, 1) = 30 Parameter                   │   │
+│  │  - patch_embed.bias:   (10,)      = 10 Parameter                   │   │
+│  │  ─────────────────────────────────────────────                      │   │
+│  │  GESAMT: 40 trainierbare Parameter                                  │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### 6.4.2 Forward Pass des Proprio Encoders (models/proprio.py)
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  SCHRITT F: ProprioceptiveEmbedding.forward(x)                              │
+│  ─────────────────────────────────────────────────────────────────────────  │
+│                                                                             │
+│  Code (models/proprio.py):                                                  │
+│  ──────────────────────────                                                 │
+│  def forward(self, x):                                                      │
+│      # x: (B, T, D) = (8, 5, 3)                                           │
+│      x = x.permute(0, 2, 1)   # → (B, D, T) = (8, 3, 5)                  │
+│      x = self.patch_embed(x)  # Conv1d: (8, 3, 5) → (8, 10, 5)           │
+│      x = x.permute(0, 2, 1)   # → (B, T, emb_dim) = (8, 5, 10)           │
+│      return x                                                               │
+│                                                                             │
+│  Tensor-Fluss im Detail:                                                    │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │                                                                      │   │
+│  │  INPUT x:          (B=8, T=5, D=3)                                   │   │
+│  │  ┌──────────────────────────────────────┐                           │   │
+│  │  │  Batch 0: [[x₀,y₀,z₀],              │  ← 5 EE-Positionen       │   │
+│  │  │            [x₁,y₁,z₁],              │     (z-normalisiert)     │   │
+│  │  │            [x₂,y₂,z₂],              │                          │   │
+│  │  │            [x₃,y₃,z₃],              │                          │   │
+│  │  │            [x₄,y₄,z₄]]              │                          │   │
+│  │  └──────────────────────────────────────┘                           │   │
+│  │                     │                                                │   │
+│  │                     ▼ permute(0, 2, 1)                               │   │
+│  │                                                                      │   │
+│  │  PERMUTED:          (B=8, D=3, T=5)                                  │   │
+│  │  ┌──────────────────────────────────────┐                           │   │
+│  │  │  Batch 0: [[x₀,x₁,x₂,x₃,x₄],      │  ← Channels-first       │   │
+│  │  │            [y₀,y₁,y₂,y₃,y₄],      │     für Conv1d            │   │
+│  │  │            [z₀,z₁,z₂,z₃,z₄]]      │                          │   │
+│  │  └──────────────────────────────────────┘                           │   │
+│  │                     │                                                │   │
+│  │                     ▼ Conv1d(3→10, k=1, s=1)                        │   │
+│  │                                                                      │   │
+│  │  CONV OUTPUT:       (B=8, emb=10, T=5)                               │   │
+│  │  ┌──────────────────────────────────────┐                           │   │
+│  │  │  Pro Zeitschritt t:                  │                           │   │
+│  │  │  emb_t = W × [x_t, y_t, z_t] + b   │  ← Lineare Projektion    │   │
+│  │  │          ↑                           │     W: (10, 3)           │   │
+│  │  │    10×3 Matrix                       │     b: (10,)             │   │
+│  │  └──────────────────────────────────────┘                           │   │
+│  │                     │                                                │   │
+│  │                     ▼ permute(0, 2, 1)                               │   │
+│  │                                                                      │   │
+│  │  OUTPUT:            (B=8, T=5, emb_dim=10)                           │   │
+│  │  ┌──────────────────────────────────────┐                           │   │
+│  │  │  z_proprio: 10D Embedding pro Frame  │  ← Verwendbar für        │   │
+│  │  │  [e₀, e₁, e₂, ..., e₉]              │     Concat mit DINO      │   │
+│  │  └──────────────────────────────────────┘                           │   │
+│  │                                                                      │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│                                                                             │
+│  Mathematisch: Conv1d(k=1, s=1) ≡ nn.Linear(3, 10)                        │
+│  → Punkt-weise lineare Transformation, identisch für jeden Zeitschritt     │
+│  → Keine Aktivierungsfunktion (rein linear!)                               │
+│  → Jeder Zeitschritt wird unabhängig transformiert                          │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 6.5 Embedding-Fusion: Proprio + Visual + Action (encode-Methode)
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  SCHRITT G: VWorldModel.encode(obs, act) — Fusion aller Modalitäten        │
+│  ─────────────────────────────────────────────────────────────────────────  │
+│                                                                             │
+│  Code (visual_world_model.py, encode):                                      │
+│  ─────────────────────────────────────                                      │
+│  def encode(self, obs, act):                                                │
+│      z_dct = self.encode_obs(obs)    # → {"visual": ..., "proprio": ...}   │
+│      act_emb = self.encode_act(act)  # → (B, T, action_emb_dim)           │
+│      # concat_dim=1 → Fusion entlang Feature-Dimension                    │
+│                                                                             │
+│  Aufrufe im Detail:                                                         │
+│  ─────────────────                                                          │
+│                                                                             │
+│  1) encode_obs(obs):                                                        │
+│     ├── DINO Encoder:                                                       │
+│     │   obs['visual']: (8, 5, 3, 224, 224)                                 │
+│     │     → rearrange: (40, 3, 224, 224)                                   │
+│     │     → DINO forward: (40, 256, 384)                                   │
+│     │     → rearrange: (8, 5, 256, 384)                                    │
+│     │   visual_embs: (B=8, T=5, P=256, D=384)                              │
+│     │                                                                       │
+│     └── Proprio Encoder:                                                    │
+│         obs['proprio']: (8, 5, 3)                                           │
+│           → proprio_encoder.forward: (8, 5, 10)                            │
+│         proprio_emb: (B=8, T=5, emb_dim=10)                                │
+│                                                                             │
+│  2) encode_act(act):                                                        │
+│     act: (8, 5, 12)                                                         │
+│       → action_encoder.forward: (8, 5, 10)                                 │
+│     act_emb: (B=8, T=5, emb_dim=10)                                        │
+│                                                                             │
+│  3) Fusion (concat_dim=1):                                                  │
+│     ─────────────────────                                                   │
+│     # Proprio tiling: (B,T,10) → unsqueeze → (B,T,1,10) → tile →          │
+│     #                  (B,T,256,10) → repeat(num_proprio_repeat=1) →       │
+│     #                  (B,T,256,10)                                         │
+│     proprio_tiled = repeat(proprio_emb.unsqueeze(2),                        │
+│                            "b t 1 a -> b t f a", f=256)                    │
+│     proprio_repeated = proprio_tiled.repeat(1, 1, 1, 1)   # ×1            │
+│                                                                             │
+│     # Action tiling: identisch                                              │
+│     act_tiled = repeat(act_emb.unsqueeze(2),                                │
+│                        "b t 1 a -> b t f a", f=256)                        │
+│     act_repeated = act_tiled.repeat(1, 1, 1, 1)   # ×1                    │
+│                                                                             │
+│     # Concatenation entlang letzer Dimension:                               │
+│     z = torch.cat([visual_embs, proprio_repeated, act_repeated], dim=3)    │
+│                                                                             │
+│  Resultat:                                                                  │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │  z: (B=8, T=5, P=256, D=404)                                       │   │
+│  │                                                                      │   │
+│  │  Aufbau der 404 Dimensionen pro Patch:                               │   │
+│  │  ┌──────────────────┬──────────────┬──────────────┐                 │   │
+│  │  │  DINO Visual     │  Proprio Emb │  Action Emb  │                 │   │
+│  │  │  z[..., :384]    │ z[...,384:394]│ z[...,394:404]│                │   │
+│  │  │  384 dim         │  10 dim      │  10 dim      │                 │   │
+│  │  │  (FROZEN)        │ (TRAINIERT)  │ (TRAINIERT)  │                 │   │
+│  │  └──────────────────┴──────────────┴──────────────┘                 │   │
+│  │                                                                      │   │
+│  │  JEDER der 256 Patches enthält dieselben Proprio/Action-Werte       │   │
+│  │  (getiled über alle Patches)                                         │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 6.6 Prediction und Loss-Berechnung für Proprio
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  SCHRITT H: Forward Pass mit Source/Target-Split und Loss                   │
+│  ─────────────────────────────────────────────────────────────────────────  │
+│                                                                             │
+│  Code (visual_world_model.py, forward):                                     │
+│  ──────────────────────────────────────                                     │
+│                                                                             │
+│  z = self.encode(obs, act)                                                  │
+│  z: (B=8, T=5, P=256, D=404)                                               │
+│                                                                             │
+│  # Source/Target Aufteilung:                                                │
+│  z_src = z[:, :num_hist]     = z[:, :4]     # (8, 4, 256, 404)            │
+│  z_tgt = z[:, num_pred:]     = z[:, 1:]     # (8, 4, 256, 404)            │
+│                                                                             │
+│  Zeitliche Zuordnung (num_hist=4, num_pred=1):                              │
+│  ┌───────────────────────────────────────────────────────────────────┐     │
+│  │  Zeitschritt:    t=0    t=1    t=2    t=3    t=4                   │     │
+│  │                                                                    │     │
+│  │  z_src:         [F0]   [F1]   [F2]   [F3]                         │     │
+│  │                                         ↓ Predictor                │     │
+│  │  z_pred:        [P1]   [P2]   [P3]   [P4]                         │     │
+│  │                                                                    │     │
+│  │  z_tgt:         [F1]   [F2]   [F3]   [F4]   ← Ground Truth       │     │
+│  │                                                                    │     │
+│  │  Vergleich: z_pred[i] soll z_tgt[i] vorhersagen                   │     │
+│  └───────────────────────────────────────────────────────────────────┘     │
+│                                                                             │
+│  ViT Predictor:                                                             │
+│  z_pred = self.predict(z_src)   # (8, 4, 256, 404)                         │
+│                                                                             │
+│  ═══════════════════════════════════════════════════════════════════════    │
+│  ║  LOSS-BERECHNUNG (concat_dim=1)                                     ║    │
+│  ═══════════════════════════════════════════════════════════════════════    │
+│                                                                             │
+│  Variablen-Mapping (self.proprio_dim=10, self.action_dim=10):              │
+│                                                                             │
+│  z-Vektor Layout pro Patch (404 dim):                                       │
+│  ┌─────────────────┬─────────────┬─────────────┐                           │
+│  │    Visual (384)  │ Proprio (10)│ Action (10) │                           │
+│  │  Indices: [0:384]│ [384:394]   │ [394:404]   │                           │
+│  └─────────────────┴─────────────┴─────────────┘                           │
+│                                                                             │
+│  Code (visual_world_model.py, forward, concat_dim=1):                       │
+│  ─────────────────────────────────────────────────────                      │
+│                                                                             │
+│  # 1) z_visual_loss: NUR visuelle Features (384 dim)                       │
+│  z_visual_loss = MSE(                                                       │
+│      z_pred[:, :, :, :-(10+10)],       # z_pred[..., :384]                 │
+│      z_tgt[:, :, :, :-(10+10)].detach()                                    │
+│  )                                                                          │
+│  # Shape: MSE über (8, 4, 256, 384) vs (8, 4, 256, 384)                   │
+│  # → Skalar                                                                │
+│                                                                             │
+│  # 2) z_proprio_loss: NUR Proprio-Embedding (10 dim)                       │
+│  z_proprio_loss = MSE(                                                      │
+│      z_pred[:, :, :, -(10+10):-10],    # z_pred[..., 384:394]             │
+│      z_tgt[:, :, :, -(10+10):-10].detach()                                 │
+│  )                                                                          │
+│  # Shape: MSE über (8, 4, 256, 10) vs (8, 4, 256, 10)                     │
+│  # → Skalar                                                                │
+│  # HINWEIS: Alle 256 Patches haben identische Proprio-Werte (getiled)      │
+│  # → MSE wird über alle Patches gemittelt, aber da identisch = kein Fehler │
+│                                                                             │
+│  # 3) z_loss: Visual + Proprio ZUSAMMEN (394 dim, OHNE Action)             │
+│  z_loss = MSE(                                                              │
+│      z_pred[:, :, :, :-10],            # z_pred[..., :394]                 │
+│      z_tgt[:, :, :, :-10].detach()                                         │
+│  )                                                                          │
+│  # Shape: MSE über (8, 4, 256, 394) vs (8, 4, 256, 394)                   │
+│  # → Skalar                                                                │
+│  # ↑ DAS IST DER HAUPTLOSS, der zum Training-Loss addiert wird!           │
+│                                                                             │
+│  loss = loss + z_loss   ← Proprio ist TEIL des Haupt-Losses!               │
+│                                                                             │
+│  WICHTIG:                                                                   │
+│  ─────────                                                                  │
+│  • z_loss enthält IMPLIZIT den Proprio-Loss (da 394 = 384 + 10)            │
+│  • z_visual_loss und z_proprio_loss werden NUR geloggt, nicht addiert      │
+│  • Action-Embedding (letzte 10 dim) wird NICHT in den Loss einbezogen      │
+│  • z_tgt wird mit .detach() abgetrennt → DINO-Encoder bekommt keinen       │
+│    Gradient (ist ohnehin eingefroren, aber detach ist zusätzliche Sicherh.)│
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 6.7 Gradient-Fluss und Optimizer-Update
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  SCHRITT I: Backward Pass und Gradient-Fluss zum Proprio Encoder            │
+│  ─────────────────────────────────────────────────────────────────────────  │
+│                                                                             │
+│  Code (train.py, train):                                                    │
+│  ──────────────────────                                                     │
+│  # 1. Zero-Grad für alle Optimizer                                         │
+│  self.encoder_optimizer.zero_grad()                                         │
+│  self.decoder_optimizer.zero_grad()                                         │
+│  self.predictor_optimizer.zero_grad()                                       │
+│  self.action_encoder_optimizer.zero_grad()  ← Setzt Gradienten auf 0      │
+│  #  ↑ Dieser Optimizer enthält BEIDE: action_encoder UND proprio_encoder   │
+│                                                                             │
+│  # 2. Backward Pass                                                        │
+│  self.accelerator.backward(loss)                                            │
+│  #  loss = z_loss + decoder_loss                                           │
+│  #       = MSE(z_pred[..., :394], z_tgt[..., :394])    ← enthält Proprio  │
+│  #       + MSE(visual_recon, obs_visual) + 0.25 × vq_loss                  │
+│                                                                             │
+│  # 3. Optimizer-Steps (NUR trainierbare Komponenten)                       │
+│  # self.encoder_optimizer.step()  ← NICHT aufgerufen (train_encoder=False) │
+│  self.decoder_optimizer.step()             # ✓ train_decoder=True          │
+│  self.predictor_optimizer.step()           # ✓ train_predictor=True        │
+│  self.action_encoder_optimizer.step()      # ✓ IMMER aufgerufen           │
+│  # ↑ Updated sowohl action_encoder.parameters() ALS AUCH                   │
+│  #   proprio_encoder.parameters()!                                          │
+│                                                                             │
+│  ═══════════════════════════════════════════════════════════════════════    │
+│  ║  GRADIENT-FLUSS ZUM PROPRIO ENCODER (Rückwärtspfad)                 ║    │
+│  ═══════════════════════════════════════════════════════════════════════    │
+│                                                                             │
+│  z_loss = MSE(z_pred[..., :394], z_tgt[..., :394].detach())                │
+│     │                                                                       │
+│     │  ∂z_loss / ∂z_pred                                                   │
+│     ▼                                                                       │
+│  z_pred = self.predict(z_src)                                               │
+│     │                                                                       │
+│     │  ∂z_pred / ∂z_src  (durch ViT Predictor)                             │
+│     ▼                                                                       │
+│  z_src = z[:, :4]                                                           │
+│     │                                                                       │
+│     │  ∂z_src / ∂z  (Identity, nur Slicing)                                │
+│     ▼                                                                       │
+│  z = cat([visual_embs, proprio_tiled, act_tiled], dim=-1)                   │
+│     │                                                                       │
+│     │  ∂z / ∂proprio_tiled  (Identity, nur Concat-Rückpropagation)         │
+│     ▼                                                                       │
+│  proprio_tiled = repeat(proprio_emb.unsqueeze(2), ..., f=256)              │
+│     │                                                                       │
+│     │  ∂proprio_tiled / ∂proprio_emb  (Summierung über 256 Patches)        │
+│     ▼                                                                       │
+│  proprio_emb = self.proprio_encoder(obs['proprio'])                        │
+│     │                                                                       │
+│     │  ∂proprio_emb / ∂W_proprio  (Conv1d Gradient)                        │
+│     ▼                                                                       │
+│  W_proprio = self.proprio_encoder.patch_embed.weight  # (10, 3, 1)        │
+│  b_proprio = self.proprio_encoder.patch_embed.bias    # (10,)             │
+│                                                                             │
+│  → action_encoder_optimizer.step() aktualisiert W und b!                   │
+│                                                                             │
+│  GRADIENT-VERSTÄRKUNG DURCH TILING:                                        │
+│  Da proprio_emb auf 256 Patches getiled wird, wird der Gradient             │
+│  über alle 256 Patches summiert:                                            │
+│  ∂L/∂proprio_emb = Σ(p=0..255) ∂L/∂proprio_tiled[p]                       │
+│  → Faktor ~256× stärkerer Gradient als ohne Tiling                         │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### 6.7.1 Optimizer-Konfiguration (train.py, init_optimizers)
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  OPTIMIZER FÜR PROPRIO ENCODER                                              │
+│  ─────────────────────────────────────────────────────────────────────────  │
+│                                                                             │
+│  Code (train.py, init_optimizers):                                          │
+│  ─────────────────────────────────                                          │
+│  self.action_encoder_optimizer = torch.optim.AdamW(                         │
+│      itertools.chain(                                                       │
+│          self.action_encoder.parameters(),   # Conv1d(12→10): 130 Params   │
+│          self.proprio_encoder.parameters()   # Conv1d(3→10):  40 Params    │
+│      ),                                                                     │
+│      lr=self.cfg.training.action_encoder_lr  # = 5e-4 = 0.0005            │
+│  )                                                                          │
+│                                                                             │
+│  Parameter-Übersicht:                                                       │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │  Modell-Komponente     │ Parameter          │ Shape      │ Anzahl  │   │
+│  ├───────────────────────┼────────────────────┼────────────┼─────────┤   │
+│  │  action_encoder       │ patch_embed.weight │ (10, 12, 1)│    120  │   │
+│  │  action_encoder       │ patch_embed.bias   │ (10,)      │     10  │   │
+│  │  proprio_encoder      │ patch_embed.weight │ (10,  3, 1)│     30  │   │
+│  │  proprio_encoder      │ patch_embed.bias   │ (10,)      │     10  │   │
+│  ├───────────────────────┼────────────────────┼────────────┼─────────┤   │
+│  │  GESAMT               │                    │            │    170  │   │
+│  └───────────────────────┴────────────────────┴────────────┴─────────┘   │
+│                                                                             │
+│  AdamW-Eigenschaften:                                                       │
+│  - Learning Rate: 5e-4                                                      │
+│  - Weight Decay: Standard (0.01)                                            │
+│  - Betas: Standard (0.9, 0.999)                                            │
+│  - Eps: Standard (1e-8)                                                     │
+│                                                                             │
+│  WICHTIG: Beide Encoder teilen NICHT die Gewichte, nur den Optimizer!      │
+│  → Jeder hat eigene W und b, aber dieselbe Learning Rate.                  │
+│  → AdamW verwaltet separate Momentum- und Varianz-Statistiken              │
+│     für jeden Parameter.                                                    │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 6.8 Separate-Embedding: Proprio aus z extrahieren (separate_emb)
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  SCHRITT J: Proprio aus dem kombinierten z-Tensor extrahieren               │
+│  ─────────────────────────────────────────────────────────────────────────  │
+│                                                                             │
+│  Code (visual_world_model.py, separate_emb, concat_dim=1):                  │
+│  ──────────────────────────────────────────────────────────                 │
+│  def separate_emb(self, z):                                                 │
+│      # z: (B, T, P=256, D=404)                                             │
+│      # self.proprio_dim = 10 (proprio_emb_dim × num_proprio_repeat = 10×1) │
+│      # self.action_dim  = 10 (action_emb_dim × num_action_repeat = 10×1)  │
+│                                                                             │
+│      z_visual  = z[..., :-(10+10)]              # z[..., :384]   → (B,T,256,384) │
+│      z_proprio = z[..., -(10+10):-10]           # z[..., 384:394]→ (B,T,256,10)  │
+│      z_act     = z[..., -10:]                   # z[..., 394:404]→ (B,T,256,10)  │
+│                                                                             │
+│      # Rückgängigmachung des Tilings:                                      │
+│      z_proprio = z_proprio[:, :, 0, :10 // 1]  # → (B, T, 10)             │
+│      z_act     = z_act[:, :, 0, :10 // 1]      # → (B, T, 10)             │
+│      # ↑ Nimmt nur Patch 0, da alle 256 Patches identisch sind            │
+│      # ↑ :10//1 = :10 (Division durch num_proprio_repeat=1)               │
+│                                                                             │
+│      z_obs = {"visual": z_visual, "proprio": z_proprio}                    │
+│      return z_obs, z_act                                                    │
+│                                                                             │
+│  Output-Dimensionen:                                                        │
+│  ┌───────────────────┬────────────────────────┐                            │
+│  │ z_obs["visual"]   │ (B, T, 256, 384)       │                            │
+│  │ z_obs["proprio"]  │ (B, T, 10)             │ ← Proprio Embedding       │
+│  │ z_act             │ (B, T, 10)             │                            │
+│  └───────────────────┴────────────────────────┘                            │
+│                                                                             │
+│  Verwendung:                                                                │
+│  - decode_obs() nutzt z_obs["visual"] für VQ-VAE Decoder                   │
+│  - z_obs["proprio"] wird NICHT decodiert (kein Proprio-Decoder!)            │
+│  - z_obs["proprio"] wird bei Planning für Rollout-Auswertung genutzt       │
+│    (Proprio-Anteil der Objective Function)                                  │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 6.9 Rollout: Proprio im autoregressiven Vorhersage-Loop
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  SCHRITT K: Autoregressive Vorhersage mit Proprio (rollout-Methode)         │
+│  ─────────────────────────────────────────────────────────────────────────  │
+│                                                                             │
+│  Code (visual_world_model.py, rollout):                                     │
+│  ──────────────────────────────────────                                     │
+│  def rollout(self, obs_0, act):                                             │
+│      # obs_0['visual']:  (1, num_hist, 3, 224, 224)  = (1, 4, 3, 224, 224)│
+│      # obs_0['proprio']: (1, num_hist, 3)             = (1, 4, 3)          │
+│      # act:              (1, num_hist+H, action_dim)  = (1, 4+H, 12)      │
+│                                                                             │
+│      num_obs_init = obs_0['visual'].shape[1]   # = 4                       │
+│      act_0 = act[:, :4]      # Initiale Actions: (1, 4, 12)               │
+│      action = act[:, 4:]     # Zukünftige Actions: (1, H, 12)             │
+│                                                                             │
+│      z = self.encode(obs_0, act_0)   # (1, 4, 256, 404)                   │
+│      # ↑ Enthält Proprio der initialen 4 Frames (aus obs_0)                │
+│                                                                             │
+│      # Autoregressive Schleife:                                             │
+│      t = 0                                                                  │
+│      while t < H:                                                           │
+│          z_pred = self.predict(z[:, -4:])  # Letzte 4 Frames              │
+│          z_new = z_pred[:, -1:]            # Nur letzter pred Frame        │
+│          z_new = self.replace_actions_from_z(z_new, action[:, t:t+1])      │
+│          z = torch.cat([z, z_new], dim=1)  # Anhängen                      │
+│          t += 1                                                             │
+│                                                                             │
+│  Was passiert mit Proprio im Rollout?                                       │
+│  ─────────────────────────────────────                                      │
+│                                                                             │
+│  1. INITIAL (t=0): z enthält echte Proprio-Embeddings aus obs_0             │
+│     z[..., 384:394] = proprio_encoder(obs_0['proprio'])                    │
+│                                                                             │
+│  2. VORHERSAGE (t>0): z_pred enthält VORHERGESAGTE Proprio-Embeddings      │
+│     z_pred = predict(z_src)                                                 │
+│     z_pred[..., 384:394] = ViT-Vorhersage für Proprio-Embedding           │
+│     ↑ Der ViT Predictor sagt ALLE 404 Dimensionen vorher,                 │
+│       einschließlich der 10 Proprio-Dimensionen!                            │
+│                                                                             │
+│  3. ACTION REPLACEMENT: replace_actions_from_z() ersetzt NUR die            │
+│     Action-Dimensionen (394:404), NICHT die Proprio-Dimensionen!           │
+│     z_new[..., 384:394] = vorhergesagtes Proprio (unverändert)             │
+│     z_new[..., 394:404] = neues Action-Embedding (ersetzt)                 │
+│                                                                             │
+│  Zeitlicher Verlauf von Proprio im z-Tensor:                                │
+│  ┌───────────────────────────────────────────────────────────────────┐     │
+│  │  Frame:  F0    F1    F2    F3    F4    F5    F6    ...            │     │
+│  │                                                                    │     │
+│  │  Proprio: REAL  REAL  REAL  REAL  PRED  PRED  PRED  ...          │     │
+│  │          └──── aus obs_0 ────┘  └─── vom Predictor ──────┘        │     │
+│  │                                                                    │     │
+│  │  Visual:  REAL  REAL  REAL  REAL  PRED  PRED  PRED  ...          │     │
+│  │  Action:  REAL  REAL  REAL  REAL  NEW   NEW   NEW   ...          │     │
+│  │                                  └ replace_actions_from_z() ┘     │     │
+│  └───────────────────────────────────────────────────────────────────┘     │
+│                                                                             │
+│  Am Ende: z_obses, z = self.separate_emb(z)                                │
+│  z_obses["proprio"]: (1, 4+H+1, 10) ← Alle Proprio-Embeddings            │
+│  z_obses["visual"]:  (1, 4+H+1, 256, 384) ← Alle Visual-Embeddings       │
+│                                                                             │
+│  BEDEUTUNG: Das Training des Proprio Encoders beeinflusst direkt           │
+│  die Qualität der Proprio-Vorhersage im Rollout!                           │
+│  → Schlecht trainierter Proprio Encoder = schlechte Proprio-Vorhersage     │
+│  → Guter Proprio Encoder = Predictor kann EE-Trajektorie korrekt          │
+│    vorhersagen                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 6.10 Checkpoint: Proprio Encoder speichern und laden
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  SCHRITT L: Checkpoint-Speicherung                                          │
+│  ─────────────────────────────────────────────────────────────────────────  │
+│                                                                             │
+│  Code (train.py, __init__):                                                 │
+│  ──────────────────────────                                                 │
+│  self._keys_to_save = ["epoch"]                                             │
+│  # ... encoder, predictor, decoder (bedingt) ...                            │
+│  self._keys_to_save += ["action_encoder", "proprio_encoder"]                │
+│  # ↑ IMMER gespeichert, unabhängig von train_encoder/train_predictor!      │
+│                                                                             │
+│  Code (train.py, save_ckpt):                                                │
+│  ────────────────────────────                                               │
+│  ckpt = {}                                                                  │
+│  for k in self._keys_to_save:                                               │
+│      ckpt[k] = self.accelerator.unwrap_model(self.__dict__[k])              │
+│                                                                             │
+│  Checkpoint-Inhalt (model_50.pth):                                          │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │  Key                  │ Typ                        │ Inhalt         │   │
+│  ├───────────────────────┼────────────────────────────┼────────────────┤   │
+│  │  "epoch"              │ int                        │ 50             │   │
+│  │  "encoder"            │ DinoV2Encoder              │ DINO Weights   │   │
+│  │  "encoder_optimizer"  │ Adam state_dict            │ Opt. States    │   │
+│  │  "predictor"          │ ViTPredictor               │ ViT Weights    │   │
+│  │  "predictor_optimizer"│ AdamW state_dict           │ Opt. States    │   │
+│  │  "decoder"            │ VQVAE                      │ Decoder Wts    │   │
+│  │  "decoder_optimizer"  │ Adam state_dict            │ Opt. States    │   │
+│  │  "action_encoder"     │ ProprioceptiveEmbedding    │ Conv1d(12→10)  │   │
+│  │  "proprio_encoder"    │ ProprioceptiveEmbedding    │ Conv1d(3→10)   │   │
+│  └───────────────────────┴────────────────────────────┴────────────────┘   │
+│                                                                             │
+│  HINWEIS: action_encoder_optimizer wird NICHT als separater Key             │
+│  gespeichert, da er in _keys_to_save nicht enthalten ist!                  │
+│  → Bei Checkpoint-Resumption wird der Optimizer NEU initialisiert.          │
+│  → Proprio/Action Encoder GEWICHTE werden geladen, aber Optimizer-State    │
+│    (Momentum, Varianz) geht verloren.                                      │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 6.11 Gesamtflowchart: Proprio Encoder Training
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                   PROPRIO ENCODER — VOLLSTÄNDIGER TRAININGS-FLOWCHART       │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  ┌──────────────────────────────────────────────────────────────────────┐  │
+│  │  1. DATENSATZ LADEN                                                  │  │
+│  │  H5: eef_states (1,1,14) → flatten → (14,) → [:3] = EE pos (3D)    │  │
+│  │  500 Ep × 25 Frames → all_eef_flat: (12500, 14)                     │  │
+│  │  proprio_mean = all_eef_flat[:, :3].mean(0) → (3,) ≈ [0.48,0.02,0.16] │
+│  │  proprio_std  = all_eef_flat[:, :3].std(0)  → (3,) ≈ [0.12,0.16,0.07] │
+│  └──────────────────────────────────────────────────────────────────────┘  │
+│                                        │                                    │
+│                                        ▼                                    │
+│  ┌──────────────────────────────────────────────────────────────────────┐  │
+│  │  2. BATCH-VORBEREITUNG (pro Training-Iteration)                      │  │
+│  │  TrajSlicerDataset: frameskip=2, num_frames=5                        │  │
+│  │  get_frames() → proprio = (eef[:, :3] - mean) / std → (5, 3)       │  │
+│  │  Dataloader collate → obs['proprio']: (B=8, T=5, D=3)              │  │
+│  └──────────────────────────────────────────────────────────────────────┘  │
+│                                        │                                    │
+│                                        ▼                                    │
+│  ┌──────────────────────────────────────────────────────────────────────┐  │
+│  │  3. PROPRIO ENCODING                                                 │  │
+│  │  proprio_encoder.forward(obs['proprio'])                             │  │
+│  │  (B=8, T=5, D=3)                                                    │  │
+│  │    → permute(0,2,1) → (8, 3, 5)                                    │  │
+│  │    → Conv1d(3→10, k=1) → (8, 10, 5)                                │  │
+│  │    → permute(0,2,1) → (8, 5, 10)                                   │  │
+│  │  proprio_emb: (B=8, T=5, emb=10)                                    │  │
+│  └──────────────────────────────────────────────────────────────────────┘  │
+│                                        │                                    │
+│                                        ▼                                    │
+│  ┌──────────────────────────────────────────────────────────────────────┐  │
+│  │  4. PARALLEL: VISUAL + ACTION ENCODING                               │  │
+│  │  visual_embs = DINO(obs['visual']) → (B=8, T=5, P=256, D=384)      │  │
+│  │  act_emb = action_encoder(act)     → (B=8, T=5, emb=10)            │  │
+│  └──────────────────────────────────────────────────────────────────────┘  │
+│                                        │                                    │
+│                                        ▼                                    │
+│  ┌──────────────────────────────────────────────────────────────────────┐  │
+│  │  5. FUSION (concat_dim=1)                                            │  │
+│  │  proprio_tiled: (8,5,10) → tile auf 256 Patches → (8,5,256,10)     │  │
+│  │  act_tiled:     (8,5,10) → tile auf 256 Patches → (8,5,256,10)     │  │
+│  │  z = cat([visual_embs, proprio_tiled, act_tiled], dim=-1)            │  │
+│  │  z: (B=8, T=5, P=256, D=404)                                        │  │
+│  │       └── 384 visual ── 10 proprio ── 10 action ──┘                  │  │
+│  └──────────────────────────────────────────────────────────────────────┘  │
+│                                        │                                    │
+│                                        ▼                                    │
+│  ┌──────────────────────────────────────────────────────────────────────┐  │
+│  │  6. SRC/TGT SPLIT                                                    │  │
+│  │  z_src = z[:, :4]   → (8, 4, 256, 404)  ← Input für Predictor      │  │
+│  │  z_tgt = z[:, 1:]   → (8, 4, 256, 404)  ← Ground Truth             │  │
+│  └──────────────────────────────────────────────────────────────────────┘  │
+│                                        │                                    │
+│                                        ▼                                    │
+│  ┌──────────────────────────────────────────────────────────────────────┐  │
+│  │  7. PREDICTION (ViT Predictor)                                       │  │
+│  │  z_src: (8, 4, 256, 404) → reshape → (8, 1024, 404)                │  │
+│  │    → 6× Transformer Blocks (kausale Maske, 16 Heads)                │  │
+│  │    → reshape → z_pred: (8, 4, 256, 404)                             │  │
+│  └──────────────────────────────────────────────────────────────────────┘  │
+│                                        │                                    │
+│                                        ▼                                    │
+│  ┌──────────────────────────────────────────────────────────────────────┐  │
+│  │  8. LOSS-BERECHNUNG                                                  │  │
+│  │  z_visual_loss  = MSE(z_pred[...,:384],   z_tgt[...,:384].detach()) │  │
+│  │  z_proprio_loss = MSE(z_pred[...,384:394],z_tgt[...,384:394].detach())│ │
+│  │  z_loss         = MSE(z_pred[...,:394],   z_tgt[...,:394].detach()) │  │
+│  │                   ↑ Visual + Proprio, OHNE Action                    │  │
+│  │  total_loss = z_loss + decoder_loss                                  │  │
+│  └──────────────────────────────────────────────────────────────────────┘  │
+│                                        │                                    │
+│                                        ▼                                    │
+│  ┌──────────────────────────────────────────────────────────────────────┐  │
+│  │  9. BACKWARD + OPTIMIZER STEP                                        │  │
+│  │  accelerator.backward(total_loss)                                    │  │
+│  │  Gradient fließt: loss → z_pred → ViT → z_src → z → proprio_tiled  │  │
+│  │    → proprio_emb → Conv1d.weight/bias (∂L/∂W, ∂L/∂b)               │  │
+│  │                                                                      │  │
+│  │  action_encoder_optimizer.step()                                     │  │
+│  │    → AdamW-Update für:                                               │  │
+│  │      • action_encoder.patch_embed.weight  (10, 12, 1) → 120 Params  │  │
+│  │      • action_encoder.patch_embed.bias    (10,)       →  10 Params  │  │
+│  │      • proprio_encoder.patch_embed.weight (10,  3, 1) →  30 Params  │  │
+│  │      • proprio_encoder.patch_embed.bias   (10,)       →  10 Params  │  │
+│  │    lr = 5e-4, Gesamt: 170 Parameter                                  │  │
+│  └──────────────────────────────────────────────────────────────────────┘  │
+│                                        │                                    │
+│                                        ▼                                    │
+│  ┌──────────────────────────────────────────────────────────────────────┐  │
+│  │  10. CHECKPOINT (nach jeder Epoch)                                   │  │
+│  │  torch.save({"proprio_encoder": ProprioceptiveEmbedding, ...})       │  │
+│  │  Gespeichert: Conv1d(3→10) Weights + Bias = 40 Parameter            │  │
+│  │  Pfad: outputs/DATUM/ZEIT/checkpoints/model_{epoch}.pth              │  │
+│  └──────────────────────────────────────────────────────────────────────┘  │
+│                                                                             │
+│  W&B Logging:                                                               │
+│  ┌──────────────────────────────────────────────────────────────────────┐  │
+│  │  train_z_proprio_loss  │ val_z_proprio_loss  │ z_proprio_err_rollout │  │
+│  │  (geloggt pro Epoch)   │ (geloggt pro Epoch) │ (Rollout-Fehler)     │  │
+│  └──────────────────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 6.12 Zusammenfassung der Tensor-Dimensionen (Referenzmodell 500 Ep)
+
+| Variable | Shape | Datei | Beschreibung |
+|----------|-------|-------|-------------|
+| `eef_states` (raw) | `(1, 1, 14)` | H5-Datei | Roher EEF-Zustand pro Timestep |
+| `eef.flatten()` | `(14,)` | franka_cube_stack_dset.py | Geflachter EEF |
+| `self.eef_tensors[i]` | `(25, 14)` | franka_cube_stack_dset.py | EEF pro Episode |
+| `all_eef_flat` | `(12500, 14)` | franka_cube_stack_dset.py | Alle EEF concateniert |
+| `self.proprio_mean` | `(3,)` | franka_cube_stack_dset.py | Mean der EE-Position |
+| `self.proprio_std` | `(3,)` | franka_cube_stack_dset.py | Std der EE-Position |
+| `eef[:, :3]` | `(T, 3)` | get_frames() | EE-Position [x,y,z] |
+| `proprio` (normalisiert) | `(T, 3)` | get_frames() | Z-normalisiert ~N(0,1) |
+| `obs['proprio']` (Batch) | `(B, T, 3)` = `(8, 5, 3)` | Dataloader | Proprio pro Batch |
+| `proprio_emb` | `(B, T, 10)` = `(8, 5, 10)` | encode_obs() | Nach Conv1d |
+| `proprio_tiled` | `(B, T, P, 10)` = `(8, 5, 256, 10)` | encode() | Auf Patches getiled |
+| `z` (fusioniert) | `(B, T, P, D)` = `(8, 5, 256, 404)` | encode() | Visual+Proprio+Action |
+| `z_src` | `(8, 4, 256, 404)` | forward() | Input für Predictor |
+| `z_tgt` | `(8, 4, 256, 404)` | forward() | Ground Truth |
+| `z_pred` | `(8, 4, 256, 404)` | forward() | Vorhersage |
+| `z_pred[..., 384:394]` | `(8, 4, 256, 10)` | forward() | Vorhergesagtes Proprio-Emb |
+| `z_tgt[..., 384:394]` | `(8, 4, 256, 10)` | forward() | Ground Truth Proprio-Emb |
+| `z_proprio_loss` | Skalar | forward() | MSE(pred, tgt) für Proprio |
+| `z_loss` | Skalar | forward() | MSE(pred, tgt) für Visual+Proprio |
+| `W_proprio` | `(10, 3, 1)` | proprio_encoder | Conv1d Gewichte (30 Param) |
+| `b_proprio` | `(10,)` | proprio_encoder | Conv1d Bias (10 Param) |
+
+### 6.13 Konfigurationsparameter-Referenz
+
+| Parameter | Config-Pfad | Wert (500 Ep) | Bedeutung |
+|-----------|-------------|---------------|-----------|
+| `proprio_emb_dim` | `conf/train.yaml` | `10` | Output-Dimension des Proprio Encoders |
+| `num_proprio_repeat` | `conf/train.yaml` | `1` | Wiederholungsfaktor für Tiling (1 = keine Wiederholung) |
+| `proprio_dim` | `conf/env/franka_cube_stack.yaml` | `3` | Input-Dimension (EE x,y,z) |
+| `action_encoder_lr` | `conf/train.yaml` | `5e-4` | Learning Rate für Proprio+Action Optimizer |
+| `normalize_action` | `conf/train.yaml` | `true` | Z-Normalisierung von Proprio und Actions |
+| `concat_dim` | `conf/train.yaml` | `1` | Fusion entlang Feature-Dimension |
+| `frameskip` | `conf/train.yaml` | `2` | Temporal Subsampling |
+| `num_hist` | `conf/train.yaml` | `4` | Anzahl Kontext-Frames |
+| `train_predictor` | `conf/train.yaml → model` | `true` | Aktiviert Predictor + Action/Proprio Optimizer |
+
+---
+
+## 7. Loss-Funktionen
+
+### 7.1 Übersicht aller Losses
 
 | Loss Name | Formel | Gewichtung | Zweck |
 |-----------|--------|------------|-------|
@@ -1131,7 +2048,7 @@ DINO (Self-**DI**stillation with **NO** labels) ist ein selbstüberwachtes Visio
 | `decoder_vq_loss` | Commitment Loss | 0.25 | VQ Regularisierung (=0 wenn quantize=False) |
 | `decoder_loss` | recon + 0.25×vq | 1.0 | Decoder-Training |
 
-### 6.2 Warum diese Kombination?
+### 7.2 Warum diese Kombination?
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -1156,13 +2073,13 @@ DINO (Self-**DI**stillation with **NO** labels) ist ein selbstüberwachtes Visio
 
 ---
 
-## 7. W&B Metriken und Monitoring
+## 8. W&B Metriken und Monitoring
 
-### 7.1 Übersicht aller geplotteten Metriken
+### 8.1 Übersicht aller geplotteten Metriken
 
 Das Training loggt automatisch zahlreiche Metriken zu Weights & Biases. Hier eine vollständige Übersicht:
 
-#### 7.1.1 Hauptverluste (Loss)
+#### 8.1.1 Hauptverluste (Loss)
 
 | Metrik | Definition | Ziel |
 |--------|------------|------|
@@ -1171,7 +2088,7 @@ Das Training loggt automatisch zahlreiche Metriken zu Weights & Biases. Hier ein
 | `train_z_visual_loss` / `val_z_visual_loss` | Visueller Encoder-Verlust im latenten Raum (nur 384 DINO-Features) | ↓ niedrig |
 | `train_z_proprio_loss` / `val_z_proprio_loss` | Propriozeptiver Verlust im latenten Raum (10 proprio-dim) | ↓ niedrig |
 
-#### 7.1.2 Decoder-Verluste
+#### 8.1.2 Decoder-Verluste
 
 | Metrik | Definition | Ziel |
 |--------|------------|------|
@@ -1180,7 +2097,7 @@ Das Training loggt automatisch zahlreiche Metriken zu Weights & Biases. Hier ein
 | `decoder_recon_loss_*` | Reiner Rekonstruktionsverlust ohne VQ-Komponente | ↓ niedrig |
 | `decoder_vq_loss_*` | Vector-Quantization Verlust (= 0, wenn `quantize: false`) | ↓ niedrig |
 
-#### 7.1.3 Bildqualitätsmetriken
+#### 8.1.3 Bildqualitätsmetriken
 
 Diese Metriken messen die Qualität der rekonstruierten/vorhergesagten Bilder:
 
@@ -1197,7 +2114,7 @@ Diese Metriken messen die Qualität der rekonstruierten/vorhergesagten Bilder:
 - `*_reconstructed`: Decoder rekonstruiert den Input direkt (keine Vorhersage)
 - `*_pred`: Decoder rekonstruiert die Vorhersage des Predictors
 
-#### 7.1.4 Rollout-Fehler (Latent Space)
+#### 8.1.4 Rollout-Fehler (Latent Space)
 
 Diese Metriken bewerten die Vorhersagequalität über mehrere Zeitschritte:
 
@@ -1214,7 +2131,7 @@ Diese Metriken bewerten die Vorhersagequalität über mehrere Zeitschritte:
 | `z_proprio_err_full` | Gesamter Propriozeption-Rollout-Fehler |
 | `z_proprio_err_next1` | Proprio-Fehler für den nächsten Frame |
 
-### 7.2 Interpretation der Metriken
+### 8.2 Interpretation der Metriken
 
 #### Gute Trainingskurven zeigen:
 ```
@@ -1257,9 +2174,9 @@ train_loss
      │  ╲╱  ╲╱  ╲╱  ← Starke Schwankungen
 ```
 
-### 7.3 Overfitting-Diagnose und Lösungsansätze
+### 8.3 Overfitting-Diagnose und Lösungsansätze
 
-#### 7.3.1 Typische Overfitting-Indikatoren
+#### 8.3.1 Typische Overfitting-Indikatoren
 
 Overfitting tritt auf, wenn das Modell die Trainingsdaten "auswendig lernt" statt zu generalisieren:
 
@@ -1271,7 +2188,7 @@ Overfitting tritt auf, wenn das Modell die Trainingsdaten "auswendig lernt" stat
 | Sinkende Image-Qualität auf Validation | `val_img_psnr_*`, `val_img_ssim_*` fallen |
 | Akkumulierende Rollout-Fehler | `val_z_visual_err_full`, `val_z_proprio_err_full` steigen |
 
-#### 7.3.2 Besonders anfällige Metriken
+#### 8.3.2 Besonders anfällige Metriken
 
 Basierend auf Experimenten mit kleinen Datensätzen (20 Episoden):
 
@@ -1280,7 +2197,7 @@ Basierend auf Experimenten mit kleinen Datensätzen (20 Episoden):
 3. **`val_img_mse_reconstructed`** - Verschlechtert sich nach Epoch 50
 4. **`val_decoder_loss_reconstructed`** - Steigt langsam an
 
-#### 7.3.3 Lösungsansätze gegen Overfitting
+#### 8.3.3 Lösungsansätze gegen Overfitting
 
 | Ansatz | Konfiguration | Empfehlung |
 |--------|---------------|------------|
@@ -1293,7 +2210,7 @@ Basierend auf Experimenten mit kleinen Datensätzen (20 Episoden):
 | **Mehr Trainingsdaten** | Zusätzliche Episoden sammeln | ⚠️ Aufwändig |
 | **Data Augmentation** | Bild-Transformationen | ⚠️ Erfordert Code-Änderung |
 
-#### 7.3.4 Dropout erklärt
+#### 8.3.4 Dropout erklärt
 
 **Was ist Dropout?**
 
@@ -1378,7 +2295,7 @@ predictor:
 
 **Wichtig:** Dropout ist nur während des **Trainings** aktiv. Bei Inferenz (`model.eval()`) werden alle Neuronen verwendet, aber die Gewichte werden skaliert.
 
-#### 7.3.5 Empfohlene Konfiguration für kleine Datensätze (< 50 Episoden)
+#### 8.3.5 Empfohlene Konfiguration für kleine Datensätze (< 50 Episoden)
 
 ```yaml
 # conf/train.yaml Anpassungen
@@ -1391,7 +2308,7 @@ predictor:
   dropout: 0.2        # Erhöht von 0.1
 ```
 
-#### 7.3.6 Optimales Checkpoint-Auswahl
+#### 8.3.6 Optimales Checkpoint-Auswahl
 
 Bei Overfitting **NICHT** das letzte Checkpoint verwenden! Stattdessen:
 
@@ -1407,9 +2324,9 @@ checkpoint_path = f"outputs/DATUM/ZEIT/checkpoints/model_{best_epoch}.pth"
 
 ---
 
-## 8. Training starten
+## 9. Training starten
 
-### 8.1 Basis-Kommando
+### 9.1 Basis-Kommando
 
 ```bash
 cd /path/to/dino_wm
@@ -1425,7 +2342,7 @@ python train.py env=franka_cube_stack \
     training.batch_size=8
 ```
 
-### 8.2 Empfohlene Parameter für deinen Datensatz
+### 9.2 Empfohlene Parameter für deinen Datensatz
 
 Da du nur 10 Episoden hast, hier optimierte Einstellungen:
 
@@ -1440,7 +2357,7 @@ python train.py env=franka_cube_stack \
     debug=True                       # Wandb Debug-Projekt
 ```
 
-### 8.3 Erwartete Ausgabe
+### 9.3 Erwartete Ausgabe
 
 ```
 outputs/
@@ -1460,7 +2377,7 @@ outputs/
         └── hydra.yaml               # Gespeicherte Konfiguration
 ```
 
-### 8.4 Monitoring mit Weights & Biases
+### 9.4 Monitoring mit Weights & Biases
 
 Training wird automatisch zu W&B geloggt:
 - Projekt: `dino_wm_debug` (wenn `debug=True`) oder `dino_wm`
@@ -1468,7 +2385,7 @@ Training wird automatisch zu W&B geloggt:
 
 ---
 
-## 8.5 Klarstellung: Pixel-Space vs. Meter-Space — Kein Problem für das Training
+## 9.5 Klarstellung: Pixel-Space vs. Meter-Space — Kein Problem für das Training
 
 > **Analyse vom 09.02.2026** — Die DINO-WM-Architektur ist vollständig einheitsagnostisch.
 
@@ -1527,7 +2444,7 @@ Schritt 3: Predictor (ViT)
 
 ---
 
-## 9. Glossar
+## 10. Glossar
 
 | Begriff | Erklärung |
 |---------|-----------|

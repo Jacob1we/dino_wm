@@ -31,7 +31,7 @@ hydra:
 
 training:
   seed: 0
-  epochs: 50
+  epochs: 100  # von 50 erhöht für 1000-Episoden-Training (14.02.2026)
   batch_size: 8 #8 -> GPU nur bei ~60% #16 -> GPU Out of Memory #32 -> GPU Out of Memory # should >= nodes * tasks_per_node
   save_every_x_epoch: 1
   reconstruct_every_x_batch: 500
@@ -42,7 +42,7 @@ training:
   action_encoder_lr: 5e-4
 
 img_size: 224 # should be a multiple of 224
-frameskip: 5
+frameskip: 2  # von 5 auf 2 für feinere Dynamik (14.02.2026, vorher per CLI-Override)
 concat_dim: 1
 
 normalize_action: True
@@ -55,7 +55,7 @@ num_action_repeat: 1
 proprio_emb_dim: 10 
 num_proprio_repeat: 1
 
-num_hist: 3
+num_hist: 4  # von 3 auf 4 (wie beim 500ep-Training per CLI-Override, 14.02.2026)
 num_pred: 1 # only supports 1
 has_predictor: True # set this to False for only training a decoder
 has_decoder: True # set this to False for only training a predictor

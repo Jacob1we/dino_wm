@@ -18,7 +18,8 @@ dataset:
   n_rollout: null  # null = alle verfügbaren Rollouts laden
   normalize_action: ${normalize_action}
   # data_path: If FRANKA_DATA_PATH env var is set, use it; otherwise fallback to local path
-  data_path: ${oc.env:FRANKA_DATA_PATH,/home/tsp_jw/Desktop/fcs_datasets/primLogger_NEps500_ActInt10_RobOpac0_NCams4_NCube1/}
+  # Alt: primLogger_NEps500_ActInt10_RobOpac0_NCams4_NCube1 (500ep, ActInt10)
+  data_path: ${oc.env:FRANKA_DATA_PATH,/home/tsp_jw/Desktop/fcs_datasets/primLogger_NEps1000_ActInt2_RobOpac10_NCams4_NCube1/}
 
   split_ratio: 0.9
 

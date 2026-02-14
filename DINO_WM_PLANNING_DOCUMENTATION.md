@@ -49,6 +49,13 @@
     - 10.5 [Diagnose und Interpretation](#105-diagnose-und-interpretation)
     - 10.6 [Kritischer Fund: Visuelle Diskrepanz Training vs. Planning](#106-kritischer-fund-visuelle-diskrepanz-training-vs-planning)
     - 10.7 [Konsequenzen und Handlungsempfehlungen](#107-konsequenzen-und-handlungsempfehlungen)
+11. [Finaler Offline-Test: Modell unzureichend für Cube Stacking](#11-finaler-offline-test-modell-unzureichend-für-cube-stacking) ← NEU (14.02.2026)
+    - 11.1 [Testaufbau und Parameter](#111-testaufbau-und-parameter)
+    - 11.2 [Ergebnisse: CEM-Konvergenz](#112-ergebnisse-cem-konvergenz)
+    - 11.3 [Ergebnisse: Ausgeführte Trajektorie](#113-ergebnisse-ausgeführte-trajektorie)
+    - 11.4 [Diagnose: Warum das Modell versagt](#114-diagnose-warum-das-modell-versagt)
+    - 11.5 [Konsequenz: Neues Training erforderlich](#115-konsequenz-neues-training-erforderlich)
+    - 11.6 [Neuer Datensatz und Trainingsplan](#116-neuer-datensatz-und-trainingsplan)
 
 ---
 
@@ -2536,6 +2543,197 @@ Es gibt **zwei unabhängige Probleme**, die beide zur schlechten Planning-Perfor
 ```
 
 **Zusammenfassung:** Das WM-Training mit 200 Episoden zeigt moderate Vorhersagequalität (3.52× Degradation vs. Reconstruction). Das ist ein bekanntes Symptom für untertrainierte World Models. **Zusätzlich** wurde die fehlende Bodenplatte im Planning Client als kritische visuelle Diskrepanz identifiziert, die zu einem Distribution Shift im DINO-Encoder führt. Beide Probleme müssen adressiert werden, aber die Bodenplatte ist der schnellere Fix.
+
+---
+
+## 11. Finaler Offline-Test: Modell unzureichend für Cube Stacking (14.02.2026)
+
+### 11.1 Testaufbau und Parameter
+
+Nach allen Bugfixes (Proprio-Fix, Goal-Image-Fix, OOM-Fix) wurde ein finaler Offline-Test mit dem 500-Episoden-Modell durchgeführt:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    FINALER OFFLINE-TEST (14.02.2026)                         │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  Modell:     2026-02-09/17-59-59 (500 Episoden, ActInt10, 50 Epochen)      │
+│  GPU:        NVIDIA RTX A5000 (24 GB VRAM)                                 │
+│                                                                             │
+│  CEM-Parameter (maximale Qualität):                                        │
+│  ┌─────────────────────────────────────────────────────────┐               │
+│  │  Horizon (H):      5     (5 Schritte vorausplanen)      │               │
+│  │  Samples:          300   (300 Aktionssequenzen/Iteration)│               │
+│  │  Opt Steps:        30    (30 CEM-Iterationen)           │               │
+│  │  Top-K:            30    (30 beste Samples für Refit)   │               │
+│  │  MPC:              Aus   (Open-Loop, 10 Aktionen)       │               │
+│  └─────────────────────────────────────────────────────────┘               │
+│                                                                             │
+│  Cube-Position: (0.396, -0.215, 0.025)                                     │
+│  Start-EEF:     (0.468, 0.079, 0.368)                                      │
+│  Goal-EEF:      (0.586, -0.196, 0.069)                                     │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 11.2 Ergebnisse: CEM-Konvergenz
+
+```
+CEM Optimierung:
+  Start-Loss:    0.828
+  End-Loss:      0.340
+  Reduktion:     58.9%
+  Dauer:         530 Sekunden (30 Steps)
+  
+  Loss-Verlauf:
+  Step  1: 0.828 ──► Step 10: 0.405 ──► Step 20: 0.351 ──► Step 30: 0.340
+           │                                                          │
+           └─── Schnelle Konvergenz ──► Plateau ab Step ~15 ──────────┘
+```
+
+**Interpretation:** Der CEM konvergiert zwar (58.9% Reduktion), aber der finale Loss von 0.340 ist zu hoch. Ein Loss-Plateau bei 0.34 bedeutet: **Keine der 300 gesampelten Aktionssequenzen kann das Modell von einem „guten" Zielzustand überzeugen.** Das Modell hat keine interne Repräsentation für eine sinnvolle Trajektorie zum Cube.
+
+### 11.3 Ergebnisse: Ausgeführte Trajektorie
+
+Der Client führte die 10 geplanten Aktionen aus. **Keine einzige Aktion nähert sich dem Cube:**
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                     AUSGEFÜHRTE TRAJEKTORIE                                  │
+├──────┬──────────────────────────────┬───────────────────────────────────────┤
+│ Step │ EEF-Position (x, y, z)       │ Analyse                              │
+├──────┼──────────────────────────────┼───────────────────────────────────────┤
+│  0   │ (0.468,  0.079, 0.368)       │ Startposition                        │
+│  1   │ (0.447, -0.001, 0.350)       │ Leichte Y-Korrektur, zu hoch         │
+│  2   │ (0.441, -0.074, 0.327)       │ Weiter in -Y, immer noch hoch       │
+│  3   │ (0.427, -0.059, 0.317)       │ Y springt zurück, kein Ziel         │
+│  4   │ (0.378,  0.031, 0.265)       │ ← SPRUNG: Y wechselt auf +0.03!    │
+│  5   │ (0.391,  0.117, 0.300)       │ ← CHAOTISCH: Y = +0.117            │
+│  6   │ (0.426,  0.019, 0.311)       │ Y springt wieder                     │
+│  7   │ (0.480, -0.043, 0.340)       │ Zurück Richtung Start!              │
+│  8   │ (0.526, -0.111, 0.212)       │ Endlich tiefer, aber zu weit rechts │
+│  9   │ (0.556, -0.090, 0.251)       │ Z wieder hoch                       │
+│ 10   │ (0.576, -0.120, 0.193)       │ Nächster Punkt an Goal, aber miss   │
+├──────┼──────────────────────────────┼───────────────────────────────────────┤
+│ Cube │ (0.396, -0.215, 0.025)       │ NIEMALS ERREICHT                    │
+│ Goal │ (0.586, -0.196, 0.069)       │ Step 10 nähert sich, aber zu hoch   │
+└──────┴──────────────────────────────┴───────────────────────────────────────┘
+```
+
+**Kritische Beobachtungen:**
+1. **Y-Koordinate chaotisch:** Springt zwischen -0.12 und +0.12 (±24 cm!)
+2. **Z immer zu hoch:** Minimum 0.193m, Cube steht bei 0.025m — nie tief genug
+3. **Kein Annäherungsverhalten:** Die Trajektorie zeigt kein zielgerichtetes Verhalten
+4. **Rückwärtsbewegung:** Step 7 bewegt sich Richtung Startposition zurück
+
+### 11.4 Diagnose: Warum das Modell versagt
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        URSACHENANALYSE                                       │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  1. LOSS-PLATEAU BEI 0.34                                                  │
+│  ═══════════════════════                                                   │
+│  Nach 30 CEM-Iterationen mit je 300 Samples (= 9000 Bewertungen)          │
+│  konvergiert der Loss auf 0.34 und bewegt sich nicht weiter.               │
+│  → Im gesamten Aktionsraum existiert KEINE Sequenz, die das Modell        │
+│    von einer sinnvollen Cube-Manipulation überzeugt.                       │
+│                                                                             │
+│  2. MODELL-KAPAZITÄT UNZUREICHEND                                          │
+│  ═════════════════════════════════                                         │
+│  Training: 500 Episoden × 25 Frames, frameskip=2                           │
+│  Action-Interval: 10 (alle 10 Sim-Steps ein Frame)                        │
+│  → Zwischen 2 Frames passiert VIEL Bewegung                               │
+│  → Modell kann die feingranulare Dynamik nicht lernen                      │
+│  → Vorhersagen sind "verschwommen" — kein klarer Zielzustand              │
+│                                                                             │
+│  3. ZEITLICHE AUFLÖSUNG ZU GROB                                           │
+│  ════════════════════════════════                                          │
+│  ActInt10 + frameskip=2 = effektiv alle 20 Sim-Steps ein Datenpunkt        │
+│  Bei ~150 Physics-Steps pro Episode:                                       │
+│  → Nur ~7-8 effektive Zeitschritte pro Trajektorie                        │
+│  → Zu wenig Information für das Modell, um feine Bewegungen zu lernen     │
+│                                                                             │
+│  4. ZU WENIG EPOCHEN                                                       │
+│  ════════════════════                                                      │
+│  50 Epochen bei 500 Episoden = begrenzte Konvergenz                        │
+│  Paper-Referenz: Rope-Dataset trainiert mit mehr Iterationen               │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 11.5 Konsequenz: Neues Training erforderlich
+
+Der finale Test bestätigt definitiv: **Das aktuelle Modell (500 Episoden, ActInt10, 50 Epochen) kann keine sinnvollen Aktionssequenzen für Cube Manipulation produzieren.** Alle Code-Bugfixes (Proprio, Goal Image, OOM) waren korrekt und notwendig, aber das Modell selbst hat zu wenig gelernt.
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                      ENTSCHEIDUNG: RETRAINING                               │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  Status aller Bugfixes:                                                     │
+│  ✅ OOM-Fix (ChunkedRolloutWrapper)                                        │
+│  ✅ Proprio-Fix (ee_pos statt Nullen)                                      │
+│  ✅ Goal-Image-Fix (Dataset-Bild statt Start-Bild)                         │
+│  ✅ Goal-EEF-Fix (H5 eef_states statt aktuelle Position)                   │
+│                                                                             │
+│  Alle Fixes sind implementiert und verifiziert.                            │
+│  Das Problem ist NICHT der Code, sondern das MODELL.                       │
+│                                                                             │
+│  → RETRAINING MIT BESSEREN DATEN UND PARAMETERN ERFORDERLICH              │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 11.6 Neuer Datensatz und Trainingsplan
+
+Basierend auf der Diagnose werden folgende Änderungen für das Retraining vorgenommen:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                     VERGLEICH: ALT vs. NEU                                   │
+├─────────────────────────┬──────────────────┬────────────────────────────────┤
+│ Parameter               │ Alt (500ep)      │ Neu (1000ep)                   │
+├─────────────────────────┼──────────────────┼────────────────────────────────┤
+│ Episoden                │ 500              │ 1000  (2× mehr)               │
+│ Epochen                 │ 50               │ 100   (2× mehr)               │
+│ ActionInterval          │ 10               │ 2     (5× feiner)            │
+│ Frames/Episode          │ 25               │ 25    (gleich)                │
+│ frameskip               │ 2                │ 2     (gleich)                │
+│ action_dim              │ 6                │ 6     (gleich)                │
+│ proprio_dim             │ 3                │ 3     (gleich)                │
+│ Robot Opacity           │ 1.0              │ 1.0   (gleich)                │
+│ img_size                │ 224              │ 224   (gleich)                │
+├─────────────────────────┼──────────────────┼────────────────────────────────┤
+│ Effektive Sim-Steps/    │ 10×2 = 20        │ 2×2 = 4                       │
+│ Datenpunkt              │                  │                                │
+│ Trainingssamples        │ ~9.900           │ ~19.800 (2× mehr Episoden)    │
+│ Geschätzte Dauer        │ ~2h (RTX A5000)  │ ~8h (RTX A5000)              │
+├─────────────────────────┼──────────────────┼────────────────────────────────┤
+│ Datensatzpfad           │ primLogger_      │ primLogger_                    │
+│                         │ NEps500_ActInt10 │ NEps1000_ActInt2               │
+│                         │ _RobOpac10_      │ _RobOpac10_                    │
+│                         │ NCams4_NCube1    │ NCams4_NCube1                  │
+└─────────────────────────┴──────────────────┴────────────────────────────────┘
+```
+
+**Erwartete Verbesserungen:**
+
+| Änderung | Wirkung |
+|----------|---------|
+| **1000 statt 500 Episoden** | Doppelt so viel Varianz → bessere Generalisierung |
+| **100 statt 50 Epochen** | Mehr Trainingsiterationen → bessere Konvergenz |
+| **ActInt2 statt ActInt10** | 5× feinere zeitliche Auflösung → Modell lernt feinere Dynamik |
+| **ActInt2 + frameskip=2** | Effektiv alle 4 Sim-Steps ein Datenpunkt (statt 20) → 5× feinere Bewegungsinformation zwischen Frames |
+
+**Trainingsbefehl:**
+```bash
+cd /home/tsp_jw/Desktop/dino_wm
+conda activate dino_wm
+FRANKA_DATA_PATH=/home/tsp_jw/Desktop/fcs_datasets/primLogger_NEps1000_ActInt2_RobOpac10_NCams4_NCube1 \
+python train.py env=franka_cube_stack frameskip=2 training.epochs=100
+```
 
 ---
 

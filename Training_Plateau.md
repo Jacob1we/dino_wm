@@ -475,6 +475,43 @@ Dann **zwei** identische Runs durchführen:
 
 ---
 
+### Priorität 5: DINOv2 Register-Modell + Feature-Normalisierung (Research Frontier)
+
+> **Kontext:** Basierend auf Community Best-Practices für ViT-basierte World Models (IRIS, Genie, DreamerV3) und DINOv2-Spezifika.
+
+#### Aktion 5a: Wechsel auf `dinov2_vits14_reg`
+
+**Das Problem:** Standard-DINOv2 missbraucht bestimmte Patch-Tokens im Bildhintergrund als "Register" (Zwischenspeicher für globale Informationen). Diese Tokens haben extrem hohe Norm-Werte und enthalten keine lokalen Bildinformationen mehr.
+
+**Der Effekt auf World Models:** Der MSE-Loss wird von 1–2 High-Norm "Register-Tokens" dominiert. Die feinen Bewegungen des Roboterarms (kleine Norm-Änderung) werden vom Rauschen dieser Artefakt-Tokens übertönt → Loss stagniert.
+
+**Die Lösung:** Meta hat `dinov2_vits14_reg` veröffentlicht — eine Variante mit expliziten Register-Tokens, die das Problem behebt. Drop-in Replacement.
+
+```yaml
+# In conf/encoder/dino.yaml:
+name: "dinov2_vits14_reg"  # statt "dinov2_vits14"
+```
+
+#### Aktion 5b: L2-Normalisierung der DINO-Features
+
+Da der Encoder gefroren ist, sind die Features nicht für den MSE-Loss optimiert. L2-Normalisierung zwingt den Loss, sich auf die **Richtung** der Vektoren (Semantik: "Was ist das?") zu konzentrieren, statt auf deren **Länge** (Beleuchtung/Kontrast/Register-Artefakte).
+
+```python
+# In models/dino.py, DinoV2Encoder.forward():
+emb = nn.functional.normalize(emb, dim=-1)  # L2-Norm entlang Embedding-Dim
+```
+
+```yaml
+# In conf/encoder/dino.yaml:
+normalize_features: true
+```
+
+**Begründung:** Die `x_norm_patchtokens` aus DINOv2 sind zwar LayerNorm-normalisiert (Mean=0, Var=1 je Token), aber NICHT L2-normalisiert. Verschiedene Tokens können trotzdem sehr unterschiedliche L2-Normen haben — genau das Register-Problem. L2-Normalisierung projiziert alle Tokens auf die Einheitskugel und eliminiert so den Einfluss der Token-Magnitude auf den MSE-Loss.
+
+**Aufwand:** Konfig-Änderung + 1 Zeile Code.
+
+---
+
 ### Zusammenfassung des verfeinerten Plans
 
 | Prio | Maßnahme | Warum? | Aufwand |
@@ -483,12 +520,14 @@ Dann **zwei** identische Runs durchführen:
 | **2** | `frameskip=5` | Erhöht das visuelle Delta, macht den Task **"lernbarer"**. Modell soll Dynamik lernen, nicht Identität. | Konfig-Änderung |
 | **3** | `decoder_lr=3e-4` | "Gratis" Verbesserung der Bildmetriken (SSIM, LPIPS, PSNR). | Konfig-Änderung |
 | **4** | Clean Run (1000ep, h=3, 100 Epochen) | Nachweis des Scaling-Laws — **erst sinnvoll nach Fix 1 & 2**. | 1 Run (~8h) |
+| **5a** | `dinov2_vits14_reg` Encoder | Behebt High-Norm Register-Token Artefakte, die den MSE-Loss dominieren. | Konfig-Änderung |
+| **5b** | L2-Normalisierung der Features | Loss fokussiert auf Semantik (Richtung), nicht Magnitude (Beleuchtung/Artefakte). | 1 Zeile Code + Konfig |
 
 ### Fazit
 
-Das bisherige Setup war **"zu laut"** (Batch Size 8 statt 32) und **"zu aggressiv"** (LR 2e-4 statt 5e-5), um die feinen Bewegungen des Franka-Arms im DINOv2-Latent-Space zu lernen. Zusätzlich war das **visuelle Signal zu schwach** (frameskip=2), sodass das Modell kaum Unterschied zwischen Input und Target hatte.
+Das bisherige Setup war **"zu laut"** (Batch Size 8 statt 32) und **"zu aggressiv"** (LR 2e-4 statt 5e-5), um die feinen Bewegungen des Franka-Arms im DINOv2-Latent-Space zu lernen. Zusätzlich war das **visuelle Signal zu schwach** (frameskip=2), sodass das Modell kaum Unterschied zwischen Input und Target hatte. Darüber hinaus können **Register-Token-Artefakte** im Standard-DINOv2 den MSE-Loss dominieren und feine Bewegungsunterschiede maskieren.
 
-Mit den Anpassungen aus Prio 1 & 2 sollte der `val_z_visual_loss` **signifikant unter 0.3 fallen**. Erst danach macht die Daten-Ablation (Prio 4) wissenschaftlich Sinn.
+Mit den Anpassungen aus Prio 1–3 und den DINOv2-spezifischen Fixes (Prio 5) sollte der `val_z_visual_loss` **signifikant unter 0.3 fallen**. Erst danach macht die Daten-Ablation (Prio 4) wissenschaftlich Sinn.
 
 ---
 

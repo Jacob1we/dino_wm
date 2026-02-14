@@ -76,7 +76,10 @@ class Trainer:
             torch.distributed.barrier()
             # # ==== /init ddp process group ====
 
-        self.accelerator = Accelerator(log_with="wandb")
+        self.accelerator = Accelerator(
+            log_with="wandb",
+            gradient_accumulation_steps=cfg.training.gradient_accumulation_steps,
+        )
         log.info(
             f"rank: {self.accelerator.local_process_index}  model_name: {model_name}"
         )
@@ -94,7 +97,7 @@ class Trainer:
         )
 
         OmegaConf.set_struct(cfg, False)
-        cfg.effective_batch_size = cfg.training.batch_size
+        cfg.effective_batch_size = cfg.training.batch_size * cfg.training.gradient_accumulation_steps
         cfg.gpu_batch_size = cfg.training.batch_size // self.accelerator.num_processes
         OmegaConf.set_struct(cfg, True)
 
@@ -470,26 +473,28 @@ class Trainer:
             obs, act, state = data
             plot = i == 0  # only plot from the first batch
             self.model.train()
-            z_out, visual_out, visual_reconstructed, loss, loss_components = self.model(
-                obs, act
-            )
 
-            self.encoder_optimizer.zero_grad()
-            if self.cfg.has_decoder:
-                self.decoder_optimizer.zero_grad()
-            if self.cfg.has_predictor:
-                self.predictor_optimizer.zero_grad()
-                self.action_encoder_optimizer.zero_grad()
+            with self.accelerator.accumulate(self.model):
+                z_out, visual_out, visual_reconstructed, loss, loss_components = self.model(
+                    obs, act
+                )
 
-            self.accelerator.backward(loss)
+                self.encoder_optimizer.zero_grad()
+                if self.cfg.has_decoder:
+                    self.decoder_optimizer.zero_grad()
+                if self.cfg.has_predictor:
+                    self.predictor_optimizer.zero_grad()
+                    self.action_encoder_optimizer.zero_grad()
 
-            if self.model.train_encoder:
-                self.encoder_optimizer.step()
-            if self.cfg.has_decoder and self.model.train_decoder:
-                self.decoder_optimizer.step()
-            if self.cfg.has_predictor and self.model.train_predictor:
-                self.predictor_optimizer.step()
-                self.action_encoder_optimizer.step()
+                self.accelerator.backward(loss)
+
+                if self.model.train_encoder:
+                    self.encoder_optimizer.step()
+                if self.cfg.has_decoder and self.model.train_decoder:
+                    self.decoder_optimizer.step()
+                if self.cfg.has_predictor and self.model.train_predictor:
+                    self.predictor_optimizer.step()
+                    self.action_encoder_optimizer.step()
 
             loss = self.accelerator.gather_for_metrics(loss).mean()
 

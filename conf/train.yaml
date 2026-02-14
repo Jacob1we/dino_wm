@@ -33,16 +33,17 @@ training:
   seed: 0
   epochs: 100  # von 50 erhöht für 1000-Episoden-Training (14.02.2026)
   batch_size: 8 #8 -> GPU nur bei ~60% #16 -> GPU Out of Memory #32 -> GPU Out of Memory # should >= nodes * tasks_per_node
+  gradient_accumulation_steps: 4  # effektive Batch-Size = 8 * 4 = 32 (Paper-Standard)
   save_every_x_epoch: 1
   reconstruct_every_x_batch: 500
   num_reconstruct_samples: 6
   encoder_lr: 1e-6
-  decoder_lr: 1e-4   # von 3e-4
-  predictor_lr: 2e-4 # von 5e-4
+  decoder_lr: 3e-4   # Paper-Wert (zurückgesetzt)
+  predictor_lr: 5e-5  # Paper Table 12 (war 2e-4, ~16x zu hoch mit kleiner BS)
   action_encoder_lr: 5e-4
 
 img_size: 224 # should be a multiple of 224
-frameskip: 2  # von 5 auf 2 für feinere Dynamik (14.02.2026, vorher per CLI-Override)
+frameskip: 5  # Paper-Default (frameskip=2 führt zu near-identity Predictions)
 concat_dim: 1
 
 normalize_action: True
@@ -55,7 +56,7 @@ num_action_repeat: 1
 proprio_emb_dim: 10 
 num_proprio_repeat: 1
 
-num_hist: 4  # von 3 auf 4 (wie beim 500ep-Training per CLI-Override, 14.02.2026)
+num_hist: 3  # Paper-Default (konsistent halten für kontrollierte Experimente)
 num_pred: 1 # only supports 1
 has_predictor: True # set this to False for only training a decoder
 has_decoder: True # set this to False for only training a predictor

@@ -1876,11 +1876,40 @@ ls outputs/2026-01-31/23-03-37/checkpoints/
 CUDA out of memory
 ```
 
-**Lösung:**
-Reduziere `num_samples` in der Planner-Konfiguration:
+**Lösung 1 — CEM-Parameter reduzieren:**
 ```bash
 python plan.py ... planner.num_samples=128
 ```
+
+**Lösung 2 — Dataset-Bilder im Server freigeben (HAUPTURSACHE bei großen Datasets):**
+
+**Root Cause (gefunden 2026-02-10):** `FrankaCubeStackDataset` lädt mit `preload_images=True` **ALLE** Episoden-Bilder in den RAM. Ein `TrajSubset` (dset_val) hält eine Referenz zum **vollen** Dataset — d.h. auch `dset["valid"]` hält alle 500 Episoden im Speicher!
+
+| Dataset-Größe | Geschätzter RAM | OOM bei 500 samples? |
+|---|---|---|
+| 200 Episoden | ~2-3 GB | ❌ kein Problem |
+| 500 Episoden | ~6-8 GB | ✅ OOM! |
+
+**Der Server braucht aber nur:**
+- `action_mean/std` (6 Floats), `state_mean/std` (14 Floats), `proprio_mean/std` (3 Floats)
+- `transform` (torchvision Transform)
+- `action_dim` (1 Integer)
+
+**Fix in `planning_server.py`:** Stats extrahieren + `.clone()`, dann sofort `del` + `gc.collect()`:
+```python
+# Statistiken extrahieren und KLONEN
+base_action_dim = _dset_val.action_dim
+action_mean_base = _dset_val.action_mean.clone()
+# ... etc.
+
+# SOFORT freigeben
+del _dset_val, _traj_dset, _datasets
+gc.collect()
+torch.cuda.empty_cache()
+```
+
+**Warum werden die Episoden überhaupt geladen?**
+Weil die Normalisierungs-Statistiken (`action_mean/std` etc.) im Dataset-Objekt berechnet werden und NICHT im Checkpoint gespeichert sind. Die Bilder selbst werden im Server NIE verwendet (Goals kommen vom Isaac Sim Client), aber `preload_images=True` lädt sie trotzdem mit.
 
 ### 9.4 Environment nicht gefunden
 

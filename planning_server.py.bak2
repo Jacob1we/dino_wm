@@ -1,0 +1,841 @@
+"""  
+DINO WM Planning Server
+
+Minimaler Server der plan.py's Setup nutzt und planner.plan() in einer Loop aufruft.
+Laeuft als TCP-Socket-Server und empfaengt Goals/Bilder vom Isaac Sim Client.
+
+Architektur-Entscheidungen (warum minimal):
+  - Server nutzt plan.py's load_model() direkt (kein eigener Model-Loader)
+  - Preprocessor wird mit Dataset-Statistiken erstellt (wie PlanWorkspace)
+  - Server braucht NICHT: env, PlanEvaluator, prepare_targets(), episode-Daten
+  - Dataset wird NUR fuer Normalisierungs-Statistiken geladen, dann sofort geloescht
+    (spart ~6 GB RAM bei 500 Episoden, verhindert OOM!)
+
+Modi:
+  --mode online   Reduzierte CEM-Parameter fuer Echtzeit (MPC-Loop)
+  --mode offline  Volle CEM-Parameter fuer bestmoegliche Qualitaet (Open-Loop)
+
+Wichtige Best Practices (aus CEM-Analyse):
+  - CEM optimiert in (horizon * action_dim * frameskip)-dimensionalem Raum
+  - Online-MPC: Kurzer Horizon (1-2) + Warm-Start essenziell!
+  - Offline: Langer Horizon (5) + volle Samples (300x30) ok
+  - CEM Loss muss sinken -> wird jetzt pro Iteration geloggt
+  - Warm-Start: Vorherigen Plan um 1 Step shiften statt von Null starten
+
+Verwendung:
+    cd ~/Desktop/dino_wm
+    conda activate dino_wm
+    
+    # Online (schnell, fuer MPC):
+    python planning_server.py --model_name 2026-02-09/08-12-44
+    
+    # Online mit mehr Budget:
+    python planning_server.py --model_name 2026-02-09/08-12-44 --num_samples 128 --opt_steps 10 --goal_H 5
+    
+    # Mit Weights & Biases Logging:
+    python planning_server.py --model_name 2026-02-09/08-12-44 --num_samples 128 --opt_steps 10 --goal_H 5 --wandb
+    
+    # Offline (beste Qualitaet, fuer Evaluation):
+    python planning_server.py --model_name 2026-02-09/08-12-44 --mode offline
+"""
+
+import os
+import sys
+import socket
+import pickle
+import time
+import json
+import csv
+import numpy as np
+import argparse
+from datetime import datetime
+from einops import rearrange
+
+# DINO WM Pfad
+dino_wm_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, dino_wm_dir)
+os.chdir(dino_wm_dir)
+
+import torch
+import hydra
+from pathlib import Path
+from omegaconf import OmegaConf
+
+# Alles aus plan.py importieren
+from plan import load_model, planning_main
+from preprocessor import Preprocessor
+from utils import seed, cfg_to_dict
+
+
+class CEMConvergenceTracker:
+    """
+    Zentrale Speicherung und Visualisierung aller CEM-Konvergenzkurven.
+    
+    Speichert pro plan()-Aufruf:
+      - Alle CEM-Loss-Werte pro Iteration (die Konvergenzkurve)
+      - Metadaten: Zeitstempel, Plan-ID, CEM-Parameter, Planungszeit
+    
+    Ausgabe-Dateien (im output_dir):
+      - cem_convergence.csv:  Rohdaten aller Runs (1 Zeile pro CEM-Iteration)
+      - cem_summary.csv:      Zusammenfassung pro plan()-Aufruf
+      - cem_convergence.png:  Konvergenzkurven-Plot (wird nach jedem plan() aktualisiert)
+      - cem_convergence.json: Vollständige Rohdaten für programmatischen Zugriff
+    """
+    
+    def __init__(self, output_dir: str, model_name: str, cem_params: dict):
+        self.output_dir = Path(output_dir)
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.model_name = model_name
+        self.cem_params = cem_params  # {num_samples, opt_steps, topk, horizon, ...}
+        
+        # Session-ID für diesen Server-Run
+        self.session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.session_start = datetime.now()
+        
+        # Alle Runs dieser Session
+        self.all_runs = []  # Liste von dicts: {plan_id, losses, time_s, ...}
+        
+        # CSV-Dateien initialisieren
+        self._init_csvs()
+        
+        print(f"  CEMConvergenceTracker initialisiert:")
+        print(f"    Output: {self.output_dir}")
+        print(f"    Session: {self.session_id}")
+    
+    def _init_csvs(self):
+        """Erstellt CSV-Header wenn Dateien noch nicht existieren."""
+        # Konvergenz-Rohdaten: 1 Zeile pro CEM-Iteration
+        self.convergence_csv = self.output_dir / "cem_convergence.csv"
+        if not self.convergence_csv.exists():
+            with open(self.convergence_csv, "w", newline="") as f:
+                writer = csv.writer(f, delimiter=";")
+                writer.writerow([
+                    "session_id", "model_name", "plan_id", "cem_step",
+                    "loss", "num_samples", "opt_steps", "topk", "horizon",
+                    "timestamp"
+                ])
+        
+        # Summary: 1 Zeile pro plan()-Aufruf
+        self.summary_csv = self.output_dir / "cem_summary.csv"
+        if not self.summary_csv.exists():
+            with open(self.summary_csv, "w", newline="") as f:
+                writer = csv.writer(f, delimiter=";")
+                writer.writerow([
+                    "session_id", "model_name", "plan_id",
+                    "initial_loss", "final_loss", "reduction_pct",
+                    "convergence_step",  # Ab welchem Step < 1% Verbesserung
+                    "time_s", "num_samples", "opt_steps", "topk", "horizon",
+                    "timestamp"
+                ])
+    
+    def record_plan(self, plan_id: int, losses: list, plan_time: float):
+        """Speichert einen vollständigen plan()-Aufruf."""
+        if not losses:
+            return
+        
+        timestamp = datetime.now().isoformat()
+        
+        # Run-Daten speichern
+        run_data = {
+            "plan_id": plan_id,
+            "losses": list(losses),
+            "time_s": plan_time,
+            "initial_loss": losses[0],
+            "final_loss": losses[-1],
+            "reduction_pct": (1 - losses[-1] / losses[0]) * 100 if losses[0] > 0 else 0,
+            "timestamp": timestamp,
+        }
+        
+        # Konvergenz-Step berechnen: Ab wann < 1% Verbesserung pro Step
+        convergence_step = len(losses)
+        for i in range(1, len(losses)):
+            improvement = (losses[i-1] - losses[i]) / losses[i-1] * 100 if losses[i-1] > 0 else 0
+            if improvement < 1.0:
+                convergence_step = i
+                break
+        run_data["convergence_step"] = convergence_step
+        
+        self.all_runs.append(run_data)
+        
+        # CSV-Dateien updaten (append)
+        self._append_convergence_csv(plan_id, losses, timestamp)
+        self._append_summary_csv(run_data)
+        
+        # JSON aktualisieren (vollständige Rohdaten)
+        self._save_json()
+        
+        # Plot aktualisieren
+        self._update_plot()
+    
+    def _append_convergence_csv(self, plan_id, losses, timestamp):
+        """Hängt CEM-Iterationsdaten an Konvergenz-CSV an."""
+        with open(self.convergence_csv, "a", newline="") as f:
+            writer = csv.writer(f, delimiter=";")
+            for step, loss in enumerate(losses, start=1):
+                writer.writerow([
+                    self.session_id, self.model_name, plan_id, step,
+                    f"{loss:.6f}",
+                    self.cem_params.get("num_samples", ""),
+                    self.cem_params.get("opt_steps", ""),
+                    self.cem_params.get("topk", ""),
+                    self.cem_params.get("horizon", ""),
+                    timestamp
+                ])
+    
+    def _append_summary_csv(self, run_data):
+        """Hängt plan()-Zusammenfassung an Summary-CSV an."""
+        with open(self.summary_csv, "a", newline="") as f:
+            writer = csv.writer(f, delimiter=";")
+            writer.writerow([
+                self.session_id, self.model_name, run_data["plan_id"],
+                f"{run_data['initial_loss']:.6f}",
+                f"{run_data['final_loss']:.6f}",
+                f"{run_data['reduction_pct']:.1f}",
+                run_data["convergence_step"],
+                f"{run_data['time_s']:.1f}",
+                self.cem_params.get("num_samples", ""),
+                self.cem_params.get("opt_steps", ""),
+                self.cem_params.get("topk", ""),
+                self.cem_params.get("horizon", ""),
+                run_data["timestamp"]
+            ])
+    
+    def _save_json(self):
+        """Speichert vollständige Rohdaten als JSON."""
+        json_path = self.output_dir / "cem_convergence.json"
+        data = {
+            "session_id": self.session_id,
+            "session_start": self.session_start.isoformat(),
+            "model_name": self.model_name,
+            "cem_params": self.cem_params,
+            "n_plans": len(self.all_runs),
+            "runs": self.all_runs,
+        }
+        with open(json_path, "w") as f:
+            json.dump(data, f, indent=2)
+    
+    def _update_plot(self):
+        """Aktualisiert den Konvergenzkurven-Plot."""
+        try:
+            import matplotlib
+            matplotlib.use("Agg")  # Non-interactive Backend
+            import matplotlib.pyplot as plt
+            from matplotlib.cm import get_cmap
+        except ImportError:
+            print("  [Tracker] matplotlib nicht installiert, kein Plot erstellt")
+            return
+        
+        if not self.all_runs:
+            return
+        
+        n_runs = len(self.all_runs)
+        
+        # --- Figure mit 2x2 Subplots ---
+        fig, axes = plt.subplots(2, 2, figsize=(16, 12))
+        fig.suptitle(
+            f"CEM Convergence — {self.model_name}\n"
+            f"Session {self.session_id} | "
+            f"samples={self.cem_params.get('num_samples')}, "
+            f"steps={self.cem_params.get('opt_steps')}, "
+            f"topk={self.cem_params.get('topk')}, "
+            f"H={self.cem_params.get('horizon')}",
+            fontsize=13, fontweight="bold"
+        )
+        
+        # Colormap: ältere Runs heller, neuere dunkler
+        cmap = get_cmap("viridis")
+        colors = [cmap(i / max(n_runs - 1, 1)) for i in range(n_runs)]
+        
+        # --- Plot 1: Alle Konvergenzkurven übereinander ---
+        ax1 = axes[0, 0]
+        for i, run in enumerate(self.all_runs):
+            losses = run["losses"]
+            steps = list(range(1, len(losses) + 1))
+            alpha = max(0.15, 0.3 + 0.7 * (i / max(n_runs - 1, 1)))
+            lw = 0.8 if i < n_runs - 1 else 2.5
+            ax1.plot(steps, losses, color=colors[i], alpha=alpha, linewidth=lw,
+                     label=f"Plan {run['plan_id']}" if i >= n_runs - 3 else None)
+        ax1.set_xlabel("CEM Iteration")
+        ax1.set_ylabel("Loss")
+        ax1.set_title(f"Alle Konvergenzkurven (n={n_runs})")
+        ax1.grid(True, alpha=0.3)
+        if n_runs <= 10:
+            ax1.legend(fontsize=8)
+        
+        # --- Plot 2: Initial- und Final-Loss über Zeit ---
+        ax2 = axes[0, 1]
+        plan_ids = [r["plan_id"] for r in self.all_runs]
+        initial_losses = [r["initial_loss"] for r in self.all_runs]
+        final_losses = [r["final_loss"] for r in self.all_runs]
+        ax2.plot(plan_ids, initial_losses, "o-", color="red", alpha=0.7, 
+                 markersize=4, linewidth=1, label="Initial Loss")
+        ax2.plot(plan_ids, final_losses, "o-", color="green", alpha=0.7,
+                 markersize=4, linewidth=1, label="Final Loss")
+        ax2.fill_between(plan_ids, initial_losses, final_losses, alpha=0.15, color="blue")
+        ax2.set_xlabel("Plan-Aufruf #")
+        ax2.set_ylabel("Loss")
+        ax2.set_title("Initial vs. Final Loss pro Plan")
+        ax2.legend(fontsize=9)
+        ax2.grid(True, alpha=0.3)
+        
+        # --- Plot 3: Konvergenz-Step (wo <1% Improvement) ---
+        ax3 = axes[1, 0]
+        conv_steps = [r["convergence_step"] for r in self.all_runs]
+        ax3.bar(plan_ids, conv_steps, color=[colors[i] for i in range(n_runs)], alpha=0.8)
+        opt_steps = self.cem_params.get("opt_steps", 20)
+        ax3.axhline(y=opt_steps, color="red", linestyle="--", alpha=0.5,
+                     label=f"Max opt_steps={opt_steps}")
+        ax3.set_xlabel("Plan-Aufruf #")
+        ax3.set_ylabel("Konvergenz-Step (<1% Improvement)")
+        ax3.set_title("Frühes Abflachen der Konvergenz")
+        ax3.legend(fontsize=9)
+        ax3.grid(True, alpha=0.3)
+        
+        # --- Plot 4: Loss-Reduktion (%) und Planungszeit ---
+        ax4 = axes[1, 1]
+        reductions = [r["reduction_pct"] for r in self.all_runs]
+        times = [r["time_s"] for r in self.all_runs]
+        
+        ax4_twin = ax4.twinx()
+        bars = ax4.bar(plan_ids, reductions, color="steelblue", alpha=0.6, label="Reduktion (%)")
+        ax4_twin.plot(plan_ids, times, "D-", color="darkorange", alpha=0.8,
+                      markersize=4, linewidth=1.2, label="Zeit (s)")
+        
+        ax4.set_xlabel("Plan-Aufruf #")
+        ax4.set_ylabel("Loss-Reduktion (%)", color="steelblue")
+        ax4_twin.set_ylabel("Planungszeit (s)", color="darkorange")
+        ax4.set_title("Effizienz: Reduktion & Planungszeit")
+        ax4.grid(True, alpha=0.3)
+        
+        # Combined legend
+        lines1, labels1 = ax4.get_legend_handles_labels()
+        lines2, labels2 = ax4_twin.get_legend_handles_labels()
+        ax4.legend(lines1 + lines2, labels1 + labels2, fontsize=9, loc="upper right")
+        
+        plt.tight_layout()
+        
+        # Speichern
+        plot_path = self.output_dir / "cem_convergence.png"
+        fig.savefig(plot_path, dpi=150, bbox_inches="tight")
+        plt.close(fig)
+        
+        # Auch session-spezifisch speichern
+        session_plot = self.output_dir / f"cem_convergence_{self.session_id}.png"
+        # Nur wenn sich unterscheidet (nicht bei jedem Update kopieren)
+        if n_runs % 5 == 0 or n_runs <= 3:
+            import shutil
+            shutil.copy2(plot_path, session_plot)
+        
+        if n_runs <= 5 or n_runs % 5 == 0:
+            print(f"  [Tracker] Plot aktualisiert: {plot_path} ({n_runs} Runs)")
+
+
+class LoggingWandbRun:
+    """CEM-Loss auf stdout UND optional an echtes Weights & Biases weiterleiten.
+    
+    Ohne --wandb: Nur stdout-Ausgabe (wie bisher).
+    Mit --wandb: Zusaetzlich an wandb.ai geloggt fuer Dashboard-Analyse.
+    
+    W&B Metriken:
+      - cem/loss:              CEM-Loss pro Iteration (innerhalb eines plan()-Aufrufs)
+      - cem/iteration:         CEM-Iterationsschritt (1..opt_steps)
+      - plan_summary/initial:  Anfangsloss jedes plan()-Aufrufs
+      - plan_summary/final:    Endloss jedes plan()-Aufrufs
+      - plan_summary/reduction: Prozentuale Loss-Reduktion
+      - plan_summary/time_s:   Planungsdauer in Sekunden
+      - plan_count:            Laufende Nummer des plan()-Aufrufs
+    
+    Neu: CEMConvergenceTracker für lokale CSV/PNG-Plots.
+    """
+    def __init__(self, real_wandb_run=None, tracker: CEMConvergenceTracker = None):
+        self.mode = "logging"
+        self._step_losses = []
+        self._real_run = real_wandb_run
+        self._plan_count = 0
+        self._global_step = 0
+        self._tracker = tracker
+    
+    def log(self, data, *args, **kwargs):
+        # CEM loggt: {"plan_0/loss": float, "step": int}
+        for key, value in data.items():
+            if "loss" in key:
+                step = data.get("step", "?")
+                self._step_losses.append(value)
+                # Kompakte Ausgabe: Loss pro CEM-Iteration
+                print(f"    [CEM] Step {step}: loss={value:.6f}", flush=True)
+        
+        # An echtes W&B weiterleiten (mit globalem Step-Counter)
+        if self._real_run is not None:
+            self._global_step += 1
+            wb_data = {}
+            for key, value in data.items():
+                if key == "step":
+                    wb_data["cem/iteration"] = value
+                elif "loss" in key:
+                    wb_data["cem/loss"] = value
+                else:
+                    wb_data[key] = value
+            wb_data["plan_count"] = self._plan_count
+            self._real_run.log(wb_data, step=self._global_step)
+    
+    def get_loss_summary(self, plan_time=None):
+        """Gibt Loss-Verlauf zurueck fuer Konvergenz-Diagnose."""
+        if not self._step_losses:
+            return "keine Daten"
+        first = self._step_losses[0]
+        last = self._step_losses[-1]
+        reduction = (1 - last/first) * 100 if first > 0 else 0
+        
+        # Tracker: Konvergenzdaten speichern + Plot aktualisieren
+        if self._tracker is not None:
+            self._tracker.record_plan(
+                plan_id=self._plan_count,
+                losses=list(self._step_losses),
+                plan_time=plan_time or 0.0,
+            )
+        
+        # Plan-Summary an W&B loggen
+        if self._real_run is not None:
+            summary = {
+                "plan_summary/initial": first,
+                "plan_summary/final": last,
+                "plan_summary/reduction": reduction,
+                "plan_summary/plan_id": self._plan_count,
+            }
+            if plan_time is not None:
+                summary["plan_summary/time_s"] = plan_time
+            self._real_run.log(summary, step=self._global_step)
+        
+        return f"loss: {first:.6f} -> {last:.6f} ({reduction:.1f}% Reduktion)"
+    
+    def reset_losses(self):
+        self._step_losses.clear()
+        self._plan_count += 1
+    
+    def watch(self, *args, **kwargs): pass
+    def config(self, *args, **kwargs): pass
+    def finish(self):
+        if self._real_run is not None:
+            self._real_run.finish()
+
+# Args
+parser = argparse.ArgumentParser()
+parser.add_argument("--model_name", type=str, required=True)
+parser.add_argument("--port", type=int, default=5555)
+parser.add_argument("--goal_H", type=int, default=None,
+                    help="Planning-Horizon (online-default: 2 fuer MPC, offline-default: 5)")
+parser.add_argument("--mode", type=str, default="online", choices=["online", "offline"],
+                    help="online: reduzierte CEM-Params fuer MPC | offline: volle cem.yaml Params fuer Evaluation")
+# CEM-Parameter Overrides (nur relevant im Online-Modus)
+parser.add_argument("--num_samples", type=int, default=None,
+                    help="CEM Samples pro Iteration (online-default: 64, offline: aus cem.yaml)")
+parser.add_argument("--opt_steps", type=int, default=None,
+                    help="CEM Optimierungsschritte (online-default: 5, offline: aus cem.yaml)")
+parser.add_argument("--topk", type=int, default=None,
+                    help="CEM Top-K Eliten (online-default: 10, offline: aus cem.yaml)")
+# W&B Logging
+parser.add_argument("--wandb", action="store_true", default=False,
+                    help="Aktiviere Weights & Biases Logging (wandb.ai Dashboard)")
+parser.add_argument("--wandb_project", type=str, default="dino_wm_planning",
+                    help="W&B Projektname (default: dino_wm_planning)")
+args = parser.parse_args()
+
+# =============================================================================
+# SETUP: Identisch zu planning_main() bis zum Planner
+# =============================================================================
+
+print("=" * 60)
+print("DINO WM Planning Server")
+print("=" * 60)
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+seed(42)
+
+# Config laden (wie in planning_main)
+model_path = f"{dino_wm_dir}/outputs/{args.model_name}/"
+with open(os.path.join(model_path, "hydra.yaml"), "r") as f:
+    model_cfg = OmegaConf.load(f)
+
+# =============================================================================
+# Dataset laden NUR fuer Normalisierungs-Statistiken, dann sofort freigeben!
+# =============================================================================
+# WICHTIG: FrankaCubeStackDataset laedt mit preload_images=True ALLE Episoden-
+# Bilder in den RAM (obses.pth pro Episode). Bei 500 Episoden sind das ~6+ GB!
+# Der Server braucht aber NUR die kleinen Statistik-Tensoren:
+#   - action_mean/std (6,), state_mean/std (14,), proprio_mean/std (3,)
+#   - transform (torchvision Transform), action_dim (int)
+# Die Episode-Bilder werden NIE verwendet (Goals kommen vom Isaac Sim Client).
+#
+# TrajSubset haelt eine Referenz zum VOLLEN FrankaCubeStackDataset, daher muss
+# ALLES geloescht werden um den Speicher tatsaechlich freizugeben.
+# =============================================================================
+print("Lade Dataset (nur fuer Normalisierungs-Statistiken)...")
+import gc
+_datasets, _traj_dset = hydra.utils.call(
+    model_cfg.env.dataset,
+    num_hist=model_cfg.num_hist,
+    num_pred=model_cfg.num_pred,
+    frameskip=model_cfg.frameskip,
+)
+_dset_val = _traj_dset["valid"]
+
+# Statistiken extrahieren und KLONEN (unabhaengig von Dataset-Referenz)
+base_action_dim = _dset_val.action_dim  # int, keine Referenz
+dset_transform = _dset_val.transform    # torchvision Transform (leichtgewichtig)
+action_mean_base = _dset_val.action_mean.clone()   # (6,)
+action_std_base = _dset_val.action_std.clone()      # (6,)
+state_mean = _dset_val.state_mean.clone()            # (14,)
+state_std = _dset_val.state_std.clone()              # (14,)
+proprio_mean = _dset_val.proprio_mean.clone()        # (3,)
+proprio_std = _dset_val.proprio_std.clone()          # (3,)
+
+print(f"  Statistiken extrahiert: action_dim={base_action_dim}")
+print(f"  action_mean={action_mean_base.numpy()}")
+print(f"  action_std={action_std_base.numpy()}")
+
+# SOFORT freigeben: Dataset mit allen Episoden-Bildern aus dem RAM loeschen!
+del _dset_val, _traj_dset, _datasets
+gc.collect()
+if torch.cuda.is_available():
+    torch.cuda.empty_cache()
+print("  Dataset freigegeben (Bilder aus RAM entfernt) ✓")
+
+# Model laden (wie in planning_main)
+print("Lade Model...")
+model_ckpt = Path(model_path) / "checkpoints" / "model_latest.pth"
+model = load_model(model_ckpt, model_cfg, model_cfg.num_action_repeat, device)
+
+# GPU-Speicher Diagnose (hilft bei OOM-Debugging)
+if torch.cuda.is_available():
+    allocated = torch.cuda.memory_allocated() / 1024**2
+    reserved = torch.cuda.memory_reserved() / 1024**2
+    total = torch.cuda.get_device_properties(0).total_memory / 1024**2
+    print(f"  GPU-Speicher nach Model-Load: {allocated:.0f} MB allocated, {reserved:.0f} MB reserved, {total:.0f} MB total")
+    print(f"  Frei fuer CEM: ~{total - reserved:.0f} MB")
+
+# Preprocessor (wie in PlanWorkspace)
+# WICHTIG: action_mean/std haben Shape (action_dim,) z.B. (6,)
+# Aber der Planner arbeitet mit action_dim * frameskip z.B. (12,)
+# Daher muessen wir die Stats repeaten fuer korrekte Denormalisierung
+frameskip = model_cfg.frameskip
+full_action_dim = base_action_dim * frameskip
+action_mean_full = action_mean_base.repeat(frameskip)  # (6,) -> (12,)
+action_std_full = action_std_base.repeat(frameskip)    # (6,) -> (12,)
+print(f"Action stats: base_dim={base_action_dim}, frameskip={frameskip}, full_dim={full_action_dim}")
+print(f"  action_mean shape: {action_mean_base.shape} -> {action_mean_full.shape}")
+
+preprocessor = Preprocessor(
+    action_mean=action_mean_full,
+    action_std=action_std_full,
+    state_mean=state_mean,
+    state_std=state_std,
+    proprio_mean=proprio_mean,
+    proprio_std=proprio_std,
+    transform=dset_transform,
+)
+
+# Planner erstellen (wie in PlanWorkspace)
+objective_fn = hydra.utils.call({"_target_": "planning.objectives.create_objective_fn", "alpha": 0.5, "base": 2, "mode": "last"})
+planner_cfg = OmegaConf.load(f"{dino_wm_dir}/conf/planner/cem.yaml")
+
+# base_action_dim und frameskip wurden oben beim Dataset-Laden gesetzt
+
+# Horizon: Online kurz (MPC re-plant jeden Step), Offline lang
+if args.goal_H is not None:
+    planning_horizon = args.goal_H
+elif args.mode == "offline":
+    planning_horizon = 5  # Voller Horizont fuer Qualitaet
+else:
+    planning_horizon = 2  # Kurz fuer MPC (weniger Dimensionen = bessere Konvergenz)
+
+# Suchraum-Dimensionalitaet: horizon * action_dim * frameskip
+search_dim = planning_horizon * base_action_dim * frameskip
+print(f"\nSuchraum-Dimensionalitaet: {planning_horizon} x {base_action_dim} x {frameskip} = {search_dim}D")
+
+if args.mode == "offline":
+    # Volle cem.yaml Parameter fuer bestmoegliche Qualitaet
+    # Nur ueberschreiben wenn explizit per CLI angegeben
+    if args.num_samples is not None:
+        planner_cfg.num_samples = args.num_samples
+    if args.opt_steps is not None:
+        planner_cfg.opt_steps = args.opt_steps
+    if args.topk is not None:
+        planner_cfg.topk = args.topk
+    print(f"Modus: OFFLINE (Open-Loop, volle CEM-Qualitaet)")
+    print(f"CEM-Parameter: num_samples={planner_cfg.num_samples}, opt_steps={planner_cfg.opt_steps}, topk={planner_cfg.topk}")
+    print(f"  Geschaetzte DINO-Passes pro plan(): {planner_cfg.num_samples} x {planner_cfg.opt_steps} = {planner_cfg.num_samples * planner_cfg.opt_steps}")
+    print(f"  ACHTUNG: Kann mehrere Minuten pro plan() dauern!")
+else:
+    # Reduzierte Parameter fuer Echtzeit-MPC
+    planner_cfg.num_samples = args.num_samples or 64
+    planner_cfg.opt_steps = args.opt_steps or 5
+    planner_cfg.topk = args.topk or 10
+    print(f"Modus: ONLINE (MPC, reduzierte CEM-Params)")
+    print(f"CEM-Parameter: num_samples={planner_cfg.num_samples}, opt_steps={planner_cfg.opt_steps}, topk={planner_cfg.topk}")
+    print(f"  Geschaetzte DINO-Passes pro plan(): {planner_cfg.num_samples} x {planner_cfg.opt_steps} = {planner_cfg.num_samples * planner_cfg.opt_steps}")
+
+# WandbRun mit Loss-Logging (kritisch fuer CEM-Diagnose!)
+# Optional: Echtes W&B-Logging fuer Dashboard-Analyse
+real_wandb_run = None
+if args.wandb:
+    import wandb
+    real_wandb_run = wandb.init(
+        project=args.wandb_project,
+        config={
+            "model_name": args.model_name,
+            "mode": args.mode,
+            "num_samples": int(planner_cfg.num_samples),
+            "opt_steps": int(planner_cfg.opt_steps),
+            "topk": int(planner_cfg.topk),
+            "horizon": planning_horizon,
+            "search_dim": search_dim,
+            "frameskip": frameskip,
+            "action_dim": base_action_dim,
+            "full_action_dim": full_action_dim,
+        },
+        name=f"{args.mode}_s{planner_cfg.num_samples}_o{planner_cfg.opt_steps}_h{planning_horizon}",
+    )
+    print(f"\n✓ W&B Run gestartet: {real_wandb_run.url}")
+
+# CEMConvergenceTracker: Lokale CSV/PNG-Plots für Konvergenz-Analyse
+tracker_output_dir = Path(dino_wm_dir) / "plan_outputs" / "cem_tracking"
+cem_tracker = CEMConvergenceTracker(
+    output_dir=str(tracker_output_dir),
+    model_name=args.model_name,
+    cem_params={
+        "num_samples": int(planner_cfg.num_samples),
+        "opt_steps": int(planner_cfg.opt_steps),
+        "topk": int(planner_cfg.topk),
+        "horizon": planning_horizon,
+        "search_dim": search_dim,
+        "frameskip": frameskip,
+        "action_dim": base_action_dim,
+        "mode": args.mode,
+    }
+)
+wandb_run = LoggingWandbRun(real_wandb_run=real_wandb_run, tracker=cem_tracker)
+
+planner = hydra.utils.instantiate(
+    planner_cfg,
+    horizon=planning_horizon,
+    wm=model,
+    action_dim=base_action_dim * frameskip,
+    objective_fn=objective_fn,
+    preprocessor=preprocessor,
+    evaluator=None,
+    wandb_run=wandb_run,
+)
+
+print(f"✓ Setup komplett! Horizon={planning_horizon}, Action_dim={base_action_dim * frameskip}")
+print(f"  CEM-Suchraum: {search_dim}D (horizon={planning_horizon} x full_action_dim={base_action_dim * frameskip})")
+
+# =============================================================================
+# MPC WARM-START STATE
+# =============================================================================
+# Vorherigen Plan speichern und um 1 Step shiften fuer naechsten plan() Aufruf.
+# Ohne Warm-Start startet CEM JEDES MAL von mu=0 (= Dataset-Durchschnitt).
+# Mit Warm-Start: Vorheriger Plan wird um 1 Step geshiftet -> bessere Initialisierung.
+warm_start_actions = None  # (1, horizon, action_dim) normalized, auf CUDA
+
+# =============================================================================
+# SOCKET SERVER: Einfache Loop die planner.plan() aufruft
+# =============================================================================
+
+server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+server.bind(("localhost", args.port))
+server.listen(1)
+
+print(f"\nServer läuft auf localhost:{args.port}")
+print("Warte auf Client...\n")
+
+goal_obs = None
+
+def prepare_obs_for_planner(img: np.ndarray) -> dict:
+    """
+    Bereitet ein RGB-Bild für den Planner vor.
+    
+    Der Planner erwartet via preprocessor.transform_obs():
+      - visual: (B, T, H, W, C) mit C=3 (RGB), Werte 0-255, dtype float/uint8
+      - proprio: (B, T, proprio_dim)
+    
+    Die transform_obs() Methode macht dann:
+      1. rearrange zu (B, T, C, H, W)  
+      2. /255.0 normalisieren
+      3. transform (Normalize) anwenden
+    
+    Also: Wir geben einfach das uint8 Bild in (1, 1, H, W, 3) Format!
+    """
+    # Sicherstellen dass es uint8 ist
+    if img.dtype != np.uint8:
+        if img.max() <= 1.0:
+            img = (img * 255).astype(np.uint8)
+        else:
+            img = img.astype(np.uint8)
+    
+    # Shape: (B=1, T=1, H, W, C=3)
+    visual = img[np.newaxis, np.newaxis, ...]  # (1, 1, H, W, 3)
+    
+    # Proprio: (B=1, T=1, proprio_dim=3)
+    proprio = np.zeros((1, 1, 3), dtype=np.float32)
+    
+    obs = {
+        "visual": visual.astype(np.float32),  # transform_obs erwartet float-kompatibel
+        "proprio": proprio,
+    }
+    
+    return obs
+
+while True:
+    conn, addr = server.accept()
+    print(f"[+] Client: {addr}")
+    
+    try:
+        while True:
+            # Empfangen
+            size_data = conn.recv(8)
+            if not size_data: break
+            data_size = int.from_bytes(size_data, 'big')
+            if data_size == 0: break
+            
+            data = b""
+            while len(data) < data_size:
+                data += conn.recv(min(65536, data_size - len(data)))
+            
+            msg = pickle.loads(data)
+            cmd = msg.get("cmd")
+            
+            if cmd == "set_goal":
+                # Goal im Format für planner.plan()
+                img = np.array(msg["image"])
+                print(f"  [Goal] Raw image: shape={img.shape}, dtype={img.dtype}")
+                
+                # Obs-Dict erstellen (preprocessor.transform_obs macht den Rest)
+                goal_obs = prepare_obs_for_planner(img)
+                print(f"  [Goal] Prepared: visual={goal_obs['visual'].shape}, proprio={goal_obs['proprio'].shape}")
+                
+                response = {"status": "ok"}
+                print(f"  Goal gesetzt ✓")
+                
+            elif cmd == "plan":
+                if goal_obs is None:
+                    print(f"  [ERROR] Kein Goal gesetzt!")
+                    response = {"status": "error", "msg": "No goal set"}
+                else:
+                    # Current obs
+                    img = np.array(msg["image"])
+                    print(f"  [Plan] Raw image: shape={img.shape}, dtype={img.dtype}")
+                    
+                    # Obs-Dict erstellen
+                    cur_obs = prepare_obs_for_planner(img)
+                    print(f"  [Plan] Prepared: visual={cur_obs['visual'].shape}")
+                    
+                    # MPC Warm-Start: Vorherigen Plan um 1 Step shiften
+                    actions_init = None
+                    if warm_start_actions is not None:
+                        shifted = warm_start_actions[:, 1:, :]  # (1, H-1, action_dim)
+                        zero_tail = torch.zeros(1, 1, warm_start_actions.shape[2], device=warm_start_actions.device)
+                        actions_init = torch.cat([shifted, zero_tail], dim=1)  # (1, H, action_dim)
+                        print(f"  [Plan] Warm-Start: Vorherigen Plan geshiftet")
+                    
+                    # Planen mit Loss-Logging
+                    ns = planner_cfg.num_samples
+                    os_ = planner_cfg.opt_steps
+                    print(f"  [Plan] Running CEM (samples={ns}, steps={os_}, horizon={planning_horizon})...")
+                    wandb_run.reset_losses()
+                    t_start = time.time()
+                    with torch.no_grad():
+                        actions, _ = planner.plan(obs_0=cur_obs, obs_g=goal_obs, actions=actions_init)
+                    t_plan = time.time() - t_start
+                    
+                    # Warm-Start fuer naechsten Aufruf speichern
+                    warm_start_actions = actions.clone()
+                    
+                    # Loss-Zusammenfassung
+                    print(f"  [Plan] {wandb_run.get_loss_summary(plan_time=t_plan)} ({t_plan:.1f}s)")
+                    
+                    # Erste Horizon-Aktion in frameskip Sub-Steps aufteilen (wie plan_all)
+                    print(f"  [Plan] Actions shape: {actions.shape}")
+                    mu_norm = actions[0].norm().item()
+                    print(f"  [Plan] mu L2-Norm (normalized): {mu_norm:.4f} (0=Mittelwert, >1=signifikant)")
+                    
+                    # Split: (1, action_dim*frameskip) -> (frameskip, action_dim)
+                    all_actions_h0 = preprocessor.denormalize_actions(actions[0, 0:1].cpu())  # (1, 12)
+                    all_actions_h0 = rearrange(all_actions_h0, "t (f d) -> (t f) d", f=frameskip)  # (2, 6)
+                    all_actions_np = all_actions_h0.numpy()
+                    n_sub = all_actions_np.shape[0]
+                    print(f"  [Plan] {n_sub} Sub-Actions (frameskip={frameskip}):")
+                    for i, a in enumerate(all_actions_np):
+                        print(f"    sub {i}: [{', '.join(f'{v:.4f}' for v in a)}]")
+                    response = {"status": "ok", "actions": all_actions_np.tolist(), "n_actions": n_sub}
+            elif cmd == "plan_all":
+                # OFFLINE-Modus: Plane einmal, gib ALLE Aktionen zurueck
+                if goal_obs is None:
+                    print(f"  [ERROR] Kein Goal gesetzt!")
+                    response = {"status": "error", "msg": "No goal set"}
+                else:
+                    img = np.array(msg["image"])
+                    print(f"  [PlanAll] Raw image: shape={img.shape}, dtype={img.dtype}")
+                    
+                    cur_obs = prepare_obs_for_planner(img)
+                    print(f"  [PlanAll] Prepared: visual={cur_obs['visual'].shape}")
+                    
+                    # Plane mit vollen CEM-Parametern
+                    print(f"  [PlanAll] Running CEM planner (samples={planner_cfg.num_samples}, steps={planner_cfg.opt_steps})...")
+                    print(f"  [PlanAll] Horizon={planning_horizon}, frameskip={frameskip} -> {planning_horizon * frameskip} Einzel-Actions")
+                    wandb_run.reset_losses()
+                    t_start = time.time()
+                    with torch.no_grad():
+                        actions, _ = planner.plan(obs_0=cur_obs, obs_g=goal_obs)
+                    t_plan = time.time() - t_start
+                    
+                    # Loss-Zusammenfassung
+                    print(f"  [PlanAll] {wandb_run.get_loss_summary(plan_time=t_plan)} ({t_plan:.1f}s)")
+                    mu_norm = actions[0].norm().item()
+                    print(f"  [PlanAll] mu L2-Norm (normalized): {mu_norm:.4f}")
+                    
+                    # Alle Aktionen denormalisieren und in Einzel-Steps auffaechern
+                    # actions: (1, horizon, action_dim*frameskip) z.B. (1, 5, 12)
+                    print(f"  [PlanAll] Raw actions shape: {actions.shape} (took {t_plan:.1f}s)")
+                    all_actions = preprocessor.denormalize_actions(actions[0].cpu())  # (horizon, 12)
+                    # Reshape: (horizon, frameskip*base_dim) -> (horizon*frameskip, base_dim)
+                    all_actions = rearrange(all_actions, "t (f d) -> (t f) d", f=frameskip)  # (10, 6)
+                    all_actions_np = all_actions.numpy()
+                    
+                    n_actions = all_actions_np.shape[0]
+                    print(f"  [PlanAll] {n_actions} Einzel-Actions (shape: {all_actions_np.shape})")
+                    print(f"  [PlanAll] Erste Action: {all_actions_np[0]}")
+                    print(f"  [PlanAll] Letzte Action: {all_actions_np[-1]}")
+                    
+                    response = {
+                        "status": "ok",
+                        "actions": all_actions_np.tolist(),
+                        "n_actions": n_actions,
+                        "plan_time": t_plan,
+                    }
+                    print(f"  [PlanAll] {n_actions} Actions in {t_plan:.1f}s \u2713")
+            elif cmd == "reset":
+                # Goal und Warm-Start zuruecksetzen fuer neue Episode
+                goal_obs = None
+                warm_start_actions = None
+                response = {"status": "ok"}
+                print(f"  Reset (Goal + Warm-Start)")
+                
+            elif cmd == "quit":
+                response = {"status": "ok"}
+                pickle_resp = pickle.dumps(response)
+                conn.sendall(len(pickle_resp).to_bytes(8, 'big') + pickle_resp)
+                break
+            else:
+                response = {"status": "error", "msg": f"Unknown: {cmd}"}
+            
+            # Senden
+            pickle_resp = pickle.dumps(response)
+            conn.sendall(len(pickle_resp).to_bytes(8, 'big') + pickle_resp)
+            
+    except Exception as e:
+        print(f"  Error: {e}")
+        import traceback; traceback.print_exc()
+    finally:
+        conn.close()
+        print(f"[-] Client getrennt\n")

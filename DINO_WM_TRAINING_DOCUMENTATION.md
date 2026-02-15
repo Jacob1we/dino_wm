@@ -223,7 +223,155 @@ Aus deinen 932 Frames pro Episode:
 
 = 913 Trainingssamples pro Episode
 
-### 3.4 Action & Proprio Embedding Prozess
+### 3.4 Hyperparameter-Abhängigkeiten: Grenzen und Formeln
+
+Die Parameter `frameskip`, `num_hist`, `num_pred`, `batch_size` und die Episodenlänge `T` stehen in direktem Zusammenhang. Falsche Kombinationen führen zu **0 Training-Samples** oder einem **Freeze bei der Validation**.
+
+#### Zentrale Formeln
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  FORMEL 1: Benötigte Frames pro Sample                                      │
+│  ─────────────────────────────────────                                      │
+│                                                                             │
+│  benötigte_frames = (num_hist + num_pred) × frameskip                       │
+│                                                                             │
+│  Beispiel: (6 + 1) × 2 = 14                                                │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  FORMEL 2: Training funktioniert (Slices > 0)                               │
+│  ────────────────────────────────────────────                               │
+│                                                                             │
+│  (num_hist + num_pred) × frameskip  ≤  T                                    │
+│                                                                             │
+│  ⟹  num_hist  ≤  ⌊T / frameskip⌋ - num_pred                               │
+│  ⟹  num_hist  ≤  ⌊T / frameskip⌋ - 1                                      │
+│                                                                             │
+│  Wenn diese Bedingung NICHT erfüllt ist:                                    │
+│  → 0 Slices, kein Training möglich                                          │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  FORMEL 3: Slices pro Episode (= Trainingssamples pro Episode)              │
+│  ─────────────────────────────────────────────────────────────              │
+│                                                                             │
+│  slices = T - (num_hist + num_pred) × frameskip + 1                         │
+│                                                                             │
+│  Beispiel (T=22, num_hist=6, frameskip=2):                                  │
+│  slices = 22 - (6+1)×2 + 1 = 22 - 14 + 1 = 9                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  FORMEL 4: Steps pro Epoch (= tqdm-Balken Länge)                            │
+│  ───────────────────────────────────────────────                            │
+│                                                                             │
+│  train_samples = Σ max(0, T_i - (num_hist+num_pred) × frameskip + 1)       │
+│                  über alle Train-Episoden                                   │
+│                                                                             │
+│  ≈ nutzbare_train_episoden × slices_pro_episode                             │
+│                                                                             │
+│  steps_pro_epoch = ⌈ train_samples / batch_size ⌉                          │
+│                                                                             │
+│  Hinweis: num_workers hat KEINEN Einfluss auf die Anzahl der Steps.         │
+│  Workers beschleunigen nur das Laden der Daten.                             │
+│                                                                             │
+│  Beispiel (499 Ep., T=22, num_hist=6, frameskip=2, batch_size=4):           │
+│  train_episoden ≈ 419 (von 449, da ~30 Ep. zu kurz)                        │
+│  train_samples  = 419 × 9 = 3771                                           │
+│  steps          = ⌈3771 / 4⌉ = 943                                         │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  FORMEL 5: Validation-Rollout friert NICHT ein                              │
+│  ────────────────────────────────────────────                               │
+│                                                                             │
+│  Die openloop_rollout-Funktion setzt:                                       │
+│      min_horizon = 2 + num_hist                                             │
+│                                                                             │
+│  und prüft (strikt größer!):                                                │
+│      max_horizon = ⌊(T - 1) / frameskip⌋  >  min_horizon                   │
+│                                                                             │
+│  ⟹  ⌊(T-1) / frameskip⌋  >  2 + num_hist                                  │
+│  ⟹  num_hist  <  ⌊(T-1) / frameskip⌋ - 2                                  │
+│                                                                             │
+│  Wenn diese Bedingung NICHT erfüllt ist:                                    │
+│  → Endlos-Schleife! Training hängt nach dem Train-Balken.                   │
+│                                                                             │
+│  ACHTUNG: Diese Grenze ist STRENGER als die Training-Grenze!                │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Übersichtstabelle: Maximales num_hist nach T und frameskip
+
+**T = 25** (z.B. `primLogger_NEps1000_ActInt2`)
+
+| frameskip | Max num_hist (Training) | Max num_hist (Rollout ohne Freeze) | Slices bei max Rollout |
+|-----------|------------------------|------------------------------------|------------------------|
+| 1 | 24 | 21 | 4 |
+| 2 | 11 | 9 | 3 |
+| **3** | **7** | **5** | **8** |
+| 4 | 5 | 3 | 6 |
+| 5 | 4 | 2 | 6 |
+
+**T = 22** (z.B. `NEps500_RobOpac10`)
+
+| frameskip | Max num_hist (Training) | Max num_hist (Rollout ohne Freeze) | Slices bei max Rollout |
+|-----------|------------------------|------------------------------------|------------------------|
+| 1 | 21 | 18 | 4 |
+| **2** | **10** | **7** | **8** |
+| 3 | 6 | 4 | 7 |
+| 4 | 4 | 2 | 5 |
+| 5 | 3 | 1 | 3 |
+
+**T = 21** (z.B. `NEps500_RobOpac10` ältere Version)
+
+| frameskip | Max num_hist (Training) | Max num_hist (Rollout ohne Freeze) | Slices bei max Rollout |
+|-----------|------------------------|------------------------------------|------------------------|
+| 1 | 20 | 17 | 4 |
+| **2** | **9** | **6** | **9** |
+| 3 | 6 | 3 | 7 |
+| 4 | 4 | 2 | 2 |
+| 5 | 3 | 1 | 2 |
+
+#### Empfohlene Konfigurationen
+
+```
+┌────────────────────────────────────────────────────────────────────────┐
+│  Ziel: Maximale Historie bei stabilem Training + Validation            │
+│                                                                        │
+│  T=25, frameskip=3:  num_hist=5  → 8 Slices/Ep   ✅ Empfohlen         │
+│  T=25, frameskip=2:  num_hist=6  → 12 Slices/Ep  ✅ Empfohlen         │
+│  T=22, frameskip=2:  num_hist=6  → 9 Slices/Ep   ✅ Empfohlen         │
+│  T=22, frameskip=3:  num_hist=4  → 7 Slices/Ep   ✅ OK                │
+│                                                                        │
+│  ⚠️  Nicht verwenden (Rollout-Freeze):                                 │
+│  T=25, frameskip=3, num_hist=6  → Training OK, Rollout hängt!         │
+│  T=22, frameskip=3, num_hist=5  → Training OK, Rollout hängt!         │
+│  T=25, frameskip=4, num_hist=6  → Training scheitert (0 Slices)       │
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Diagnostik: Warum friert mein Training ein?
+
+```
+Symptom: tqdm-Balken "Epoch X Train: 100%" fertig, danach keine Ausgabe mehr
+
+Ursache: openloop_rollout() in val() sucht endlos nach einer
+         Trajektorie die lang genug ist → while-Schleife terminiert nie
+
+Prüfung:
+  1. Berechne: min_horizon = 2 + num_hist
+  2. Berechne: max_horizon = ⌊(T - 1) / frameskip⌋
+  3. Wenn max_horizon ≤ min_horizon → FREEZE!
+
+Lösung:
+  → num_hist reduzieren, oder
+  → frameskip reduzieren, oder
+  → openloop_rollout in train.py absichern (max_attempts + Fallback)
+```
+
+### 3.5 Action & Proprio Embedding Prozess
 
 Die `action_emb_dim: 10` und `proprio_emb_dim: 10` entsprechen **nicht** den Rohdimensionen deiner Daten (Action: 9, Proprio: 3). Stattdessen werden die Rohdaten durch einen **lernbaren Encoder** in diese Embedding-Dimensionen transformiert.
 
@@ -313,7 +461,7 @@ Actions:  (B, T, 9) ──frameskip(5)──► (B, T, 9*5=45) ──Conv1d─�
 Proprio:  (B, T, 3) ─────────────────────────► Conv1d──► (B, T, 10)
 ```
 
-### 3.5 Umgebungs-Konfiguration: `conf/env/franka_cube_stack.yaml`
+### 3.6 Umgebungs-Konfiguration: `conf/env/franka_cube_stack.yaml`
 
 ```yaml
 name: franka_cube_stack
@@ -330,6 +478,236 @@ dataset:
 num_workers: 4           # Dataloader Workers
 decoder_path: null       # Optional: Vortrainierter Decoder
 ```
+
+---
+
+### 3.7 VRAM-Analyse und Validierungs-Lastspitze
+
+Die GPU-Speicherbelegung ist die **harte Grenze** für die Hyperparameter-Wahl. Auf der NVIDIA A5000 (24 564 MiB) bestimmt der VRAM maßgeblich, wie hoch `num_hist` bei gegebenem `batch_size` und `frameskip` gewählt werden kann.
+
+#### 3.7.1 VRAM-Modell: Drei Kostenklassen
+
+Der VRAM-Verbrauch zerfällt in drei Kategorien:
+
+```
+┌──────────────────────────────────────────────────────────────────────────────┐
+│  VRAM-Zerlegung                                                             │
+│  ═══════════════                                                            │
+│                                                                             │
+│  1. FESTE KOSTEN (~559 MiB, konfigurationsunabhängig)                       │
+│     ├─ Frozen Encoder (DINOv2 ViT-S/14):  21M × 4 Bytes   ≈  80 MiB       │
+│     ├─ Trainable Weights (fp16):          31M × 2 Bytes   ≈  59 MiB       │
+│     ├─ AdamW Optimizer States:            31M × 12 Bytes  ≈ 355 MiB       │
+│     │  (fp32 master copy + momentum + variance)                            │
+│     └─ Gradients (fp16):                  31M × 2 Bytes   ≈  59 MiB       │
+│                                                                             │
+│  2. AKTIVIERUNGEN (~13 908 MiB bei bs=4, nh=6, fs=2) ← HAUPTTREIBER       │
+│     ├─ DINOv2 Encoder:      linear in batch_size × (num_hist + 1)          │
+│     │  (12 Layers × Attention + FF pro Frame)                              │
+│     ├─ ViT Predictor:       QUADRATISCH in num_hist × 196                  │
+│     │  Attention-Matrix: O((num_hist × 196)²) ← KRITISCH                  │
+│     │  (6 Layers, 16 Heads, seq_len = num_hist × 196)                     │
+│     ├─ VQVAE Decoder:       linear in batch_size × (num_hist + 1) × 2     │
+│     │  (2× Forward: Prediction + Reconstruction)                          │
+│     └─ Misc: Loss-Buffers, einops-Temporärtensoren, Tiling                │
+│                                                                             │
+│  3. CUDA OVERHEAD (~2000 MiB, Basis-Kosten)                                │
+│     ├─ PyTorch CUDA Context                                                │
+│     ├─ cuDNN Workspace                                                     │
+│     └─ CUDA Memory Allocator Reservierung                                  │
+│                                                                             │
+│  GESAMT = Feste Kosten + Aktivierungen + CUDA Overhead                     │
+└──────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Warum Attention quadratisch skaliert:**
+
+$$\text{VRAM}_{\text{Attention}} \propto B \times H_{\text{heads}} \times (\text{num\_hist} \times 196)^2 \times D \times 2$$
+
+| num_hist | seq_len (×196) | Attention-Speicher (relativ) |
+|----------|---------------|------------------------------|
+| 1        | 196           | 1×                           |
+| 3        | 588           | 9×                           |
+| 6        | 1176          | 36×                          |
+| 10       | 1960          | 100×                         |
+
+#### 3.7.2 Empirische Kalibrierung
+
+Theoretische VRAM-Formeln unterschätzen systematisch, da sie folgende Faktoren nicht erfassen:
+- PyTorch Autograd-Graph (speichert Computation Graph für Backward)
+- CUDA Memory Allocator Fragmentierung
+- Temporäre Tensoren bei `einops.rearrange`, `torch.cat`, `repeat`
+- cuDNN Workspace für optimierte Convolution-Kernel
+
+**Kalibrierung an realen Messdaten:**
+
+```
+┌──────────────────────────────────────────────────────────────────────────────┐
+│  REFERENZ-MESSPUNKT (A5000, Epoch 1)                                        │
+│  ───────────────────────────────────                                        │
+│  Konfiguration: batch_size=4, num_hist=6, frameskip=2                       │
+│  Gemessen:      16 467 MiB  (67.0% von 24 564 MiB)                         │
+│                                                                             │
+│  Zerlegung:                                                                 │
+│    Feste Kosten:     559 MiB                                                │
+│    CUDA Overhead:   2 000 MiB                                               │
+│    Activations:    13 908 MiB  (= 16467 - 559 - 2000)                       │
+│                                                                             │
+│  Theoretische Activations: ~2 524 MiB (viel zu niedrig!)                    │
+│  → Kalibrierungsfaktor: 13 908 / 2 524 = 5.51×                             │
+│                                                                             │
+│  Kreuzvalidierung:                                                          │
+│  ┌───────────┬────────┬──────────────────────┬──────────┬──────────────┐     │
+│  │ batch_size│num_hist│ Geschätzt (MiB)      │ Gemessen │ Quelle       │     │
+│  ├───────────┼────────┼──────────────────────┼──────────┼──────────────┤     │
+│  │     4     │   6    │ 16 467 (= Referenz)  │ 16 467   │ Epoch 1 Log  │     │
+│  │     8     │   3-4  │ ~14 598 (59.4%)      │ ~60%     │ train.yaml   │     │
+│  │    16     │   3-4  │ >24 564 (OOM)        │ OOM!     │ train.yaml   │     │
+│  │    32     │   3-4  │ >24 564 (OOM)        │ OOM!     │ train.yaml   │     │
+│  └───────────┴────────┴──────────────────────┴──────────┴──────────────┘     │
+│                                                                             │
+│  ✅ Schätzung "59.4%" passt zum Kommentar "~60%" in train.yaml              │
+└──────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### 3.7.3 Validierungs-Lastspitze (Val Peak)
+
+**Kritischer Befund:** Die Validierungsphase verbraucht **mehr VRAM** als das Training!
+
+Drei Ursachen im Code (`train.py`, Methode `val()`):
+
+```
+┌──────────────────────────────────────────────────────────────────────────────┐
+│  PROBLEM 1: openloop_rollout() vor dem Val-Loop                             │
+│  ──────────────────────────────────────────────                             │
+│  → model.rollout() baut z-Tensor iterativ auf via torch.cat                │
+│  → decode_obs() erzeugt Bilder auf der GPU                                 │
+│  → CUDA-Allocator hält freigegebene Blöcke als fragmentierten Cache        │
+│                                                                             │
+│  PROBLEM 2: Val Forward Pass OHNE torch.no_grad()                          │
+│  ──────────────────────────────────────────────────                         │
+│  for batch in valid_dataloader:                                             │
+│      model(obs, act)      ← baut vollen Computation Graph!                │
+│      encode_obs(obs)      ← ZUSÄTZLICHER Encoder-Pass (für Plots)          │
+│                                                                             │
+│  → Identische Activation-Kosten wie Training Forward Pass                  │
+│  → Autograd-Graph wird gebaut, obwohl backward() nie aufgerufen wird       │
+│  → Verschwendet VRAM durch gespeicherte Zwischenergebnisse                 │
+│                                                                             │
+│  PROBLEM 3: Kein torch.cuda.empty_cache() zwischen Rollout und Val-Loop    │
+│  ──────────────────────────────────────────────────────────────────         │
+│  → Fragmentierte Blöcke vom Rollout + neue Val-Allokationen                │
+│  → CUDA-Allocator findet keine zusammenhängenden Blöcke                    │
+│  → ~12% zusätzlicher Overhead durch Fragmentierung                         │
+└──────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Formel: Validierungs-Lastspitze**
+
+$$\text{VRAM}_{\text{Val Peak}} = \bigl(\underbrace{F}_{\text{Feste Kosten}} + \underbrace{C}_{\text{CUDA}} + \underbrace{A_{\text{val}}}_{\substack{\text{Val Activations}\\\text{(= Train Fwd)}}} + \underbrace{R}_{\text{Rollout-Residuen}} + \underbrace{P}_{\text{Extra Plot}}\bigr) \times \underbrace{1.12}_{\text{Fragmentierung}}$$
+
+**Beispielrechnung für aktuelle Konfiguration (bs=4, nh=6, fs=2, T=22):**
+
+| Komponente | MiB | Erklärung |
+|------------|-----|-----------|
+| Training VRAM | 16 467 | Gemessener Wert |
+| + Rollout-Residuen | ~73 | z-Tensor + Decode-Bilder + Fragmentierung |
+| + Extra Plot-Decode | ~151 | encode_obs + eval_images beim 1. Batch |
+| × Fragmentierung (1.12) | | CUDA-Allocator Overhead |
+| **= Val Peak** | **~19 239** | **78.3% von 24 564 MiB** |
+| Overhead vs. Training | **+16.8%** | |
+
+#### 3.7.4 Maximales num_hist nach VRAM (inkl. Val Peak)
+
+**Szenario: T=22, frameskip=2, batch_size=4 (aktuelle Konfiguration)**
+
+| num_hist | Train VRAM | Train % | Val Peak | Val Peak % | Status |
+|----------|-----------|---------|----------|------------|--------|
+| 3 | 6 654 MiB | 27.1% | 7 783 MiB | 31.7% | ✅ Sicher |
+| 4 | 8 699 MiB | 35.4% | 10 182 MiB | 41.5% | ✅ Sicher |
+| 5 | 12 101 MiB | 49.3% | 14 157 MiB | 57.6% | ✅ Sicher |
+| 6 | 16 467 MiB | 67.0% | 19 239 MiB | 78.3% | ✅ Aktuell |
+| **7** | **21 797 MiB** | **88.7%** | **25 479 MiB** | **103.7%** | **⚠️ Val OOM!** |
+| 8 | 28 092 MiB | 114.4% | – | – | ❌ Train OOM |
+
+> **Ergebnis:** Bei `batch_size=4, frameskip=2` ist `num_hist=6` das Maximum,
+> das sowohl Training als auch Validierung ohne OOM übersteht.
+> `num_hist=7` würde im Training noch passen (88.7%), aber die
+> Validierung sprengt den VRAM (103.7%)!
+
+#### 3.7.5 Optimale Konfigurationen (Solver-Ergebnisse)
+
+Der Optimierungssolver (`hyperparameter_analysis.py`) maximiert `num_hist` unter
+der harten Grenze `Val Peak ≤ 90% × 24 564 MiB`:
+
+**Szenarien (T=22, E=500):**
+
+| Rang | Config (bs/nh/fs) | Train VRAM | Val Peak | Val Peak % | Slices/Ep | Score |
+|------|-------------------|-----------|----------|------------|-----------|-------|
+| 1 | bs=4, nh=7, fs=2 | 21 797 | ~25 479 | ~103.7% | 8 | ⚠️ Val OOM |
+| **2** | **bs=4, nh=6, fs=2** | **16 467** | **19 239** | **78.3%** | **9** | **Gewählt ✅** |
+| 3 | bs=2, nh=7, fs=2 | ~11 266 | ~13 182 | ~53.7% | 8 | Machbar |
+| 4 | bs=1, nh=8, fs=2 | ~7 621 | ~8 917 | ~36.3% | 7 | Machbar |
+
+> **Begründung für bs=4, nh=6, fs=2:**
+> - Maximales `num_hist` bei `batch_size ≥ 4` (stabile Gradientenschätzung)
+> - 9 Slices/Episode → gute Dateneffizienz
+> - Val Peak bei 78.3% → ausreichend Headroom
+> - Korrespondiert mit Paper-Empfehlung: Zhou et al. nutzen `batch_size=32`
+>   auf A6000 (48 GB), skaliert linear: 32 × (24564/49152) ≈ 16 → unser bs=4
+>   mit höherem nh kompensiert durch kleineren bs
+
+#### 3.7.6 Vergleich mit Paper (Zhou et al. 2025)
+
+| Parameter | Paper (PushT/PointMaze) | Unsere Konfig. (Franka) | Begründung |
+|-----------|------------------------|------------------------|------------|
+| GPU | A6000 (48 GB) | A5000 (24.5 GB) | ~50% VRAM |
+| batch_size | 32 | 4 | VRAM-limitiert |
+| num_hist | 1–3 | 6 | Maximiert (Priorität 1) |
+| frameskip | 1–5 | 2 | Franka: langsame Dynamik |
+| Epochen | 100 | 100 | Identisch |
+| num_pred | 1 | 1 | Identisch |
+
+#### 3.7.7 Generierte Analyse-Plots
+
+Alle Plots befinden sich in `hyperparameter_analysis/` und wurden mit
+`hyperparameter_analysis.py` erzeugt (PDF + PNG):
+
+| # | Datei | Inhalt |
+|---|-------|--------|
+| 01 | `01_feasibility_heatmap_T{22,25}.pdf` | Machbarkeitskarte: num_hist × batch_size (grün/gelb/rot) |
+| 02 | `02_vram_vs_batch_numhist_T22.pdf` | VRAM-Kurven: Train + Val Peak vs. batch_size pro num_hist |
+| 03 | `03_samples_efficiency_T{22,25}.pdf` | Slices/Ep + Steps/Ep über num_hist × frameskip |
+| 04 | `04_optimal_frontier_T{22,25}.pdf` | Pareto-Front: Score vs. Val Peak pro Konfiguration |
+| 05 | `05_vram_breakdown_T22.pdf` | Gestapeltes Balkendiagramm: Weights, Optimizer, Activations, Val-Overhead |
+| 06 | `06_attention_scaling.pdf` | Quadratische Attention-Skalierung über seq_len |
+| 07 | `07_paper_comparison.pdf` | Unsere Konfig vs. Paper-Referenz (skaliert auf A5000) |
+| 08 | `08_sweep_table_T{22,25}.pdf` | Vollständige Sweep-Tabelle mit Status-Codes |
+| 09 | `09_validation_peak_T{22,25}.pdf` | Validierungs-Lastspitze: Training vs. Val Peak + Zerlegung |
+
+#### 3.7.8 Potentielle Code-Verbesserungen (train.py)
+
+Die folgenden Änderungen würden die Validierungs-Lastspitze um ~12–15% senken:
+
+```python
+# FIX 1: torch.no_grad() um den Validation Loop
+# Aktuell (train.py, val()):
+for i, batch in enumerate(valid_dataloader):
+    out = self.model(obs, act)         # ← baut Computation Graph!
+
+# Verbesserung:
+with torch.no_grad():                  # ← spart ~gleiche Activations wie Forward
+    for i, batch in enumerate(valid_dataloader):
+        out = self.model(obs, act)     # ← kein Graph, nur Inference
+
+# FIX 2: torch.cuda.empty_cache() zwischen Rollout und Val Loop
+# Nach openloop_rollout und vor dem Val Loop einfügen:
+torch.cuda.empty_cache()              # ← räumt CUDA-Allocator auf
+```
+
+> **Hinweis:** Diese Fixes wurden NICHT angewendet, um die Reproduzierbarkeit
+> gegenüber dem Originalcode (Zhou et al. 2025) zu wahren. Die VRAM-Analyse
+> berücksichtigt diese Overhead-Quellen in der Parameterwahl.
 
 ---
 

@@ -51,14 +51,21 @@ parser = argparse.ArgumentParser(description="DINO WM Planning Server")
 parser.add_argument("--model_name", type=str, required=True)
 parser.add_argument("--port", type=int, default=5555)
 parser.add_argument("--mode", type=str, default="online", choices=["online", "offline"])
-parser.add_argument("--goal_H", type=int, default=None)
-parser.add_argument("--num_samples", type=int, default=None)
-parser.add_argument("--opt_steps", type=int, default=None)
-parser.add_argument("--topk", type=int, default=None)
+parser.add_argument("--goal_H", type=int, default=5)
+parser.add_argument("--num_samples", type=int, default=300)
+parser.add_argument("--opt_steps", type=int, default=30)
+parser.add_argument("--topk", type=int, default=30)
 parser.add_argument("--chunk_size", type=int, default=None,
                     help="Max Batch-Size pro WM Rollout (OOM-Schutz). "
                          "None=auto (GPU-abhaengig), 0=kein Chunking.")
 args = parser.parse_args()
+
+# # Default Parameter aus dem Paper:
+# horizon: 5
+# topk: 30
+# num_samples: 300
+# var_scale: 1
+# opt_steps: 30
 
 # =============================================================================
 # SETUP — identisch zu plan.py's planning_main()
@@ -77,25 +84,40 @@ with open(os.path.join(model_path, "hydra.yaml"), "r") as f:
     model_cfg = OmegaConf.load(f)
 
 # 2. Dataset-Statistiken extrahieren (dann sofort freigeben → OOM-Fix)
-print("Lade Dataset-Statistiken...")
-_datasets, _traj_dset = hydra.utils.call(
-    model_cfg.env.dataset,
-    num_hist=model_cfg.num_hist,
-    num_pred=model_cfg.num_pred,
-    frameskip=model_cfg.frameskip,
+#
+# WICHTIG: Wir brauchen NUR die Normalisierungs-Statistiken (mean/std) vom
+# Dataset, nicht die Bilder selbst. Daher laden wir das Dataset MIT ALLEN
+# Episoden (fuer identische Statistiken wie beim Training), aber OHNE
+# Bilder im RAM (preload_images=False). Das spart mehrere GB RAM und
+# reduziert die Startzeit von ~60s auf ~10s.
+#
+# Die H5-Dateien (Actions, EEF-States) sind klein (~KB pro Episode)
+# und muessen geladen werden, damit mean/std korrekt berechnet werden.
+print("Lade Dataset-Statistiken (ohne Bilder)...")
+
+from datasets.franka_cube_stack_dset import FrankaCubeStackDataset
+
+_dset_cfg = OmegaConf.to_container(model_cfg.env.dataset, resolve=True)
+_transform = hydra.utils.call(model_cfg.env.dataset.transform)
+
+_full_dset = FrankaCubeStackDataset(
+    n_rollout=_dset_cfg.get("n_rollout", None),
+    data_path=_dset_cfg["data_path"],
+    normalize_action=_dset_cfg.get("normalize_action", True),
+    transform=_transform,
+    preload_images=False,  # ← KEIN Bild-RAM! Nur Actions/EEF fuer Statistiken
 )
-_dset = _traj_dset["valid"]
 
-base_action_dim = _dset.action_dim
-dset_transform = _dset.transform
-action_mean = _dset.action_mean.clone()
-action_std = _dset.action_std.clone()
-state_mean = _dset.state_mean.clone()
-state_std = _dset.state_std.clone()
-proprio_mean = _dset.proprio_mean.clone()
-proprio_std = _dset.proprio_std.clone()
+base_action_dim = _full_dset.action_dim
+dset_transform = _full_dset.transform
+action_mean = _full_dset.action_mean.clone()
+action_std = _full_dset.action_std.clone()
+state_mean = _full_dset.state_mean.clone()
+state_std = _full_dset.state_std.clone()
+proprio_mean = _full_dset.proprio_mean.clone()
+proprio_std = _full_dset.proprio_std.clone()
 
-del _dset, _traj_dset, _datasets
+del _full_dset, _transform, _dset_cfg
 gc.collect()
 if torch.cuda.is_available():
     torch.cuda.empty_cache()
@@ -105,6 +127,7 @@ print(f"  action_dim={base_action_dim}, Stats extrahiert, Dataset freigegeben �
 print("Lade Model...")
 model_ckpt = Path(model_path) / "checkpoints" / "model_latest.pth"
 model = load_model(model_ckpt, model_cfg, model_cfg.num_action_repeat, device)
+model.eval()  # WICHTIG: Eval-Modus fuer deterministische Inferenz (kein Dropout etc.)
 
 if torch.cuda.is_available():
     alloc = torch.cuda.memory_allocated() / 1024**2
@@ -143,6 +166,13 @@ class ChunkedRolloutWrapper:
             raise AttributeError(name)
         return getattr(self._model, name)
 
+    def to(self, *args, **kwargs):
+        self._model.to(*args, **kwargs)
+        return self
+
+    def state_dict(self, *args, **kwargs):
+        return self._model.state_dict(*args, **kwargs)
+
     def rollout(self, obs_0, act):
         B = act.shape[0]
         if B <= self.chunk_size:
@@ -157,7 +187,9 @@ class ChunkedRolloutWrapper:
             z_obses, zs = self._model.rollout(chunk_obs, chunk_act)
             all_z_obses.append(z_obses)
             all_zs.append(zs)
-            # Sofort GPU-Cache freigeben zwischen Chunks
+
+        # GPU-Cache erst NACH allen Chunks freigeben (vermeidet Fragmentierung)
+        if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
         return (
@@ -361,12 +393,12 @@ while True:
                     cur_obs = img_to_obs(img, ee_pos)
 
                     # Warm-Start: vorherigen Plan shiften
+                    # Letzte Action wird wiederholt statt Nullen (vermeidet Null-Bias)
                     actions_init = None
                     if warm_start is not None:
                         shifted = warm_start[:, 1:, :]
-                        zero_tail = torch.zeros(1, 1, warm_start.shape[2],
-                                                device=warm_start.device)
-                        actions_init = torch.cat([shifted, zero_tail], dim=1)
+                        last_action = warm_start[:, -1:, :]  # Letzte bekannte Action
+                        actions_init = torch.cat([shifted, last_action], dim=1)
 
                     wandb_run.reset()
                     t0 = time.time()

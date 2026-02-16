@@ -8,6 +8,7 @@ ERGEBNIS DES FINALEN OFFLINE-TESTS (14.02.2026):
   CEM: H=5, samples=300, steps=30, topk=30 (maximale Qualität)
 
   CEM-Loss:  0.828 → 0.340 (58.9% Reduktion, Plateau ab Step 15)
+  
   Trajektorie: 10 Aktionen ausgeführt — KEINE nähert sich dem Cube
     - Cube bei (0.396, -0.215, 0.025) — niemals erreicht
     - Y-Koordinate chaotisch (±24 cm Sprünge)

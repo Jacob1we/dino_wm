@@ -56,6 +56,12 @@
     - 11.4 [Diagnose: Warum das Modell versagt](#114-diagnose-warum-das-modell-versagt)
     - 11.5 [Konsequenz: Neues Training erforderlich](#115-konsequenz-neues-training-erforderlich)
     - 11.6 [Neuer Datensatz und Trainingsplan](#116-neuer-datensatz-und-trainingsplan)
+12. [Planning Server Bug-Analyse und Fixes](#12-planning-server-bug-analyse-und-fixes) ← NEU (16.02.2026)
+    - 12.1 [Hintergrund: plan.py vs. planning_server.py](#121-hintergrund-planpy-vs-planning_serverpy)
+    - 12.2 [Erkenntnisse: Wie plan.py's CEM wirklich funktioniert](#122-erkenntnisse-wie-planpys-cem-wirklich-funktioniert)
+    - 12.3 [Bug-Katalog mit Fixes](#123-bug-katalog-mit-fixes)
+    - 12.4 [Verbleibende strukturelle Unterschiede](#124-verbleibende-strukturelle-unterschiede)
+    - 12.5 [Zusammenfassung der Änderungen](#125-zusammenfassung-der-änderungen)
 
 ---
 
@@ -2753,4 +2759,268 @@ python train.py env=franka_cube_stack frameskip=2 training.epochs=100
 
 ---
 
-*Dokumentation erstellt am 01.02.2026, aktualisiert am 09.02.2026 (Sektion 6.7: Strategische MPC-Entscheidung, Sektion 8.5: Startbefehl-Übersicht, Sektion 10: WM Sanity-Check mit Bodenplatten-Analyse)*
+*Dokumentation erstellt am 01.02.2026, aktualisiert am 09.02.2026 (Sektion 6.7: Strategische MPC-Entscheidung, Sektion 8.5: Startbefehl-Übersicht, Sektion 10: WM Sanity-Check mit Bodenplatten-Analyse), aktualisiert am 16.02.2026 (Sektion 12: Planning Server Bug-Analyse und Fixes)*
+
+---
+
+## 12. Planning Server Bug-Analyse und Fixes
+
+> Datum: 16.02.2026. Systematische Analyse der Qualitätsunterschiede zwischen
+> `plan.py` (Offline-Evaluation) und `planning_server.py` (Online Isaac Sim
+> Steuerung). Identifizierte Bugs wurden direkt im Code behoben.
+
+### 12.1 Hintergrund: plan.py vs. planning_server.py
+
+| Eigenschaft | `plan.py` | `planning_server.py` |
+|-------------|-----------|---------------------|
+| **Zweck** | Offline Batch-Evaluation, Jobs, WandB | Persistenter TCP-Server für Isaac Sim |
+| **Start** | `hydra.main()` / submitit | `argparse` + Socket-Loop |
+| **Lebenszyklus** | Kurzlebig pro Run | Permanent, viele Requests |
+| **Dataset** | Komplett geladen (für Targets + Eval) | Nur Statistiken (mean/std), dann freigegeben |
+| **Env** | `SerialVectorEnv` mit `n_evals` gym-Envs | Keine Env (Client steuert Isaac Sim) |
+| **Evaluator** | `PlanEvaluator` (Env-Rollout + Metriken) | `None` (Client evaluiert) |
+| **Logging** | WandB + `logs.json` | `LoggingRun` auf stdout |
+| **OOM-Schutz** | Keiner (GPU wird nicht geteilt) | `ChunkedRolloutWrapper` |
+
+### 12.2 Erkenntnisse: Wie plan.py's CEM wirklich funktioniert
+
+**Häufiges Missverständnis:** "Die `n_evals` parallelen Envs werden als Echtzeit-
+Evaluation verwendet, um die beste Aktion unter den Rollouts zu wählen."
+
+**Tatsächlicher Ablauf:**
+
+Die `n_evals` Environments repräsentieren **verschiedene Init/Goal-Paare** (verschiedene
+Szenarien), NICHT verschiedene Rollout-Kandidaten für dasselbe Szenario:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                  WIE CEM IN plan.py WIRKLICH FUNKTIONIERT                    │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  PHASE 1: CEM-Optimierung (rein im World Model, KEIN Env-Kontakt)          │
+│  ─────────────────────────────────────────────────────────────────           │
+│                                                                             │
+│  for traj in range(n_evals):          # z.B. 5 versch. Szenarien           │
+│      for i in range(opt_steps):        # z.B. 30 CEM-Iterationen           │
+│          sample 300 Action-Kandidaten                                       │
+│          → wm.rollout() im LATENT SPACE (nicht in der Env!)                │
+│          → objective_fn() bewertet Distanz zum Ziel-Embedding              │
+│          → topk=30 beste Kandidaten → neues mu/sigma                       │
+│                                                                             │
+│  Referenz: planning/cem.py Zeile 80-99                                     │
+│                                                                             │
+│  Die 300 Samples werden AUSSCHLIESSLICH durch das World Model              │
+│  gerollt — die echte Env wird hier NIE berührt.                            │
+│                                                                             │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  PHASE 2: Zwischen-Evaluation (echte Env, nur Monitoring)                  │
+│  ──────────────────────────────────────────────────────────                  │
+│                                                                             │
+│  if evaluator is not None and i % eval_every == 0:                         │
+│      logs, successes = evaluator.eval_actions(mu, ...)                     │
+│      if np.all(successes): break   # Early Termination                     │
+│                                                                             │
+│  Referenz: planning/cem.py Zeile 105-113                                   │
+│                                                                             │
+│  Hier werden die aktuellen besten Actions (mu) IN DER ECHTEN ENV           │
+│  ausgeführt — aber das Ergebnis fliesst NICHT zurück in mu/sigma.          │
+│  Es dient nur:                                                              │
+│    1. Monitoring: Wie gut ist der aktuelle Plan in der echten Welt?         │
+│    2. Early Termination: Wenn alle Szenarien erfolgreich → stoppen         │
+│    3. Video-Erzeugung: Side-by-side WM-Prediction vs. Env-Realität        │
+│                                                                             │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  PHASE 3: MPC (nur wenn MPCPlanner konfiguriert, nicht CEM direkt)         │
+│  ─────────────────────────────────────────────────────────────────           │
+│                                                                             │
+│  Der MPCPlanner (planning/mpc.py) ist der EINZIGE Pfad, der echtes         │
+│  Env-Feedback für Replanning nutzt. Er führt CEM aus, nimmt die            │
+│  ersten n_taken_actions, führt sie in der Env aus und plant dann            │
+│  vom neuen Zustand weiter.                                                  │
+│                                                                             │
+│  Der planning_server.py implementiert MPC manuell über den Socket-Loop:    │
+│  Client sendet neues Bild → Server plant → Client führt aus → repeat       │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Zusammenfassung der Rollen:**
+
+| | CEM Auswahl | Env-Evaluation | Feedback in Planner? |
+|---|---|---|---|
+| **300 Samples** | WM-Rollout → Latent-Loss → topk | ❌ Nie in Env | — |
+| **eval_every** | — | ✅ mu in Env ausführen | ❌ Nur Monitoring + Early Stop |
+| **MPC** | CEM als Sub-Planner | ✅ Env-Rollout nach jedem MPC-Step | ✅ Neuer obs_0 für nächste CEM-Runde |
+
+### 12.3 Bug-Katalog mit Fixes
+
+#### 12.3.1 🔴 Bug 1: `model.eval()` wird nie aufgerufen
+
+**Datei:** `planning_server.py` Zeile 107 (nach Fix)
+
+**Problem:** Nach `load_model()` bleibt das Model im `train()`-Modus.
+`VWorldModel.train()` (models/visual_world_model.py Zeile 78-86) aktiviert
+Training-Modi für alle Sub-Module (Encoder, Predictor, Proprio/Action-Encoder).
+Folgen:
+- **Dropout-Layer** im Predictor erzeugen stochastische Ausgaben
+- **Stochastische Regularisierung** verfälscht Ergebnisse
+- Im persistenten Server akkumuliert sich die Stochastik über viele Requests
+
+**Mögliche Lösungen:**
+1. ✅ `model.eval()` einmal nach dem Laden aufrufen (1 Zeile)
+2. ○ `torch.no_grad()` um jeden Planner-Call (existiert bereits, schützt aber nicht gegen Dropout)
+
+**Gewählte Lösung:** Ansatz 1 — simpelste und nachhaltigste Lösung.
+
+```python
+model = load_model(model_ckpt, model_cfg, model_cfg.num_action_repeat, device)
+model.eval()  # WICHTIG: Eval-Modus fuer deterministische Inferenz
+```
+
+#### 12.3.2 🔴 Bug 2: Warm-Start füllt mit Nullen auf → Null-Bias
+
+**Datei:** `planning_server.py` Zeile 374-380 (nach Fix)
+
+**Problem (alt):**
+```python
+zero_tail = torch.zeros(1, 1, warm_start.shape[2], device=warm_start.device)
+actions_init = torch.cat([shifted, zero_tail], dim=1)
+```
+
+Die letzte Action im Warm-Start war immer `[0, 0, ..., 0]`. Im normalisierten
+Raum bedeutet Null: "bewege dich zum Mittelwert aller Trainingsaktionen". Der CEM
+startet mit einem Plan, dessen letzte Aktion systematisch in Richtung Dataset-
+Mittelwert verzerrt ist.
+
+Bei wenigen opt_steps (z.B. 5 im Online-Modus) hat CEM zu wenig Iterationen,
+um diesen Bias zu überwinden. Effekt: Roboter-Arm "driftet" in Richtung
+Mittelposition des Workspace nach mehreren MPC-Schritten.
+
+**Mögliche Lösungen:**
+1. ✅ Letzte bekannte Action wiederholen statt Null (1 Zeile)
+2. ○ Lineare Extrapolation der letzten 2 Actions
+3. ○ Kein Warm-Start (jedes Mal von Null starten → schlechtere Konvergenz)
+
+**Gewählte Lösung:** Ansatz 1 — physikalisch am sinnvollsten (Trägheitsannahme).
+
+```python
+last_action = warm_start[:, -1:, :]  # Letzte bekannte Action
+actions_init = torch.cat([shifted, last_action], dim=1)
+```
+
+#### 12.3.3 🟡 Bug 3: `torch.cuda.empty_cache()` zwischen Chunks fragmentiert VRAM
+
+**Datei:** `planning_server.py`, `ChunkedRolloutWrapper.rollout()` Zeile 168 (nach Fix)
+
+**Problem (alt):**
+```python
+for start in range(0, B, self.chunk_size):
+    ...
+    z_obses, zs = self._model.rollout(chunk_obs, chunk_act)
+    all_z_obses.append(z_obses)
+    all_zs.append(zs)
+    torch.cuda.empty_cache()  # ← ZWISCHEN Chunks!
+```
+
+`empty_cache()` gibt den CUDA-Cache frei, aber die akkumulierten Ergebnis-Tensoren
+bleiben alloziert. Der nächste Chunk muss neuen Speicher anfordern → Fragmentierung.
+Bei vielen Chunks kann das paradoxerweise zu MEHR OOM führen statt weniger.
+
+**Mögliche Lösungen:**
+1. ✅ `empty_cache()` nur einmal NACH der Schleife (2 Zeilen)
+2. ○ `.detach().cpu()` für Zwischen-Ergebnisse (komplexer, mehr Code)
+3. ○ Chunking komplett entfernen (riskant bei großen Batches)
+
+**Gewählte Lösung:** Ansatz 1 — keine Fragmentierung, volle Kontrolle.
+
+```python
+for start in range(0, B, self.chunk_size):
+    ...
+    all_z_obses.append(z_obses)
+    all_zs.append(zs)
+# GPU-Cache erst NACH allen Chunks freigeben
+if torch.cuda.is_available():
+    torch.cuda.empty_cache()
+```
+
+#### 12.3.4 🔴 Bug 4: `evaluator=None` → Kein Early-Stopping im CEM
+
+**Datei:** `planning_server.py` Zeile 278
+
+**Problem:** Im Server ist `evaluator=None`. In `cem.py` Zeile 105-113 wird
+der gesamte Evaluierungs- und Early-Termination-Block übersprungen:
+
+```python
+if self.evaluator is not None and i % self.eval_every == 0:
+    logs, successes, _, _ = self.evaluator.eval_actions(...)
+    if np.all(successes):
+        break  # ← Existiert nicht im Server
+```
+
+**Auswirkung:** Kein Qualitätsproblem (Early Stop spart nur Zeit), aber der Server
+optimiert immer für alle opt_steps, auch wenn der Loss bereits konvergiert ist.
+
+**Mögliche Lösungen:**
+1. ✅ Akzeptieren — ist im Server kein kritisches Problem, da Online-Modus
+   ohnehin wenige Schritte nutzt. Bei Bedarf: Loss-Konvergenz-Check im
+   `LoggingRun` hinzufügen (Eigenentwicklung, nicht aus plan.py übertragbar,
+   da kein Env im Server vorhanden ist).
+2. ○ Socket-basierter Evaluator (Server fragt Client nach Env-Feedback) —
+   würde bidirektionale Kommunikation erfordern, hohe Komplexität
+3. ○ Dummy-Evaluator der nur Loss-Konvergenz prüft
+
+**Gewählte Lösung:** Ansatz 1 — bewusste Entscheidung: der CEM-Loss auf stdout
+zeigt dem Nutzer bereits die Konvergenz. Ein automatischer Early-Stop wäre
+Premature Optimization bei den aktuellen Online-Parametern (5-15 Steps).
+
+#### 12.3.5 🟡 Bug 5: `__getattr__`-Fallback maskiert Fehler im ChunkedRolloutWrapper
+
+**Datei:** `planning_server.py`, `ChunkedRolloutWrapper` Zeile 141-152 (nach Fix)
+
+**Problem:** Jeder Attributzugriff, der nicht explizit gesetzt ist, wird stumm
+an `self._model` delegiert. `nn.Module`-Methoden wie `to()`, `state_dict()`
+werden durchgereicht, was dazu führen kann, dass z.B. `model.to('cpu')` den
+Wrapper intakt lässt aber das innere Model verschiebt.
+
+**Gewählte Lösung:** Explizite Forwarding-Methoden für kritische Operationen.
+
+```python
+def to(self, *args, **kwargs):
+    self._model.to(*args, **kwargs)
+    return self
+
+def state_dict(self, *args, **kwargs):
+    return self._model.state_dict(*args, **kwargs)
+```
+
+### 12.4 Verbleibende strukturelle Unterschiede
+
+Diese Unterschiede sind **architekturbedingt** und können nicht durch einfache
+Bugfixes behoben werden:
+
+| Aspekt | `plan.py` | `planning_server.py` | Anmerkung |
+|--------|-----------|---------------------|-----------|
+| **Evaluator** | `PlanEvaluator` mit Env-Rollout | `None` | Server hat keine Env — Client-seitige MPC-Loop ersetzt dies |
+| **MPC** | `MPCPlanner` mit Env-Feedback | Socket-Loop im Client | Funktional äquivalent, aber ohne server-seitige Action-Maskierung |
+| **Multi-Eval** | `n_evals=5` parallele Szenarien | Immer `n_evals=1` | Ok für Online-Betrieb (1 Szenario = 1 Roboter) |
+| **Dataset-Targets** | `prepare_targets()` aus Dset | Socket-basierte Goals | Architektureller Unterschied, kein Bug |
+| **Reproduzierbarkeit** | `dump_targets()` + `logs.json` | Nur stdout | Ggf. JSON-Log hinzufügen |
+
+### 12.5 Zusammenfassung der Änderungen
+
+**Geänderte Datei:** `planning_server.py`
+
+| Bug | Schwere | Fix | Zeilen geändert | Erwartete Auswirkung |
+|-----|---------|-----|-----------------|---------------------|
+| `model.eval()` fehlt | 🔴 Hoch | 1 Zeile hinzugefügt | +1 | Deterministische Inferenz |
+| Warm-Start Null-Bias | 🔴 Hoch | `zero_tail` → `last_action` | ~3 | Kein Drift zum Dataset-Mittelwert |
+| `empty_cache()` Fragmentierung | 🟡 Mittel | Nach statt in der Schleife | ~3 | Stabilere GPU-Nutzung |
+| Evaluator fehlt | 🔴 Info | Bewusst akzeptiert | 0 | — (kein Fix nötig) |
+| Wrapper-Forwarding | 🟡 Mittel | `to()` + `state_dict()` | +6 | Robustere Wrapper-Nutzung |
+
+**Gesamt: ~13 Zeilen geändert, 0 neue Abhängigkeiten, 0 API-Änderungen.**
+
+Die CEM-Parameter-Korrektur (num_samples/opt_steps/topk auf cem.yaml-Defaults)
+wurde bereits separat durchgeführt und ist hier nicht erneut dokumentiert.

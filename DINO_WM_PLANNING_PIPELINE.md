@@ -740,3 +740,115 @@ state_std  = [14D Vektor]
     │ ─────────────────────────────────── ▶ │
     ▼                                      ▼
 ```
+
+---
+
+## BUGFIXES IM PLANNING SERVER (16.02.2026)
+
+> Systematische Analyse der Code-Pfade `plan.py` vs. `planning_server.py`.
+> Fünf Bugs identifiziert und behoben. Details in DINO_WM_PLANNING_DOCUMENTATION.md §12.
+
+### Übersicht der Fixes
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                PLANNING SERVER BUGFIXES                              │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  FIX 1: model.eval() nach load_model()                             │
+│  ─────────────────────────────────────                              │
+│  Vorher: Model bleibt im train()-Modus                             │
+│          → Dropout/Stochastik aktiv bei Inferenz                   │
+│  Nachher: model.eval() → deterministische Predictions              │
+│                                                                     │
+│  FIX 2: Warm-Start Null-Bias behoben                               │
+│  ─────────────────────────────────                                  │
+│  Vorher: Letzte Action im Warm-Start = [0,0,...,0]                 │
+│          → CEM-Init biased Richtung Dataset-Mittelwert             │
+│  Nachher: Letzte bekannte Action wird wiederholt                   │
+│          → Physikalisch sinnvolle Trägheitsannahme                 │
+│                                                                     │
+│  FIX 3: CUDA Cache-Fragmentierung behoben                          │
+│  ──────────────────────────────────────                              │
+│  Vorher: empty_cache() INNERHALB der Chunk-Schleife               │
+│          → VRAM-Fragmentierung, paradoxerweise mehr OOM            │
+│  Nachher: empty_cache() nur einmal NACH der Schleife               │
+│                                                                     │
+│  FIX 4: Evaluator=None → Bewusst akzeptiert                       │
+│  ──────────────────────────────────────────                          │
+│  Server hat keine Env → kein Early-Stop via Evaluator möglich      │
+│  Client-seitige MPC-Loop übernimmt diese Rolle                     │
+│                                                                     │
+│  FIX 5: ChunkedRolloutWrapper Robustheit                           │
+│  ──────────────────────────────────────                              │
+│  Vorher: __getattr__ Fallback maskiert Fehler                      │
+│  Nachher: Explizite to()/state_dict() Forwarding-Methoden          │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### Warm-Start: Warum Null-Bias ein Problem ist
+
+```
+MPC-Loop mit Null-Bias (ALT):
+─────────────────────────────
+Step 0: Plan = [a₀, a₁, a₂, a₃, a₄]     ← CEM von Null
+Step 1: Init = [a₁, a₂, a₃, a₄, 0⃗]      ← Shift + NULLEN
+                                  ↑
+                        Im z-normalisierten Raum
+                        = "bewege zum Dataset-Mittelwert"
+Step 2: Init = [a₂, a₃, a₄, 0⃗, 0⃗]      ← 2 Null-Actions
+Step 3: Init = [a₃, a₄, 0⃗, 0⃗, 0⃗]       ← Dominiert von Nullen!
+→ Roboter driftet zum Workspace-Zentrum statt zum Ziel
+
+MPC-Loop mit Last-Action-Repeat (NEU):
+──────────────────────────────────────
+Step 0: Plan = [a₀, a₁, a₂, a₃, a₄]
+Step 1: Init = [a₁, a₂, a₃, a₄, a₄]     ← Shift + REPEAT
+Step 2: Init = [a₂, a₃, a₄, a₄, a₄]     ← Fortsetzung der Tendenz
+→ CEM startet mit physikalisch sinnvoller Schätzung
+```
+
+### CEM-Ablauf: Was plan.py tut vs. was man erwarten könnte
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│           HÄUFIGES MISSVERSTÄNDNIS (KORRIGIERT)                     │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  FALSCH: "n_evals parallele Envs wählen die beste Aktion"         │
+│                                                                     │
+│  RICHTIG: n_evals = verschiedene Szenarien (Init/Goal-Paare)       │
+│           300 Samples = Kandidaten PRO Szenario (nur im WM!)       │
+│           topk = Eliten-Selektion PRO Szenario                     │
+│           Env-Evaluation = nur Monitoring + Early-Stop              │
+│                                                                     │
+│  Der CEM optimiert im LATENT SPACE des World Models.               │
+│  Die echte Env wird nur zum Validieren benutzt, NICHT              │
+│  zum Auswählen — die Auswahl passiert über die Objective           │
+│  Function (MSE im Embedding-Space).                                 │
+│                                                                     │
+│  Im Planning Server: n_evals=1 (ein Roboter, ein Szenario)        │
+│  → Kein Unterschied in der CEM-Qualität selbst                    │
+│  → Unterschied nur: kein Early-Stop und kein Monitoring            │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### Verbleibende Architektur-Unterschiede (kein Bugfix möglich)
+
+```
+plan.py                                  planning_server.py
+────────                                 ─────────────────
+PlanEvaluator (Env-Rollout,              evaluator=None
+Videos, Metriken, Early-Stop)            → Client übernimmt Eval
+
+MPCPlanner (automatisches                Socket-Loop ersetzt MPC:
+Replanning + Action-Maskierung)          plan → execute → neues Bild → plan
+
+n_evals=5 (Batch über Szenarien)         n_evals=1 (ein Roboter)
+
+prepare_targets() aus Dataset            Goals via Socket (set_goal)
+
+WandB Logging + logs.json                LoggingRun auf stdout
+```

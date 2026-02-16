@@ -1,0 +1,15 @@
+  W&B Run: https://wandb.ai/jacob-weyer-rwth-aachen-university/dino_wm_planning/runs/7izggj7g
+✓ Setup komplett
+  Modus: ONLINE
+  CEM: samples=300, steps=30, topk=30, horizon=5
+  Suchraum: 60D (H=5 × D=12)
+Server laeuft auf localhost:5555
+Warte auf Client...
+[+] Client: ('127.0.0.1', 39742)
+  W&B Config aktualisiert mit Client-Config (12 Keys)
+  Client-Config empfangen: ['port', 'n_episodes', 'max_steps', 'headless', 'goal_image', 'settle_steps', 'ee_threshold', 'timeout', 'mode', 'log_dir', 'robot_opacity_for_capture', 'scene_config']
+  Reset
+  Goal gesetzt: (224, 224, 3) uint8, ee_pos=[ 0.5861372  -0.19599408  0.0685048 ]
+    CEM step 1: loss=0.900987
+    CEM step 2: loss=0.585020
+    CEM step 3: loss=0.540812

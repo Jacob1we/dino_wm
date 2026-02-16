@@ -59,6 +59,9 @@ parser.add_argument("--topk", type=int, default=30)
 parser.add_argument("--chunk_size", type=int, default=None,
                     help="Max Batch-Size pro WM Rollout (OOM-Schutz). "
                          "None=auto (GPU-abhaengig), 0=kein Chunking.")
+parser.add_argument("--n_sub_actions", type=int, default=1,
+                    help="Anzahl Sub-Actions pro Plan-Step (default: 1). "
+                         "Max = frameskip. 0 = alle (=frameskip).")
 args = parser.parse_args()
 
 # # Default Parameter aus dem Paper:
@@ -294,11 +297,21 @@ class WandBPlanningRun:
         self._global_step = 0
 
         # W&B initialisieren — wie train.py's wandb.init()
+        # Run-Name enthaelt CEM-Parameter fuer schnelle Identifikation
+        model = server_config.get('model_name', 'unknown')
+        mode = server_config.get('mode', 'online')
+        H = server_config.get('goal_H', '?')
+        S = server_config.get('num_samples', '?')
+        O = server_config.get('opt_steps', '?')
+        K = server_config.get('topk', '?')
+        N = server_config.get('n_sub_actions', 1)
+        run_name = f"plan_{model}_{mode}_H{H}_S{S}_O{O}_K{K}_N{N}"
+
         self._run = wandb.init(
             project=project,
             config=server_config,
-            name=f"plan_{server_config.get('model_name', 'unknown')}_{server_config.get('mode', 'online')}",
-            tags=["planning", server_config.get("mode", "online")],
+            name=run_name,
+            tags=["planning", mode],
             reinit=True,
         )
         print(f"  W&B Run: {self._run.url}")
@@ -402,6 +415,7 @@ server_config = {
     # Server-Parameter
     "port": args.port,
     "chunk_size": args.chunk_size,
+    "n_sub_actions": args.n_sub_actions,
 }
 
 wandb_run = WandBPlanningRun(server_config)
@@ -531,10 +545,13 @@ while True:
 
                     print(f"  Plan: {wandb_run.get_summary(t_plan)}")
 
-                    # Erste Horizon-Aktion → frameskip Sub-Actions
+                    # Erste Horizon-Aktion → frameskip Sub-Actions, dann auf n_sub_actions kuerzen
                     denorm = preprocessor.denormalize_actions(actions[0, 0:1].cpu())
-                    sub_actions = rearrange(denorm, "t (f d) -> (t f) d",
-                                            f=frameskip).numpy()
+                    all_sub = rearrange(denorm, "t (f d) -> (t f) d",
+                                        f=frameskip).numpy()
+                    # n_sub_actions: 0 oder >= frameskip → alle, sonst kuerzen
+                    n_ret = args.n_sub_actions if 0 < args.n_sub_actions < len(all_sub) else len(all_sub)
+                    sub_actions = all_sub[:n_ret]
                     wandb_run.log_plan_summary(t_plan, len(sub_actions), mode="plan")
                     # Diagnostik: denormalisierte Zielposition
                     for si, sa in enumerate(sub_actions):
@@ -561,10 +578,22 @@ while True:
 
                     print(f"  PlanAll: {wandb_run.get_summary(t_plan)}")
 
-                    # Alle Horizon-Actions → Einzel-Steps
+                    # Alle Horizon-Actions → Einzel-Steps, n_sub_actions pro Horizon-Step
                     denorm = preprocessor.denormalize_actions(actions[0].cpu())
-                    all_actions = rearrange(denorm, "t (f d) -> (t f) d",
-                                            f=frameskip).numpy()
+                    all_sub = rearrange(denorm, "t (f d) -> (t f) d",
+                                        f=frameskip).numpy()
+                    # n_sub_actions pro Horizon-Step anwenden:
+                    # all_sub hat (horizon * frameskip) Zeilen, in horizon-Bloecke aufteilen
+                    n_ret = args.n_sub_actions if 0 < args.n_sub_actions < frameskip else frameskip
+                    if n_ret < frameskip:
+                        # Je Horizon-Block nur die ersten n_ret Sub-Actions behalten
+                        n_horizon = len(all_sub) // frameskip
+                        kept = []
+                        for h in range(n_horizon):
+                            kept.append(all_sub[h * frameskip : h * frameskip + n_ret])
+                        all_actions = np.concatenate(kept, axis=0)
+                    else:
+                        all_actions = all_sub
                     response = {
                         "status": "ok",
                         "actions": all_actions.tolist(),
@@ -572,7 +601,7 @@ while True:
                         "plan_time": t_plan,
                     }
                     wandb_run.log_plan_summary(t_plan, len(all_actions), mode="plan_all")
-                    print(f"  → {len(all_actions)} Actions in {t_plan:.1f}s")
+                    print(f"  → {len(all_actions)} Actions ({n_ret}/{frameskip} Sub-Actions/Step) in {t_plan:.1f}s")
 
             elif cmd == "reset":
                 goal_obs = None

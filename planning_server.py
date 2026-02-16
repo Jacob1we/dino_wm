@@ -346,6 +346,12 @@ class WandBPlanningRun:
             log_data["plan_count"] = self._plan_count
             self._run.log(log_data)
 
+    def log_step(self, step_data: dict):
+        """Per-Step Metriken loggen (EEF→Cube, Ist→Soll Distanz)."""
+        if self._run:
+            log_data = {f"step/{k}": v for k, v in step_data.items()}
+            self._run.log(log_data)
+
     def log_episode(self, episode_data: dict):
         """Episode-Zusammenfassung loggen (nach jeder Episode im Client)."""
         self._episode_count += 1
@@ -504,6 +510,12 @@ while True:
                 wandb_run.update_config(client_cfg)
                 response = {"status": "ok", "wandb_run_id": wandb_run.id}
                 print(f"  Client-Config empfangen: {list(client_cfg.keys())}")
+
+            elif cmd == "log_step":
+                # Client sendet Per-Step-Metriken (Distanzen)
+                step_data = msg.get("data", {})
+                wandb_run.log_step(step_data)
+                response = {"status": "ok"}
 
             elif cmd == "log_episode":
                 # Client sendet Episode-Metriken (Cube-Distanzen, Erfolg, etc.)

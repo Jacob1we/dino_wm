@@ -1,0 +1,94 @@
+  W&B Run: https://wandb.ai/jacob-weyer-rwth-aachen-university/dino_wm_planning/runs/a24vmjus
+✓ Setup komplett
+  Modus: ONLINE
+  CEM: samples=300, steps=30, topk=30, horizon=5
+  Suchraum: 60D (H=5 × D=12)
+Server laeuft auf localhost:5555
+Warte auf Client...
+[+] Client: ('127.0.0.1', 37332)
+  W&B Config aktualisiert mit Client-Config (12 Keys)
+  Client-Config empfangen: ['port', 'n_episodes', 'max_steps', 'headless', 'goal_image', 'settle_steps', 'ee_threshold', 'timeout', 'mode', 'log_dir', 'robot_opacity_for_capture', 'scene_config']
+  Reset
+  Goal gesetzt: (224, 224, 3) uint8, ee_pos=[ 0.5861372  -0.19599408  0.0685048 ]
+    CEM step 1: loss=0.895414
+    CEM step 2: loss=0.586685
+    CEM step 3: loss=0.486659
+    CEM step 4: loss=0.531606
+    CEM step 5: loss=0.454100
+    CEM step 6: loss=0.392233
+    CEM step 7: loss=0.433552
+    CEM step 8: loss=0.438504
+    CEM step 9: loss=0.423161
+    CEM step 10: loss=0.414058
+    CEM step 11: loss=0.410806
+    CEM step 12: loss=0.397970
+    CEM step 13: loss=0.380710
+    CEM step 14: loss=0.392919
+    CEM step 15: loss=0.379264
+    CEM step 16: loss=0.367754
+    CEM step 17: loss=0.362233
+    CEM step 18: loss=0.357599
+    CEM step 19: loss=0.365316
+    CEM step 20: loss=0.359246
+    CEM step 21: loss=0.354128
+    CEM step 22: loss=0.337730
+    CEM step 23: loss=0.353187
+    CEM step 24: loss=0.348183
+    CEM step 25: loss=0.347117
+    CEM step 26: loss=0.344340
+    CEM step 27: loss=0.339922
+    CEM step 28: loss=0.337522
+    CEM step 29: loss=0.336756
+    CEM step 30: loss=0.335270
+  Plan: 0.895414 → 0.335270 (62.6% Reduktion, 311.4s)
+    Sub-Action 0: target_ee=[0.399, -0.002, 0.223]
+    CEM step 1: loss=0.574647
+    CEM step 2: loss=0.480568
+    CEM step 3: loss=0.406955
+    CEM step 4: loss=0.434822
+    CEM step 5: loss=0.412060
+    CEM step 6: loss=0.375820
+    CEM step 7: loss=0.377372
+    CEM step 8: loss=0.377456
+    CEM step 9: loss=0.357748
+    CEM step 10: loss=0.367351
+    CEM step 11: loss=0.367129
+    CEM step 12: loss=0.362943
+    CEM step 13: loss=0.358219
+    CEM step 14: loss=0.365489
+    CEM step 15: loss=0.355201
+    CEM step 16: loss=0.353263
+    CEM step 17: loss=0.348054
+    CEM step 18: loss=0.338294
+    CEM step 19: loss=0.340815
+    CEM step 20: loss=0.339683
+    CEM step 21: loss=0.339023
+    CEM step 22: loss=0.339454
+    CEM step 23: loss=0.336380
+    CEM step 24: loss=0.335579
+    CEM step 25: loss=0.332139
+    CEM step 26: loss=0.333362
+    CEM step 27: loss=0.332609
+[-] Client getrennt
+Traceback (most recent call last):
+  File "/home/tsp_jw/Desktop/dino_wm/planning_server.py", line 541, in <module>
+  File "/home/tsp_jw/Desktop/dino_wm/planning/cem.py", line 108, in plan
+    i_z_obses, i_zs = self.wm.rollout(
+  File "/home/tsp_jw/Desktop/dino_wm/planning_server.py", line 191, in rollout
+    z_obses, zs = self._model.rollout(chunk_obs, chunk_act)
+  File "/home/tsp_jw/Desktop/dino_wm/models/visual_world_model.py", line 301, in rollout
+    z_new = self.replace_actions_from_z(z_new, action[:, t : t + inc, :])
+  File "/home/tsp_jw/Desktop/dino_wm/models/visual_world_model.py", line 279, in replace_actions_from_z
+    act_repeated = act_tiled.repeat(1, 1, 1, self.num_action_repeat)
+KeyboardInterrupt
+Traceback (most recent call last):
+  File "/home/tsp_jw/Desktop/dino_wm/planning_server.py", line 541, in <module>
+  File "/home/tsp_jw/Desktop/dino_wm/planning/cem.py", line 108, in plan
+    i_z_obses, i_zs = self.wm.rollout(
+  File "/home/tsp_jw/Desktop/dino_wm/planning_server.py", line 191, in rollout
+    z_obses, zs = self._model.rollout(chunk_obs, chunk_act)
+  File "/home/tsp_jw/Desktop/dino_wm/models/visual_world_model.py", line 301, in rollout
+    z_new = self.replace_actions_from_z(z_new, action[:, t : t + inc, :])
+  File "/home/tsp_jw/Desktop/dino_wm/models/visual_world_model.py", line 279, in replace_actions_from_z
+    act_repeated = act_tiled.repeat(1, 1, 1, self.num_action_repeat)
+KeyboardInterrupt

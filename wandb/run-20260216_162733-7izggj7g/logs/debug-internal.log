@@ -72,3 +72,346 @@
 2026-02-16 16:28:44,096 INFO    SenderThread:3246824 [sender.py:_save_file():1156] saving file wandb-summary.json with policy end
 2026-02-16 16:28:44,155 INFO    Thread-12 :3246824 [dir_watcher.py:_on_file_modified():292] file/dir modified: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260216_162733-7izggj7g/files/wandb-summary.json
 2026-02-16 16:28:46,155 INFO    Thread-12 :3246824 [dir_watcher.py:_on_file_modified():292] file/dir modified: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260216_162733-7izggj7g/files/output.log
+2026-02-16 16:28:54,079 DEBUG   HandlerThread:3246824 [handler.py:handle_request():141] handle_request: partial_history
+2026-02-16 16:28:54,080 DEBUG   SenderThread:3246824 [sender.py:send():302] send: history
+2026-02-16 16:28:54,081 DEBUG   SenderThread:3246824 [sender.py:send():302] send: summary
+2026-02-16 16:28:54,082 INFO    SenderThread:3246824 [sender.py:_save_file():1156] saving file wandb-summary.json with policy end
+2026-02-16 16:28:54,158 INFO    Thread-12 :3246824 [dir_watcher.py:_on_file_modified():292] file/dir modified: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260216_162733-7izggj7g/files/wandb-summary.json
+2026-02-16 16:28:56,159 INFO    Thread-12 :3246824 [dir_watcher.py:_on_file_modified():292] file/dir modified: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260216_162733-7izggj7g/files/output.log
+2026-02-16 16:28:59,098 DEBUG   HandlerThread:3246824 [handler.py:handle_request():141] handle_request: stop_status
+2026-02-16 16:28:59,099 DEBUG   SenderThread:3246824 [sender.py:send_request():316] send_request: stop_status
+2026-02-16 16:29:04,087 DEBUG   SenderThread:3246824 [sender.py:send():302] send: stats
+2026-02-16 16:29:04,300 DEBUG   HandlerThread:3246824 [handler.py:handle_request():141] handle_request: partial_history
+2026-02-16 16:29:04,301 DEBUG   SenderThread:3246824 [sender.py:send():302] send: history
+2026-02-16 16:29:04,301 DEBUG   SenderThread:3246824 [sender.py:send():302] send: summary
+2026-02-16 16:29:04,302 INFO    SenderThread:3246824 [sender.py:_save_file():1156] saving file wandb-summary.json with policy end
+2026-02-16 16:29:05,162 INFO    Thread-12 :3246824 [dir_watcher.py:_on_file_modified():292] file/dir modified: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260216_162733-7izggj7g/files/wandb-summary.json
+2026-02-16 16:29:06,162 INFO    Thread-12 :3246824 [dir_watcher.py:_on_file_modified():292] file/dir modified: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260216_162733-7izggj7g/files/output.log
+2026-02-16 16:29:14,517 DEBUG   HandlerThread:3246824 [handler.py:handle_request():141] handle_request: stop_status
+2026-02-16 16:29:14,518 DEBUG   SenderThread:3246824 [sender.py:send_request():316] send_request: stop_status
+2026-02-16 16:29:14,559 DEBUG   HandlerThread:3246824 [handler.py:handle_request():141] handle_request: partial_history
+2026-02-16 16:29:14,748 DEBUG   SenderThread:3246824 [sender.py:send():302] send: history
+2026-02-16 16:29:14,748 DEBUG   SenderThread:3246824 [sender.py:send():302] send: summary
+2026-02-16 16:29:14,751 INFO    SenderThread:3246824 [sender.py:_save_file():1156] saving file wandb-summary.json with policy end
+2026-02-16 16:29:15,165 INFO    Thread-12 :3246824 [dir_watcher.py:_on_file_modified():292] file/dir modified: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260216_162733-7izggj7g/files/wandb-summary.json
+2026-02-16 16:29:16,165 INFO    Thread-12 :3246824 [dir_watcher.py:_on_file_modified():292] file/dir modified: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260216_162733-7izggj7g/files/output.log
+2026-02-16 16:29:24,875 DEBUG   HandlerThread:3246824 [handler.py:handle_request():141] handle_request: partial_history
+2026-02-16 16:29:24,876 DEBUG   SenderThread:3246824 [sender.py:send():302] send: history
+2026-02-16 16:29:24,876 DEBUG   SenderThread:3246824 [sender.py:send():302] send: summary
+2026-02-16 16:29:24,878 INFO    SenderThread:3246824 [sender.py:_save_file():1156] saving file wandb-summary.json with policy end
+2026-02-16 16:29:25,168 INFO    Thread-12 :3246824 [dir_watcher.py:_on_file_modified():292] file/dir modified: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260216_162733-7izggj7g/files/wandb-summary.json
+2026-02-16 16:29:26,169 INFO    Thread-12 :3246824 [dir_watcher.py:_on_file_modified():292] file/dir modified: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260216_162733-7izggj7g/files/output.log
+2026-02-16 16:29:29,752 DEBUG   HandlerThread:3246824 [handler.py:handle_request():141] handle_request: stop_status
+2026-02-16 16:29:29,752 DEBUG   SenderThread:3246824 [sender.py:send_request():316] send_request: stop_status
+2026-02-16 16:29:34,874 DEBUG   SenderThread:3246824 [sender.py:send():302] send: stats
+2026-02-16 16:29:35,204 DEBUG   HandlerThread:3246824 [handler.py:handle_request():141] handle_request: partial_history
+2026-02-16 16:29:35,205 DEBUG   SenderThread:3246824 [sender.py:send():302] send: history
+2026-02-16 16:29:35,205 DEBUG   SenderThread:3246824 [sender.py:send():302] send: summary
+2026-02-16 16:29:35,207 INFO    SenderThread:3246824 [sender.py:_save_file():1156] saving file wandb-summary.json with policy end
+2026-02-16 16:29:36,172 INFO    Thread-12 :3246824 [dir_watcher.py:_on_file_modified():292] file/dir modified: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260216_162733-7izggj7g/files/wandb-summary.json
+2026-02-16 16:29:36,172 INFO    Thread-12 :3246824 [dir_watcher.py:_on_file_modified():292] file/dir modified: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260216_162733-7izggj7g/files/output.log
+2026-02-16 16:29:45,607 DEBUG   HandlerThread:3246824 [handler.py:handle_request():141] handle_request: stop_status
+2026-02-16 16:29:45,607 DEBUG   SenderThread:3246824 [sender.py:send_request():316] send_request: stop_status
+2026-02-16 16:29:45,648 DEBUG   HandlerThread:3246824 [handler.py:handle_request():141] handle_request: partial_history
+2026-02-16 16:29:45,862 DEBUG   SenderThread:3246824 [sender.py:send():302] send: history
+2026-02-16 16:29:45,863 DEBUG   SenderThread:3246824 [sender.py:send():302] send: summary
+2026-02-16 16:29:45,865 INFO    SenderThread:3246824 [sender.py:_save_file():1156] saving file wandb-summary.json with policy end
+2026-02-16 16:29:46,176 INFO    Thread-12 :3246824 [dir_watcher.py:_on_file_modified():292] file/dir modified: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260216_162733-7izggj7g/files/wandb-summary.json
+2026-02-16 16:29:48,176 INFO    Thread-12 :3246824 [dir_watcher.py:_on_file_modified():292] file/dir modified: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260216_162733-7izggj7g/files/output.log
+2026-02-16 16:29:56,061 DEBUG   HandlerThread:3246824 [handler.py:handle_request():141] handle_request: partial_history
+2026-02-16 16:29:56,062 DEBUG   SenderThread:3246824 [sender.py:send():302] send: history
+2026-02-16 16:29:56,062 DEBUG   SenderThread:3246824 [sender.py:send():302] send: summary
+2026-02-16 16:29:56,064 INFO    SenderThread:3246824 [sender.py:_save_file():1156] saving file wandb-summary.json with policy end
+2026-02-16 16:29:56,179 INFO    Thread-12 :3246824 [dir_watcher.py:_on_file_modified():292] file/dir modified: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260216_162733-7izggj7g/files/wandb-summary.json
+2026-02-16 16:29:58,180 INFO    Thread-12 :3246824 [dir_watcher.py:_on_file_modified():292] file/dir modified: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260216_162733-7izggj7g/files/output.log
+2026-02-16 16:30:00,866 DEBUG   HandlerThread:3246824 [handler.py:handle_request():141] handle_request: stop_status
+2026-02-16 16:30:00,866 DEBUG   SenderThread:3246824 [sender.py:send_request():316] send_request: stop_status
+2026-02-16 16:30:05,521 DEBUG   SenderThread:3246824 [sender.py:send():302] send: stats
+2026-02-16 16:30:06,513 DEBUG   HandlerThread:3246824 [handler.py:handle_request():141] handle_request: partial_history
+2026-02-16 16:30:06,515 DEBUG   SenderThread:3246824 [sender.py:send():302] send: history
+2026-02-16 16:30:06,515 DEBUG   SenderThread:3246824 [sender.py:send():302] send: summary
+2026-02-16 16:30:06,517 INFO    SenderThread:3246824 [sender.py:_save_file():1156] saving file wandb-summary.json with policy end
+2026-02-16 16:30:07,183 INFO    Thread-12 :3246824 [dir_watcher.py:_on_file_modified():292] file/dir modified: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260216_162733-7izggj7g/files/wandb-summary.json
+2026-02-16 16:30:08,183 INFO    Thread-12 :3246824 [dir_watcher.py:_on_file_modified():292] file/dir modified: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260216_162733-7izggj7g/files/output.log
+2026-02-16 16:30:16,879 DEBUG   HandlerThread:3246824 [handler.py:handle_request():141] handle_request: stop_status
+2026-02-16 16:30:16,879 DEBUG   SenderThread:3246824 [sender.py:send_request():316] send_request: stop_status
+2026-02-16 16:30:16,919 DEBUG   HandlerThread:3246824 [handler.py:handle_request():141] handle_request: partial_history
+2026-02-16 16:30:17,154 DEBUG   SenderThread:3246824 [sender.py:send():302] send: history
+2026-02-16 16:30:17,154 DEBUG   SenderThread:3246824 [sender.py:send():302] send: summary
+2026-02-16 16:30:17,156 INFO    SenderThread:3246824 [sender.py:_save_file():1156] saving file wandb-summary.json with policy end
+2026-02-16 16:30:17,187 INFO    Thread-12 :3246824 [dir_watcher.py:_on_file_modified():292] file/dir modified: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260216_162733-7izggj7g/files/wandb-summary.json
+2026-02-16 16:30:18,187 INFO    Thread-12 :3246824 [dir_watcher.py:_on_file_modified():292] file/dir modified: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260216_162733-7izggj7g/files/output.log
+2026-02-16 16:30:27,372 DEBUG   HandlerThread:3246824 [handler.py:handle_request():141] handle_request: partial_history
+2026-02-16 16:30:27,373 DEBUG   SenderThread:3246824 [sender.py:send():302] send: history
+2026-02-16 16:30:27,373 DEBUG   SenderThread:3246824 [sender.py:send():302] send: summary
+2026-02-16 16:30:27,375 INFO    SenderThread:3246824 [sender.py:_save_file():1156] saving file wandb-summary.json with policy end
+2026-02-16 16:30:28,191 INFO    Thread-12 :3246824 [dir_watcher.py:_on_file_modified():292] file/dir modified: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260216_162733-7izggj7g/files/wandb-summary.json
+2026-02-16 16:30:28,191 INFO    Thread-12 :3246824 [dir_watcher.py:_on_file_modified():292] file/dir modified: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260216_162733-7izggj7g/files/output.log
+2026-02-16 16:30:32,158 DEBUG   HandlerThread:3246824 [handler.py:handle_request():141] handle_request: stop_status
+2026-02-16 16:30:32,158 DEBUG   SenderThread:3246824 [sender.py:send_request():316] send_request: stop_status
+2026-02-16 16:30:36,189 DEBUG   SenderThread:3246824 [sender.py:send():302] send: stats
+2026-02-16 16:30:37,837 DEBUG   HandlerThread:3246824 [handler.py:handle_request():141] handle_request: partial_history
+2026-02-16 16:30:37,838 DEBUG   SenderThread:3246824 [sender.py:send():302] send: history
+2026-02-16 16:30:37,838 DEBUG   SenderThread:3246824 [sender.py:send():302] send: summary
+2026-02-16 16:30:37,841 INFO    SenderThread:3246824 [sender.py:_save_file():1156] saving file wandb-summary.json with policy end
+2026-02-16 16:30:38,195 INFO    Thread-12 :3246824 [dir_watcher.py:_on_file_modified():292] file/dir modified: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260216_162733-7izggj7g/files/wandb-summary.json
+2026-02-16 16:30:40,196 INFO    Thread-12 :3246824 [dir_watcher.py:_on_file_modified():292] file/dir modified: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260216_162733-7izggj7g/files/output.log
+2026-02-16 16:30:48,363 DEBUG   HandlerThread:3246824 [handler.py:handle_request():141] handle_request: stop_status
+2026-02-16 16:30:48,363 DEBUG   SenderThread:3246824 [sender.py:send_request():316] send_request: stop_status
+2026-02-16 16:30:48,403 DEBUG   HandlerThread:3246824 [handler.py:handle_request():141] handle_request: partial_history
+2026-02-16 16:30:48,778 DEBUG   SenderThread:3246824 [sender.py:send():302] send: history
+2026-02-16 16:30:48,778 DEBUG   SenderThread:3246824 [sender.py:send():302] send: summary
+2026-02-16 16:30:48,780 INFO    SenderThread:3246824 [sender.py:_save_file():1156] saving file wandb-summary.json with policy end
+2026-02-16 16:30:49,199 INFO    Thread-12 :3246824 [dir_watcher.py:_on_file_modified():292] file/dir modified: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260216_162733-7izggj7g/files/wandb-summary.json
+2026-02-16 16:30:50,199 INFO    Thread-12 :3246824 [dir_watcher.py:_on_file_modified():292] file/dir modified: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260216_162733-7izggj7g/files/output.log
+2026-02-16 16:30:58,909 DEBUG   HandlerThread:3246824 [handler.py:handle_request():141] handle_request: partial_history
+2026-02-16 16:30:58,910 DEBUG   SenderThread:3246824 [sender.py:send():302] send: history
+2026-02-16 16:30:58,910 DEBUG   SenderThread:3246824 [sender.py:send():302] send: summary
+2026-02-16 16:30:58,912 INFO    SenderThread:3246824 [sender.py:_save_file():1156] saving file wandb-summary.json with policy end
+2026-02-16 16:30:59,203 INFO    Thread-12 :3246824 [dir_watcher.py:_on_file_modified():292] file/dir modified: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260216_162733-7izggj7g/files/wandb-summary.json
+2026-02-16 16:31:00,203 INFO    Thread-12 :3246824 [dir_watcher.py:_on_file_modified():292] file/dir modified: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260216_162733-7izggj7g/files/output.log
+2026-02-16 16:31:03,781 DEBUG   HandlerThread:3246824 [handler.py:handle_request():141] handle_request: stop_status
+2026-02-16 16:31:03,781 DEBUG   SenderThread:3246824 [sender.py:send_request():316] send_request: stop_status
+2026-02-16 16:31:06,655 DEBUG   SenderThread:3246824 [sender.py:send():302] send: stats
+2026-02-16 16:31:09,366 DEBUG   HandlerThread:3246824 [handler.py:handle_request():141] handle_request: partial_history
+2026-02-16 16:31:09,367 DEBUG   SenderThread:3246824 [sender.py:send():302] send: history
+2026-02-16 16:31:09,367 DEBUG   SenderThread:3246824 [sender.py:send():302] send: summary
+2026-02-16 16:31:09,368 INFO    SenderThread:3246824 [sender.py:_save_file():1156] saving file wandb-summary.json with policy end
+2026-02-16 16:31:10,207 INFO    Thread-12 :3246824 [dir_watcher.py:_on_file_modified():292] file/dir modified: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260216_162733-7izggj7g/files/wandb-summary.json
+2026-02-16 16:31:10,207 INFO    Thread-12 :3246824 [dir_watcher.py:_on_file_modified():292] file/dir modified: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260216_162733-7izggj7g/files/output.log
+2026-02-16 16:31:19,810 DEBUG   HandlerThread:3246824 [handler.py:handle_request():141] handle_request: stop_status
+2026-02-16 16:31:19,810 DEBUG   SenderThread:3246824 [sender.py:send_request():316] send_request: stop_status
+2026-02-16 16:31:19,850 DEBUG   HandlerThread:3246824 [handler.py:handle_request():141] handle_request: partial_history
+2026-02-16 16:31:20,034 DEBUG   SenderThread:3246824 [sender.py:send():302] send: history
+2026-02-16 16:31:20,035 DEBUG   SenderThread:3246824 [sender.py:send():302] send: summary
+2026-02-16 16:31:20,039 INFO    SenderThread:3246824 [sender.py:_save_file():1156] saving file wandb-summary.json with policy end
+2026-02-16 16:31:20,210 INFO    Thread-12 :3246824 [dir_watcher.py:_on_file_modified():292] file/dir modified: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260216_162733-7izggj7g/files/wandb-summary.json
+2026-02-16 16:31:22,211 INFO    Thread-12 :3246824 [dir_watcher.py:_on_file_modified():292] file/dir modified: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260216_162733-7izggj7g/files/output.log
+2026-02-16 16:31:30,319 DEBUG   HandlerThread:3246824 [handler.py:handle_request():141] handle_request: partial_history
+2026-02-16 16:31:30,319 DEBUG   SenderThread:3246824 [sender.py:send():302] send: history
+2026-02-16 16:31:30,319 DEBUG   SenderThread:3246824 [sender.py:send():302] send: summary
+2026-02-16 16:31:30,320 INFO    SenderThread:3246824 [sender.py:_save_file():1156] saving file wandb-summary.json with policy end
+2026-02-16 16:31:31,215 INFO    Thread-12 :3246824 [dir_watcher.py:_on_file_modified():292] file/dir modified: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260216_162733-7izggj7g/files/wandb-summary.json
+2026-02-16 16:31:32,215 INFO    Thread-12 :3246824 [dir_watcher.py:_on_file_modified():292] file/dir modified: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260216_162733-7izggj7g/files/output.log
+2026-02-16 16:31:35,039 DEBUG   HandlerThread:3246824 [handler.py:handle_request():141] handle_request: stop_status
+2026-02-16 16:31:35,040 DEBUG   SenderThread:3246824 [sender.py:send_request():316] send_request: stop_status
+2026-02-16 16:31:37,328 DEBUG   SenderThread:3246824 [sender.py:send():302] send: stats
+2026-02-16 16:31:40,763 DEBUG   HandlerThread:3246824 [handler.py:handle_request():141] handle_request: partial_history
+2026-02-16 16:31:40,765 DEBUG   SenderThread:3246824 [sender.py:send():302] send: history
+2026-02-16 16:31:40,765 DEBUG   SenderThread:3246824 [sender.py:send():302] send: summary
+2026-02-16 16:31:40,766 INFO    SenderThread:3246824 [sender.py:_save_file():1156] saving file wandb-summary.json with policy end
+2026-02-16 16:31:41,219 INFO    Thread-12 :3246824 [dir_watcher.py:_on_file_modified():292] file/dir modified: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260216_162733-7izggj7g/files/wandb-summary.json
+2026-02-16 16:31:42,219 INFO    Thread-12 :3246824 [dir_watcher.py:_on_file_modified():292] file/dir modified: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260216_162733-7izggj7g/files/output.log
+2026-02-16 16:31:51,156 DEBUG   HandlerThread:3246824 [handler.py:handle_request():141] handle_request: stop_status
+2026-02-16 16:31:51,157 DEBUG   SenderThread:3246824 [sender.py:send_request():316] send_request: stop_status
+2026-02-16 16:31:51,197 DEBUG   HandlerThread:3246824 [handler.py:handle_request():141] handle_request: partial_history
+2026-02-16 16:31:51,365 DEBUG   SenderThread:3246824 [sender.py:send():302] send: history
+2026-02-16 16:31:51,366 DEBUG   SenderThread:3246824 [sender.py:send():302] send: summary
+2026-02-16 16:31:51,368 INFO    SenderThread:3246824 [sender.py:_save_file():1156] saving file wandb-summary.json with policy end
+2026-02-16 16:31:52,223 INFO    Thread-12 :3246824 [dir_watcher.py:_on_file_modified():292] file/dir modified: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260216_162733-7izggj7g/files/wandb-summary.json
+2026-02-16 16:31:53,223 INFO    Thread-12 :3246824 [dir_watcher.py:_on_file_modified():292] file/dir modified: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260216_162733-7izggj7g/files/output.log
+2026-02-16 16:32:01,598 DEBUG   HandlerThread:3246824 [handler.py:handle_request():141] handle_request: partial_history
+2026-02-16 16:32:01,599 DEBUG   SenderThread:3246824 [sender.py:send():302] send: history
+2026-02-16 16:32:01,606 DEBUG   SenderThread:3246824 [sender.py:send():302] send: summary
+2026-02-16 16:32:01,609 INFO    SenderThread:3246824 [sender.py:_save_file():1156] saving file wandb-summary.json with policy end
+2026-02-16 16:32:02,226 INFO    Thread-12 :3246824 [dir_watcher.py:_on_file_modified():292] file/dir modified: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260216_162733-7izggj7g/files/wandb-summary.json
+2026-02-16 16:32:03,227 INFO    Thread-12 :3246824 [dir_watcher.py:_on_file_modified():292] file/dir modified: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260216_162733-7izggj7g/files/output.log
+2026-02-16 16:32:06,370 DEBUG   HandlerThread:3246824 [handler.py:handle_request():141] handle_request: stop_status
+2026-02-16 16:32:06,370 DEBUG   SenderThread:3246824 [sender.py:send_request():316] send_request: stop_status
+2026-02-16 16:32:07,865 DEBUG   SenderThread:3246824 [sender.py:send():302] send: stats
+2026-02-16 16:32:12,108 DEBUG   HandlerThread:3246824 [handler.py:handle_request():141] handle_request: partial_history
+2026-02-16 16:32:12,109 DEBUG   SenderThread:3246824 [sender.py:send():302] send: history
+2026-02-16 16:32:12,109 DEBUG   SenderThread:3246824 [sender.py:send():302] send: summary
+2026-02-16 16:32:12,111 INFO    SenderThread:3246824 [sender.py:_save_file():1156] saving file wandb-summary.json with policy end
+2026-02-16 16:32:12,230 INFO    Thread-12 :3246824 [dir_watcher.py:_on_file_modified():292] file/dir modified: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260216_162733-7izggj7g/files/wandb-summary.json
+2026-02-16 16:32:15,231 INFO    Thread-12 :3246824 [dir_watcher.py:_on_file_modified():292] file/dir modified: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260216_162733-7izggj7g/files/output.log
+2026-02-16 16:32:22,474 DEBUG   HandlerThread:3246824 [handler.py:handle_request():141] handle_request: stop_status
+2026-02-16 16:32:22,474 DEBUG   SenderThread:3246824 [sender.py:send_request():316] send_request: stop_status
+2026-02-16 16:32:22,515 DEBUG   HandlerThread:3246824 [handler.py:handle_request():141] handle_request: partial_history
+2026-02-16 16:32:22,749 DEBUG   SenderThread:3246824 [sender.py:send():302] send: history
+2026-02-16 16:32:22,750 DEBUG   SenderThread:3246824 [sender.py:send():302] send: summary
+2026-02-16 16:32:22,752 INFO    SenderThread:3246824 [sender.py:_save_file():1156] saving file wandb-summary.json with policy end
+2026-02-16 16:32:23,234 INFO    Thread-12 :3246824 [dir_watcher.py:_on_file_modified():292] file/dir modified: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260216_162733-7izggj7g/files/wandb-summary.json
+2026-02-16 16:32:25,235 INFO    Thread-12 :3246824 [dir_watcher.py:_on_file_modified():292] file/dir modified: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260216_162733-7izggj7g/files/output.log
+2026-02-16 16:32:33,019 DEBUG   HandlerThread:3246824 [handler.py:handle_request():141] handle_request: partial_history
+2026-02-16 16:32:33,019 DEBUG   SenderThread:3246824 [sender.py:send():302] send: history
+2026-02-16 16:32:33,019 DEBUG   SenderThread:3246824 [sender.py:send():302] send: summary
+2026-02-16 16:32:33,022 INFO    SenderThread:3246824 [sender.py:_save_file():1156] saving file wandb-summary.json with policy end
+2026-02-16 16:32:33,237 INFO    Thread-12 :3246824 [dir_watcher.py:_on_file_modified():292] file/dir modified: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260216_162733-7izggj7g/files/wandb-summary.json
+2026-02-16 16:32:35,238 INFO    Thread-12 :3246824 [dir_watcher.py:_on_file_modified():292] file/dir modified: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260216_162733-7izggj7g/files/output.log
+2026-02-16 16:32:37,754 DEBUG   HandlerThread:3246824 [handler.py:handle_request():141] handle_request: stop_status
+2026-02-16 16:32:37,754 DEBUG   SenderThread:3246824 [sender.py:send_request():316] send_request: stop_status
+2026-02-16 16:32:38,266 DEBUG   SenderThread:3246824 [sender.py:send():302] send: stats
+2026-02-16 16:32:43,474 DEBUG   HandlerThread:3246824 [handler.py:handle_request():141] handle_request: partial_history
+2026-02-16 16:32:43,475 DEBUG   SenderThread:3246824 [sender.py:send():302] send: history
+2026-02-16 16:32:43,475 DEBUG   SenderThread:3246824 [sender.py:send():302] send: summary
+2026-02-16 16:32:43,476 INFO    SenderThread:3246824 [sender.py:_save_file():1156] saving file wandb-summary.json with policy end
+2026-02-16 16:32:44,241 INFO    Thread-12 :3246824 [dir_watcher.py:_on_file_modified():292] file/dir modified: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260216_162733-7izggj7g/files/wandb-summary.json
+2026-02-16 16:32:45,241 INFO    Thread-12 :3246824 [dir_watcher.py:_on_file_modified():292] file/dir modified: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260216_162733-7izggj7g/files/output.log
+2026-02-16 16:32:54,026 DEBUG   HandlerThread:3246824 [handler.py:handle_request():141] handle_request: stop_status
+2026-02-16 16:32:54,026 DEBUG   SenderThread:3246824 [sender.py:send_request():316] send_request: stop_status
+2026-02-16 16:32:54,068 DEBUG   HandlerThread:3246824 [handler.py:handle_request():141] handle_request: partial_history
+2026-02-16 16:32:54,238 DEBUG   SenderThread:3246824 [sender.py:send():302] send: history
+2026-02-16 16:32:54,238 DEBUG   SenderThread:3246824 [sender.py:send():302] send: summary
+2026-02-16 16:32:54,239 INFO    SenderThread:3246824 [sender.py:_save_file():1156] saving file wandb-summary.json with policy end
+2026-02-16 16:32:54,244 INFO    Thread-12 :3246824 [dir_watcher.py:_on_file_modified():292] file/dir modified: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260216_162733-7izggj7g/files/wandb-summary.json
+2026-02-16 16:32:57,245 INFO    Thread-12 :3246824 [dir_watcher.py:_on_file_modified():292] file/dir modified: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260216_162733-7izggj7g/files/output.log
+2026-02-16 16:33:04,476 DEBUG   HandlerThread:3246824 [handler.py:handle_request():141] handle_request: partial_history
+2026-02-16 16:33:04,477 DEBUG   SenderThread:3246824 [sender.py:send():302] send: history
+2026-02-16 16:33:04,477 DEBUG   SenderThread:3246824 [sender.py:send():302] send: summary
+2026-02-16 16:33:04,478 INFO    SenderThread:3246824 [sender.py:_save_file():1156] saving file wandb-summary.json with policy end
+2026-02-16 16:33:05,248 INFO    Thread-12 :3246824 [dir_watcher.py:_on_file_modified():292] file/dir modified: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260216_162733-7izggj7g/files/wandb-summary.json
+2026-02-16 16:33:07,249 INFO    Thread-12 :3246824 [dir_watcher.py:_on_file_modified():292] file/dir modified: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260216_162733-7izggj7g/files/output.log
+2026-02-16 16:33:08,696 DEBUG   SenderThread:3246824 [sender.py:send():302] send: stats
+2026-02-16 16:33:09,240 DEBUG   HandlerThread:3246824 [handler.py:handle_request():141] handle_request: stop_status
+2026-02-16 16:33:09,240 DEBUG   SenderThread:3246824 [sender.py:send_request():316] send_request: stop_status
+2026-02-16 16:33:14,932 DEBUG   HandlerThread:3246824 [handler.py:handle_request():141] handle_request: partial_history
+2026-02-16 16:33:14,933 DEBUG   HandlerThread:3246824 [handler.py:handle_request():141] handle_request: partial_history
+2026-02-16 16:33:14,933 DEBUG   SenderThread:3246824 [sender.py:send():302] send: history
+2026-02-16 16:33:14,934 DEBUG   SenderThread:3246824 [sender.py:send():302] send: summary
+2026-02-16 16:33:14,934 INFO    SenderThread:3246824 [sender.py:_save_file():1156] saving file wandb-summary.json with policy end
+2026-02-16 16:33:14,934 DEBUG   SenderThread:3246824 [sender.py:send():302] send: history
+2026-02-16 16:33:14,934 DEBUG   SenderThread:3246824 [sender.py:send():302] send: summary
+2026-02-16 16:33:14,941 INFO    SenderThread:3246824 [sender.py:_save_file():1156] saving file wandb-summary.json with policy end
+2026-02-16 16:33:15,252 INFO    Thread-12 :3246824 [dir_watcher.py:_on_file_modified():292] file/dir modified: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260216_162733-7izggj7g/files/wandb-summary.json
+2026-02-16 16:33:17,253 INFO    Thread-12 :3246824 [dir_watcher.py:_on_file_modified():292] file/dir modified: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260216_162733-7izggj7g/files/output.log
+2026-02-16 16:33:24,445 DEBUG   HandlerThread:3246824 [handler.py:handle_request():141] handle_request: stop_status
+2026-02-16 16:33:24,446 DEBUG   SenderThread:3246824 [sender.py:send_request():316] send_request: stop_status
+2026-02-16 16:33:29,519 DEBUG   HandlerThread:3246824 [handler.py:handle_request():141] handle_request: partial_history
+2026-02-16 16:33:29,520 DEBUG   SenderThread:3246824 [sender.py:send():302] send: history
+2026-02-16 16:33:29,521 DEBUG   SenderThread:3246824 [sender.py:send():302] send: summary
+2026-02-16 16:33:29,521 INFO    SenderThread:3246824 [sender.py:_save_file():1156] saving file wandb-summary.json with policy end
+2026-02-16 16:33:30,257 INFO    Thread-12 :3246824 [dir_watcher.py:_on_file_modified():292] file/dir modified: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260216_162733-7izggj7g/files/wandb-summary.json
+2026-02-16 16:33:31,258 INFO    Thread-12 :3246824 [dir_watcher.py:_on_file_modified():292] file/dir modified: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260216_162733-7izggj7g/files/output.log
+2026-02-16 16:33:39,017 DEBUG   SenderThread:3246824 [sender.py:send():302] send: stats
+2026-02-16 16:33:39,843 DEBUG   HandlerThread:3246824 [handler.py:handle_request():141] handle_request: stop_status
+2026-02-16 16:33:39,843 DEBUG   SenderThread:3246824 [sender.py:send_request():316] send_request: stop_status
+2026-02-16 16:33:39,884 DEBUG   HandlerThread:3246824 [handler.py:handle_request():141] handle_request: partial_history
+2026-02-16 16:33:40,067 DEBUG   SenderThread:3246824 [sender.py:send():302] send: history
+2026-02-16 16:33:40,067 DEBUG   SenderThread:3246824 [sender.py:send():302] send: summary
+2026-02-16 16:33:40,069 INFO    SenderThread:3246824 [sender.py:_save_file():1156] saving file wandb-summary.json with policy end
+2026-02-16 16:33:40,261 INFO    Thread-12 :3246824 [dir_watcher.py:_on_file_modified():292] file/dir modified: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260216_162733-7izggj7g/files/wandb-summary.json
+2026-02-16 16:33:43,262 INFO    Thread-12 :3246824 [dir_watcher.py:_on_file_modified():292] file/dir modified: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260216_162733-7izggj7g/files/output.log
+2026-02-16 16:33:50,328 DEBUG   HandlerThread:3246824 [handler.py:handle_request():141] handle_request: partial_history
+2026-02-16 16:33:50,329 DEBUG   SenderThread:3246824 [sender.py:send():302] send: history
+2026-02-16 16:33:50,330 DEBUG   SenderThread:3246824 [sender.py:send():302] send: summary
+2026-02-16 16:33:50,330 INFO    SenderThread:3246824 [sender.py:_save_file():1156] saving file wandb-summary.json with policy end
+2026-02-16 16:33:51,265 INFO    Thread-12 :3246824 [dir_watcher.py:_on_file_modified():292] file/dir modified: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260216_162733-7izggj7g/files/wandb-summary.json
+2026-02-16 16:33:53,266 INFO    Thread-12 :3246824 [dir_watcher.py:_on_file_modified():292] file/dir modified: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260216_162733-7izggj7g/files/output.log
+2026-02-16 16:33:55,070 DEBUG   HandlerThread:3246824 [handler.py:handle_request():141] handle_request: stop_status
+2026-02-16 16:33:55,070 DEBUG   SenderThread:3246824 [sender.py:send_request():316] send_request: stop_status
+2026-02-16 16:34:00,741 DEBUG   HandlerThread:3246824 [handler.py:handle_request():141] handle_request: partial_history
+2026-02-16 16:34:00,742 DEBUG   SenderThread:3246824 [sender.py:send():302] send: history
+2026-02-16 16:34:00,743 DEBUG   SenderThread:3246824 [sender.py:send():302] send: summary
+2026-02-16 16:34:00,743 INFO    SenderThread:3246824 [sender.py:_save_file():1156] saving file wandb-summary.json with policy end
+2026-02-16 16:34:01,269 INFO    Thread-12 :3246824 [dir_watcher.py:_on_file_modified():292] file/dir modified: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260216_162733-7izggj7g/files/wandb-summary.json
+2026-02-16 16:34:03,270 INFO    Thread-12 :3246824 [dir_watcher.py:_on_file_modified():292] file/dir modified: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260216_162733-7izggj7g/files/output.log
+2026-02-16 16:34:09,393 DEBUG   SenderThread:3246824 [sender.py:send():302] send: stats
+2026-02-16 16:34:11,161 DEBUG   HandlerThread:3246824 [handler.py:handle_request():141] handle_request: stop_status
+2026-02-16 16:34:11,161 DEBUG   SenderThread:3246824 [sender.py:send_request():316] send_request: stop_status
+2026-02-16 16:34:11,201 DEBUG   HandlerThread:3246824 [handler.py:handle_request():141] handle_request: partial_history
+2026-02-16 16:34:11,365 DEBUG   SenderThread:3246824 [sender.py:send():302] send: history
+2026-02-16 16:34:11,365 DEBUG   SenderThread:3246824 [sender.py:send():302] send: summary
+2026-02-16 16:34:11,367 INFO    SenderThread:3246824 [sender.py:_save_file():1156] saving file wandb-summary.json with policy end
+2026-02-16 16:34:12,273 INFO    Thread-12 :3246824 [dir_watcher.py:_on_file_modified():292] file/dir modified: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260216_162733-7izggj7g/files/wandb-summary.json
+2026-02-16 16:34:13,274 INFO    Thread-12 :3246824 [dir_watcher.py:_on_file_modified():292] file/dir modified: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260216_162733-7izggj7g/files/output.log
+2026-02-16 16:34:21,560 DEBUG   HandlerThread:3246824 [handler.py:handle_request():141] handle_request: partial_history
+2026-02-16 16:34:21,561 DEBUG   SenderThread:3246824 [sender.py:send():302] send: history
+2026-02-16 16:34:21,561 DEBUG   SenderThread:3246824 [sender.py:send():302] send: summary
+2026-02-16 16:34:21,561 INFO    SenderThread:3246824 [sender.py:_save_file():1156] saving file wandb-summary.json with policy end
+2026-02-16 16:34:22,277 INFO    Thread-12 :3246824 [dir_watcher.py:_on_file_modified():292] file/dir modified: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260216_162733-7izggj7g/files/wandb-summary.json
+2026-02-16 16:34:23,278 INFO    Thread-12 :3246824 [dir_watcher.py:_on_file_modified():292] file/dir modified: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260216_162733-7izggj7g/files/output.log
+2026-02-16 16:34:26,368 DEBUG   HandlerThread:3246824 [handler.py:handle_request():141] handle_request: stop_status
+2026-02-16 16:34:26,368 DEBUG   SenderThread:3246824 [sender.py:send_request():316] send_request: stop_status
+2026-02-16 16:34:31,955 DEBUG   HandlerThread:3246824 [handler.py:handle_request():141] handle_request: partial_history
+2026-02-16 16:34:31,956 DEBUG   SenderThread:3246824 [sender.py:send():302] send: history
+2026-02-16 16:34:31,956 DEBUG   SenderThread:3246824 [sender.py:send():302] send: summary
+2026-02-16 16:34:31,956 INFO    SenderThread:3246824 [sender.py:_save_file():1156] saving file wandb-summary.json with policy end
+2026-02-16 16:34:32,281 INFO    Thread-12 :3246824 [dir_watcher.py:_on_file_modified():292] file/dir modified: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260216_162733-7izggj7g/files/wandb-summary.json
+2026-02-16 16:34:35,282 INFO    Thread-12 :3246824 [dir_watcher.py:_on_file_modified():292] file/dir modified: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260216_162733-7izggj7g/files/output.log
+2026-02-16 16:34:39,905 DEBUG   SenderThread:3246824 [sender.py:send():302] send: stats
+2026-02-16 16:34:42,313 DEBUG   HandlerThread:3246824 [handler.py:handle_request():141] handle_request: stop_status
+2026-02-16 16:34:42,313 DEBUG   SenderThread:3246824 [sender.py:send_request():316] send_request: stop_status
+2026-02-16 16:34:42,355 DEBUG   HandlerThread:3246824 [handler.py:handle_request():141] handle_request: partial_history
+2026-02-16 16:34:42,523 DEBUG   SenderThread:3246824 [sender.py:send():302] send: history
+2026-02-16 16:34:42,524 DEBUG   SenderThread:3246824 [sender.py:send():302] send: summary
+2026-02-16 16:34:42,525 INFO    SenderThread:3246824 [sender.py:_save_file():1156] saving file wandb-summary.json with policy end
+2026-02-16 16:34:43,285 INFO    Thread-12 :3246824 [dir_watcher.py:_on_file_modified():292] file/dir modified: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260216_162733-7izggj7g/files/wandb-summary.json
+2026-02-16 16:34:45,286 INFO    Thread-12 :3246824 [dir_watcher.py:_on_file_modified():292] file/dir modified: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260216_162733-7izggj7g/files/output.log
+2026-02-16 16:34:52,817 DEBUG   HandlerThread:3246824 [handler.py:handle_request():141] handle_request: partial_history
+2026-02-16 16:34:52,818 DEBUG   SenderThread:3246824 [sender.py:send():302] send: history
+2026-02-16 16:34:52,825 DEBUG   SenderThread:3246824 [sender.py:send():302] send: summary
+2026-02-16 16:34:52,825 INFO    SenderThread:3246824 [sender.py:_save_file():1156] saving file wandb-summary.json with policy end
+2026-02-16 16:34:53,289 INFO    Thread-12 :3246824 [dir_watcher.py:_on_file_modified():292] file/dir modified: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260216_162733-7izggj7g/files/wandb-summary.json
+2026-02-16 16:34:55,290 INFO    Thread-12 :3246824 [dir_watcher.py:_on_file_modified():292] file/dir modified: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260216_162733-7izggj7g/files/output.log
+2026-02-16 16:34:57,527 DEBUG   HandlerThread:3246824 [handler.py:handle_request():141] handle_request: stop_status
+2026-02-16 16:34:57,527 DEBUG   SenderThread:3246824 [sender.py:send_request():316] send_request: stop_status
+2026-02-16 16:35:03,281 DEBUG   HandlerThread:3246824 [handler.py:handle_request():141] handle_request: partial_history
+2026-02-16 16:35:03,282 DEBUG   SenderThread:3246824 [sender.py:send():302] send: history
+2026-02-16 16:35:03,282 DEBUG   SenderThread:3246824 [sender.py:send():302] send: summary
+2026-02-16 16:35:03,283 INFO    SenderThread:3246824 [sender.py:_save_file():1156] saving file wandb-summary.json with policy end
+2026-02-16 16:35:03,292 INFO    Thread-12 :3246824 [dir_watcher.py:_on_file_modified():292] file/dir modified: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260216_162733-7izggj7g/files/wandb-summary.json
+2026-02-16 16:35:05,293 INFO    Thread-12 :3246824 [dir_watcher.py:_on_file_modified():292] file/dir modified: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260216_162733-7izggj7g/files/output.log
+2026-02-16 16:35:10,562 DEBUG   SenderThread:3246824 [sender.py:send():302] send: stats
+2026-02-16 16:35:13,645 DEBUG   HandlerThread:3246824 [handler.py:handle_request():141] handle_request: stop_status
+2026-02-16 16:35:13,645 DEBUG   SenderThread:3246824 [sender.py:send_request():316] send_request: stop_status
+2026-02-16 16:35:13,689 DEBUG   HandlerThread:3246824 [handler.py:handle_request():141] handle_request: partial_history
+2026-02-16 16:35:13,844 DEBUG   SenderThread:3246824 [sender.py:send():302] send: history
+2026-02-16 16:35:13,844 DEBUG   SenderThread:3246824 [sender.py:send():302] send: summary
+2026-02-16 16:35:13,845 INFO    SenderThread:3246824 [sender.py:_save_file():1156] saving file wandb-summary.json with policy end
+2026-02-16 16:35:14,298 INFO    Thread-12 :3246824 [dir_watcher.py:_on_file_modified():292] file/dir modified: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260216_162733-7izggj7g/files/wandb-summary.json
+2026-02-16 16:35:15,298 INFO    Thread-12 :3246824 [dir_watcher.py:_on_file_modified():292] file/dir modified: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260216_162733-7izggj7g/files/output.log
+2026-02-16 16:35:18,561 DEBUG   SenderThread:3246824 [sender.py:send():302] send: exit
+2026-02-16 16:35:18,561 INFO    SenderThread:3246824 [sender.py:send_exit():438] handling exit code: 255
+2026-02-16 16:35:18,561 INFO    SenderThread:3246824 [sender.py:send_exit():440] handling runtime: 464
+2026-02-16 16:35:18,561 DEBUG   HandlerThread:3246824 [handler.py:handle_request():141] handle_request: poll_exit
+2026-02-16 16:35:18,562 INFO    SenderThread:3246824 [sender.py:_save_file():1156] saving file wandb-summary.json with policy end
+2026-02-16 16:35:18,562 INFO    SenderThread:3246824 [sender.py:send_exit():446] send defer
+2026-02-16 16:35:18,562 DEBUG   SenderThread:3246824 [sender.py:send_request():316] send_request: poll_exit
+2026-02-16 16:35:18,562 DEBUG   HandlerThread:3246824 [handler.py:handle_request():141] handle_request: defer
+2026-02-16 16:35:18,562 INFO    HandlerThread:3246824 [handler.py:handle_request_defer():164] handle defer: 0
+2026-02-16 16:35:18,563 DEBUG   SenderThread:3246824 [sender.py:send_request():316] send_request: defer
+2026-02-16 16:35:18,563 INFO    SenderThread:3246824 [sender.py:send_request_defer():455] handle sender defer: 0
+2026-02-16 16:35:18,563 INFO    SenderThread:3246824 [sender.py:transition_state():459] send defer: 1
+2026-02-16 16:35:18,563 DEBUG   HandlerThread:3246824 [handler.py:handle_request():141] handle_request: defer
+2026-02-16 16:35:18,563 INFO    HandlerThread:3246824 [handler.py:handle_request_defer():164] handle defer: 1
+2026-02-16 16:35:18,631 DEBUG   SenderThread:3246824 [sender.py:send_request():316] send_request: defer
+2026-02-16 16:35:18,631 INFO    SenderThread:3246824 [sender.py:send_request_defer():455] handle sender defer: 1
+2026-02-16 16:35:18,631 INFO    SenderThread:3246824 [sender.py:transition_state():459] send defer: 2
+2026-02-16 16:35:18,632 DEBUG   HandlerThread:3246824 [handler.py:handle_request():141] handle_request: defer
+2026-02-16 16:35:18,632 DEBUG   SenderThread:3246824 [sender.py:send():302] send: stats
+2026-02-16 16:35:18,632 INFO    HandlerThread:3246824 [handler.py:handle_request_defer():164] handle defer: 2
+2026-02-16 16:35:18,632 DEBUG   SenderThread:3246824 [sender.py:send_request():316] send_request: defer
+2026-02-16 16:35:18,632 INFO    SenderThread:3246824 [sender.py:send_request_defer():455] handle sender defer: 2
+2026-02-16 16:35:18,632 INFO    SenderThread:3246824 [sender.py:transition_state():459] send defer: 3
+2026-02-16 16:35:18,632 DEBUG   HandlerThread:3246824 [handler.py:handle_request():141] handle_request: defer
+2026-02-16 16:35:18,632 INFO    HandlerThread:3246824 [handler.py:handle_request_defer():164] handle defer: 3
+2026-02-16 16:35:18,632 DEBUG   SenderThread:3246824 [sender.py:send_request():316] send_request: defer
+2026-02-16 16:35:18,633 INFO    SenderThread:3246824 [sender.py:send_request_defer():455] handle sender defer: 3
+2026-02-16 16:35:18,633 INFO    SenderThread:3246824 [sender.py:transition_state():459] send defer: 4
+2026-02-16 16:35:18,633 DEBUG   HandlerThread:3246824 [handler.py:handle_request():141] handle_request: defer
+2026-02-16 16:35:18,633 INFO    HandlerThread:3246824 [handler.py:handle_request_defer():164] handle defer: 4
+2026-02-16 16:35:18,633 DEBUG   SenderThread:3246824 [sender.py:send():302] send: summary
+2026-02-16 16:35:18,633 INFO    SenderThread:3246824 [sender.py:_save_file():1156] saving file wandb-summary.json with policy end
+2026-02-16 16:35:18,633 DEBUG   SenderThread:3246824 [sender.py:send_request():316] send_request: defer
+2026-02-16 16:35:18,633 INFO    SenderThread:3246824 [sender.py:send_request_defer():455] handle sender defer: 4
+2026-02-16 16:35:18,633 INFO    SenderThread:3246824 [sender.py:transition_state():459] send defer: 5
+2026-02-16 16:35:18,634 DEBUG   HandlerThread:3246824 [handler.py:handle_request():141] handle_request: defer
+2026-02-16 16:35:18,634 INFO    HandlerThread:3246824 [handler.py:handle_request_defer():164] handle defer: 5
+2026-02-16 16:35:18,634 DEBUG   SenderThread:3246824 [sender.py:send_request():316] send_request: defer
+2026-02-16 16:35:18,634 INFO    SenderThread:3246824 [sender.py:send_request_defer():455] handle sender defer: 5
+2026-02-16 16:35:18,634 INFO    SenderThread:3246824 [sender.py:transition_state():459] send defer: 6
+2026-02-16 16:35:18,634 DEBUG   HandlerThread:3246824 [handler.py:handle_request():141] handle_request: defer
+2026-02-16 16:35:18,634 INFO    HandlerThread:3246824 [handler.py:handle_request_defer():164] handle defer: 6
+2026-02-16 16:35:18,634 DEBUG   SenderThread:3246824 [sender.py:send_request():316] send_request: defer
+2026-02-16 16:35:18,634 INFO    SenderThread:3246824 [sender.py:send_request_defer():455] handle sender defer: 6
+2026-02-16 16:35:18,663 DEBUG   HandlerThread:3246824 [handler.py:handle_request():141] handle_request: poll_exit
+2026-02-16 16:35:19,300 INFO    Thread-12 :3246824 [dir_watcher.py:_on_file_modified():292] file/dir modified: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260216_162733-7izggj7g/files/wandb-summary.json
+2026-02-16 16:35:20,590 INFO    SenderThread:3246824 [sender.py:transition_state():459] send defer: 7
+2026-02-16 16:35:20,590 DEBUG   SenderThread:3246824 [sender.py:send_request():316] send_request: poll_exit
+2026-02-16 16:35:20,591 DEBUG   HandlerThread:3246824 [handler.py:handle_request():141] handle_request: defer
+2026-02-16 16:35:20,591 INFO    HandlerThread:3246824 [handler.py:handle_request_defer():164] handle defer: 7
+2026-02-16 16:35:20,592 DEBUG   SenderThread:3246824 [sender.py:send_request():316] send_request: defer
+2026-02-16 16:35:20,592 INFO    SenderThread:3246824 [sender.py:send_request_defer():455] handle sender defer: 7
+2026-02-16 16:35:20,592 INFO    SenderThread:3246824 [dir_watcher.py:finish():362] shutting down directory watcher
+2026-02-16 16:35:20,853 INFO    MainThread:3246824 [internal.py:handle_exit():80] Internal process exited

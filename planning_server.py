@@ -36,6 +36,7 @@ os.chdir(dino_wm_dir)
 
 import torch
 import hydra
+import wandb
 from pathlib import Path
 from omegaconf import OmegaConf
 
@@ -268,19 +269,94 @@ else:
     planner_cfg.opt_steps = args.opt_steps or 5
     planner_cfg.topk = args.topk or 10
 
-# WandbRun mit Loss-Logging auf stdout
-class LoggingRun:
-    """Minimales Loss-Logging auf stdout (kein W&B noetig)."""
-    def __init__(self):
-        self.mode = "logging"
+# =============================================================================
+# W&B LOGGING — identisch zum Training (wandb.init + .log)
+# =============================================================================
+
+class WandBPlanningRun:
+    """Echtes W&B-Logging fuer Planning Server.
+    
+    Loggt CEM-Optimierungsschritte, Episode-Metriken und Plan-Zeiten
+    identisch zum Training auf W&B. Zusaetzlich stdout fuer lokale Diagnose.
+    
+    Lifecycle:
+      1. __init__: wandb.init() mit Server+Modell-Config
+      2. update_config(): Client-Config nachtraeglich mergen
+      3. log(): CEM-Steps (wird vom Planner aufgerufen)
+      4. log_episode(): Episode-zusammenfassung
+      5. finish(): wandb.finish() am Ende
+    """
+    def __init__(self, server_config: dict, project: str = "dino_wm_planning"):
+        self.mode = "wandb"
         self._losses = []
         self._plan_count = 0
+        self._episode_count = 0
+        self._global_step = 0
+
+        # W&B initialisieren — wie train.py's wandb.init()
+        self._run = wandb.init(
+            project=project,
+            config=server_config,
+            name=f"plan_{server_config.get('model_name', 'unknown')}_{server_config.get('mode', 'online')}",
+            tags=["planning", server_config.get("mode", "online")],
+            reinit=True,
+        )
+        print(f"  W&B Run: {self._run.url}")
+
+    @property
+    def id(self):
+        return self._run.id if self._run else None
+
+    def update_config(self, client_config: dict):
+        """Client-Config nachtraeglich in W&B-Config mergen.
+        
+        Wird aufgerufen wenn der Client seine Konfiguration sendet
+        (set_client_config Kommando). So ist die komplette Planning-
+        Konfiguration (Server + Client) in einem W&B-Run nachvollziehbar.
+        """
+        if self._run:
+            self._run.config.update({"client": client_config}, allow_val_change=True)
+            print(f"  W&B Config aktualisiert mit Client-Config ({len(client_config)} Keys)")
 
     def log(self, data, *args, **kwargs):
+        """Wird vom CEM-Planner bei jedem Optimierungsschritt aufgerufen."""
+        self._global_step += 1
+        # Stdout (lokale Diagnose)
         for key, value in data.items():
             if "loss" in key:
                 self._losses.append(value)
                 print(f"    CEM step {data.get('step', '?')}: loss={value:.6f}", flush=True)
+        # W&B
+        if self._run:
+            log_data = {f"cem/{k}": v for k, v in data.items()}
+            log_data["global_step"] = self._global_step
+            log_data["plan_count"] = self._plan_count
+            self._run.log(log_data)
+
+    def log_episode(self, episode_data: dict):
+        """Episode-Zusammenfassung loggen (nach jeder Episode im Client)."""
+        self._episode_count += 1
+        if self._run:
+            log_data = {f"episode/{k}": v for k, v in episode_data.items()}
+            log_data["episode"] = self._episode_count
+            self._run.log(log_data)
+
+    def log_plan_summary(self, plan_time: float, n_actions: int, mode: str = "plan"):
+        """Zusammenfassung nach jedem plan/plan_all Aufruf."""
+        if self._run:
+            summary = {
+                f"{mode}/plan_time_s": plan_time,
+                f"{mode}/n_actions": n_actions,
+                f"{mode}/plan_count": self._plan_count,
+            }
+            if self._losses:
+                summary[f"{mode}/final_loss"] = self._losses[-1]
+                summary[f"{mode}/initial_loss"] = self._losses[0]
+                if self._losses[0] > 0:
+                    summary[f"{mode}/loss_reduction_pct"] = (
+                        (1 - self._losses[-1] / self._losses[0]) * 100
+                    )
+            self._run.log(summary)
 
     def get_summary(self, plan_time=None):
         if not self._losses:
@@ -293,11 +369,42 @@ class LoggingRun:
         self._losses.clear()
         self._plan_count += 1
 
-    def watch(self, *a, **kw): pass
-    def config(self, *a, **kw): pass
-    def finish(self): pass
+    def watch(self, *a, **kw):
+        if self._run:
+            self._run.watch(*a, **kw)
 
-wandb_run = LoggingRun()
+    def config(self, *a, **kw): pass
+
+    def finish(self):
+        if self._run:
+            self._run.finish()
+            print("  W&B Run beendet.")
+
+
+# Server-Config zusammenstellen (alles was den Planning-Prozess definiert)
+server_config = {
+    # Modell-Info
+    "model_name": args.model_name,
+    "model_path": model_path,
+    "model_epoch": "latest",
+    # Planning-Parameter
+    "mode": args.mode,
+    "goal_H": horizon,
+    "num_samples": int(planner_cfg.num_samples),
+    "opt_steps": int(planner_cfg.opt_steps),
+    "topk": int(planner_cfg.topk),
+    "action_dim": full_action_dim,
+    "base_action_dim": base_action_dim,
+    "frameskip": frameskip,
+    "search_dim": horizon * full_action_dim,
+    # Modell-Config (aus Training)
+    "training_config": OmegaConf.to_container(model_cfg, resolve=True),
+    # Server-Parameter
+    "port": args.port,
+    "chunk_size": args.chunk_size,
+}
+
+wandb_run = WandBPlanningRun(server_config)
 
 planner = hydra.utils.instantiate(
     planner_cfg,
@@ -377,7 +484,21 @@ while True:
             msg = pickle.loads(data)
             cmd = msg.get("cmd")
 
-            if cmd == "set_goal":
+            if cmd == "set_client_config":
+                # Client sendet seine komplette Konfiguration
+                client_cfg = msg.get("config", {})
+                wandb_run.update_config(client_cfg)
+                response = {"status": "ok", "wandb_run_id": wandb_run.id}
+                print(f"  Client-Config empfangen: {list(client_cfg.keys())}")
+
+            elif cmd == "log_episode":
+                # Client sendet Episode-Metriken (Cube-Distanzen, Erfolg, etc.)
+                episode_data = msg.get("data", {})
+                wandb_run.log_episode(episode_data)
+                response = {"status": "ok"}
+                print(f"  Episode-Log: {episode_data}")
+
+            elif cmd == "set_goal":
                 img = np.array(msg["image"])
                 ee_pos = np.array(msg["ee_pos"]) if "ee_pos" in msg else None
                 goal_obs = img_to_obs(img, ee_pos)
@@ -414,6 +535,7 @@ while True:
                     denorm = preprocessor.denormalize_actions(actions[0, 0:1].cpu())
                     sub_actions = rearrange(denorm, "t (f d) -> (t f) d",
                                             f=frameskip).numpy()
+                    wandb_run.log_plan_summary(t_plan, len(sub_actions), mode="plan")
                     # Diagnostik: denormalisierte Zielposition
                     for si, sa in enumerate(sub_actions):
                         print(f"    Sub-Action {si}: target_ee=[{sa[3]:.3f}, {sa[4]:.3f}, {sa[5]:.3f}]")
@@ -449,6 +571,7 @@ while True:
                         "n_actions": len(all_actions),
                         "plan_time": t_plan,
                     }
+                    wandb_run.log_plan_summary(t_plan, len(all_actions), mode="plan_all")
                     print(f"  → {len(all_actions)} Actions in {t_plan:.1f}s")
 
             elif cmd == "reset":
@@ -458,6 +581,7 @@ while True:
                 print(f"  Reset")
 
             elif cmd == "quit":
+                wandb_run.finish()
                 response = {"status": "ok"}
                 pickle_resp = pickle.dumps(response)
                 conn.sendall(len(pickle_resp).to_bytes(8, 'big') + pickle_resp)

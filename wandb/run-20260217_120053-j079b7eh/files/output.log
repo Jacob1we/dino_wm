@@ -1,0 +1,125 @@
+  W&B Run: https://wandb.ai/jacob-weyer-rwth-aachen-university/dino_wm_planning/runs/j079b7eh
+✓ Setup komplett
+  Modus: ONLINE
+  CEM: samples=300, steps=5, topk=30, horizon=5
+  Suchraum: 60D (H=5 × D=12)
+Server laeuft auf localhost:5555
+Warte auf Client...
+[+] Client: ('127.0.0.1', 38948)
+  W&B Config aktualisiert mit Client-Config (12 Keys)
+  Client-Config empfangen: ['port', 'n_episodes', 'max_steps', 'headless', 'goal_image', 'settle_steps', 'ee_threshold', 'timeout', 'mode', 'log_dir', 'robot_opacity_for_capture', 'scene_config']
+  Reset
+  Goal gesetzt: (224, 224, 3) uint8, ee_pos=[0.40514734 0.07429169 0.43610707]
+    CEM step 1: loss=3.096432
+    CEM step 2: loss=2.269670
+    CEM step 3: loss=1.963721
+    CEM step 4: loss=1.904010
+    CEM step 5: loss=1.807624
+  Plan: 3.096432 → 1.807624 (41.6% Reduktion, 59.5s)
+    Sub-Action 0: target_ee=[0.476, 0.093, 0.152]
+    CEM step 1: loss=1.871126
+    CEM step 2: loss=1.868753
+    CEM step 3: loss=1.844924
+    CEM step 4: loss=1.846225
+    CEM step 5: loss=1.832132
+  Plan: 1.871126 → 1.832132 (2.1% Reduktion, 60.4s)
+    Sub-Action 0: target_ee=[0.545, 0.035, 0.203]
+    CEM step 1: loss=1.880182
+    CEM step 2: loss=1.819958
+    CEM step 3: loss=1.820436
+    CEM step 4: loss=1.782071
+    CEM step 5: loss=1.750062
+  Plan: 1.880182 → 1.750062 (6.9% Reduktion, 60.7s)
+    Sub-Action 0: target_ee=[0.405, -0.021, 0.218]
+    CEM step 1: loss=1.762038
+    CEM step 2: loss=1.700041
+    CEM step 3: loss=1.628005
+    CEM step 4: loss=1.612215
+    CEM step 5: loss=1.593777
+  Plan: 1.762038 → 1.593777 (9.5% Reduktion, 60.8s)
+    Sub-Action 0: target_ee=[0.552, -0.307, 0.152]
+    CEM step 1: loss=1.729991
+    CEM step 2: loss=1.695341
+    CEM step 3: loss=1.685403
+    CEM step 4: loss=1.656428
+    CEM step 5: loss=1.663513
+  Plan: 1.729991 → 1.663513 (3.8% Reduktion, 60.8s)
+    Sub-Action 0: target_ee=[0.612, 0.004, 0.150]
+    CEM step 1: loss=1.686335
+    CEM step 2: loss=1.644157
+    CEM step 3: loss=1.629117
+    CEM step 4: loss=1.619431
+    CEM step 5: loss=1.608459
+  Plan: 1.686335 → 1.608459 (4.6% Reduktion, 60.8s)
+    Sub-Action 0: target_ee=[0.458, -0.099, 0.147]
+    CEM step 1: loss=1.634312
+    CEM step 2: loss=1.636598
+    CEM step 3: loss=1.621862
+    CEM step 4: loss=1.611645
+    CEM step 5: loss=1.601515
+  Plan: 1.634312 → 1.601515 (2.0% Reduktion, 59.9s)
+    Sub-Action 0: target_ee=[0.475, -0.077, 0.179]
+    CEM step 1: loss=1.690662
+    CEM step 2: loss=1.670091
+    CEM step 3: loss=1.666172
+    CEM step 4: loss=1.652333
+    CEM step 5: loss=1.645097
+  Plan: 1.690662 → 1.645097 (2.7% Reduktion, 60.1s)
+    Sub-Action 0: target_ee=[0.368, -0.091, 0.195]
+    CEM step 1: loss=1.686247
+    CEM step 2: loss=1.634465
+    CEM step 3: loss=1.632317
+    CEM step 4: loss=1.627366
+    CEM step 5: loss=1.618281
+  Plan: 1.686247 → 1.618281 (4.0% Reduktion, 59.1s)
+    Sub-Action 0: target_ee=[0.332, 0.043, 0.185]
+    CEM step 1: loss=1.655594
+    CEM step 2: loss=1.630106
+    CEM step 3: loss=1.625700
+    CEM step 4: loss=1.604130
+    CEM step 5: loss=1.596698
+  Plan: 1.655594 → 1.596698 (3.6% Reduktion, 60.6s)
+    Sub-Action 0: target_ee=[0.321, -0.107, 0.217]
+    CEM step 1: loss=1.659250
+    CEM step 2: loss=1.613851
+    CEM step 3: loss=1.612288
+    CEM step 4: loss=1.599100
+    CEM step 5: loss=1.585897
+  Plan: 1.659250 → 1.585897 (4.4% Reduktion, 60.8s)
+    Sub-Action 0: target_ee=[0.422, -0.275, 0.106]
+    CEM step 1: loss=1.633658
+    CEM step 2: loss=1.634163
+    CEM step 3: loss=1.631276
+    CEM step 4: loss=1.620190
+    CEM step 5: loss=1.606312
+  Plan: 1.633658 → 1.606312 (1.7% Reduktion, 60.8s)
+    Sub-Action 0: target_ee=[0.500, -0.072, 0.146]
+    CEM step 1: loss=1.635287
+    CEM step 2: loss=1.602715
+    CEM step 3: loss=1.587340
+    CEM step 4: loss=1.576237
+    CEM step 5: loss=1.568523
+  Plan: 1.635287 → 1.568523 (4.1% Reduktion, 60.8s)
+    Sub-Action 0: target_ee=[0.328, -0.151, 0.170]
+    CEM step 1: loss=1.608144
+[-] Client getrennt
+Traceback (most recent call last):
+  File "/home/tsp_jw/Desktop/dino_wm/planning_server.py", line 553, in <module>
+    actions, _ = planner.plan(
+  File "/home/tsp_jw/Desktop/dino_wm/planning/cem.py", line 108, in plan
+    i_z_obses, i_zs = self.wm.rollout(
+  File "/home/tsp_jw/Desktop/dino_wm/planning_server.py", line 197, in rollout
+    torch.cuda.empty_cache()
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/site-packages/torch/cuda/memory.py", line 162, in empty_cache
+    torch._C._cuda_emptyCache()
+KeyboardInterrupt
+Traceback (most recent call last):
+  File "/home/tsp_jw/Desktop/dino_wm/planning_server.py", line 553, in <module>
+    actions, _ = planner.plan(
+  File "/home/tsp_jw/Desktop/dino_wm/planning/cem.py", line 108, in plan
+    i_z_obses, i_zs = self.wm.rollout(
+  File "/home/tsp_jw/Desktop/dino_wm/planning_server.py", line 197, in rollout
+    torch.cuda.empty_cache()
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/site-packages/torch/cuda/memory.py", line 162, in empty_cache
+    torch._C._cuda_emptyCache()
+KeyboardInterrupt

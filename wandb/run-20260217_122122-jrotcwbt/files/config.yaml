@@ -1,0 +1,315 @@
+wandb_version: 1
+
+_wandb:
+  desc: null
+  value:
+    cli_version: 0.13.1
+    framework: huggingface
+    huggingface_version: 4.21.1
+    is_jupyter_run: false
+    is_kaggle_kernel: false
+    python_version: 3.10.14
+    start_time: 1771327282.524356
+    t:
+      1:
+      - 1
+      - 11
+      - 41
+      - 49
+      - 50
+      - 51
+      - 55
+      - 71
+      2:
+      - 1
+      - 11
+      - 41
+      - 49
+      - 50
+      - 51
+      - 55
+      - 71
+      3:
+      - 13
+      - 15
+      - 16
+      - 23
+      4: 3.10.14
+      5: 0.13.1
+      6: 4.21.1
+      8:
+      - 5
+action_dim:
+  desc: null
+  value: 12
+base_action_dim:
+  desc: null
+  value: 6
+chunk_size:
+  desc: null
+  value: null
+client:
+  desc: null
+  value:
+    ee_threshold: 0.005
+    goal_image: /media/tsp_jw/data/DINO_WM/fcs_datasets/NEps1000_RobOpac0_NPrim20_NCams4_NCube1:19:-1
+    headless: false
+    log_dir: null
+    max_steps: 50
+    mode: online
+    n_episodes: 5
+    port: 5555
+    robot_opacity_for_capture: 0.0
+    scene_config:
+      cam_frequency: 20
+      cam_resolution:
+      - 224
+      - 224
+      cameras:
+      - euler:
+        - 66.0
+        - 0.0
+        - 32.05
+        name: front_right
+        position:
+        - 1.6
+        - -2.0
+        - 1.27
+      - euler:
+        - 66.0
+        - 0.0
+        - 147.95
+        name: front_left
+        position:
+        - 1.6
+        - 2.0
+        - 1.27
+      - euler:
+        - 66.0
+        - 0.0
+        - -35.05
+        name: back_right
+        position:
+        - -1.0
+        - -2.0
+        - 1.27
+      - euler:
+        - 66.0
+        - 0.0
+        - -144.95
+        name: back_left
+        position:
+        - -1.0
+        - 2.0
+        - 1.27
+      controller:
+        air_dt: 1.0
+        air_speed_multiplier: 1.0
+        critical_dt: 0.01
+        critical_height_threshold: 0.1
+        critical_speed_factor: 0.5
+        grip_dt: 0.15
+        guarantee_final_position: true
+        guarantee_phases:
+        - 1
+        - 6
+        height_adaptive_speed: false
+        release_dt: 0.15
+        trajectory_resolution: 1.0
+        wait_dt: 0.5
+      cube_size: 0.05
+      dataset_name: NEps50_ActInt10_RobOpac10_NCams1_NCube1
+      dataset_path: /media/tsp_jw/data/DINO_WM/fcs_datasets
+      fixed_cube_color:
+      - 0.2
+      - 0.4
+      - 0.9
+      fixed_light:
+        intensity: 8000.0
+        position:
+        - 0.4
+        - 0.0
+        - 2.0
+        radius: 0.5
+      fixed_plane_rgba:
+      - 0.82
+      - 0.82
+      - 0.82
+      - 1.0
+      max_placement_tries: 200
+      min_dist_factor: 1.5
+      n_cubes: 1
+      plane_lift: 0.001
+      robot_base_clearance: 0.3
+      robot_max_reach: 0.75
+      robot_min_reach: 0.3
+      robot_opacity_for_capture: 0.0
+      scene:
+        length: 0.75
+        plane_lift: 0.001
+        width: 0.6
+      scene_length: 0.75
+      scene_width: 0.6
+      seed: 111
+      vis_rand_enabled: false
+      visual_randomization:
+        enabled: false
+        fixed_cube_color:
+        - 0.2
+        - 0.4
+        - 0.9
+        fixed_light:
+          intensity: 8000.0
+          position:
+          - 0.4
+          - 0.0
+          - 2.0
+          radius: 0.5
+        fixed_plane_rgba:
+        - 0.82
+        - 0.82
+        - 0.82
+        - 1.0
+      yaw_range:
+      - 0.0
+      - 0.0
+    settle_steps: 20
+    timeout: 1000
+frameskip:
+  desc: null
+  value: 2
+goal_H:
+  desc: null
+  value: 5
+mode:
+  desc: null
+  value: online
+model_epoch:
+  desc: null
+  value: latest
+model_name:
+  desc: null
+  value: 260216/23-42
+model_path:
+  desc: null
+  value: /home/tsp_jw/Desktop/dino_wm/outputs/260216/23-42/
+n_sub_actions:
+  desc: null
+  value: 1
+num_samples:
+  desc: null
+  value: 300
+opt_steps:
+  desc: null
+  value: 5
+port:
+  desc: null
+  value: 5555
+search_dim:
+  desc: null
+  value: 60
+topk:
+  desc: null
+  value: 30
+training_config:
+  desc: null
+  value:
+    action_emb_dim: 10
+    action_encoder:
+      _target_: models.proprio.ProprioceptiveEmbedding
+      num_frames: 1
+      tubelet_size: 1
+      use_3d_pos: false
+    ckpt_base_path: ./
+    concat_dim: 1
+    debug: false
+    decoder:
+      _target_: models.vqvae.VQVAE
+      channel: 384
+      n_embed: 2048
+      n_res_block: 4
+      n_res_channel: 128
+      quantize: false
+    effective_batch_size: 4
+    encoder:
+      _target_: models.dino.DinoV2Encoder
+      feature_key: x_norm_patchtokens
+      name: dinov2_vits14
+    env:
+      action_dim: 6
+      args: []
+      dataset:
+        _target_: datasets.franka_cube_stack_dset.load_franka_cube_stack_slice_train_val
+        data_path: /media/tsp_jw/data/DINO_WM/fcs_datasets/NEps1000_RobOpac0_NPrim20_NCams4_NCube1
+        n_rollout: null
+        normalize_action: true
+        split_ratio: 0.9
+        transform:
+          _target_: datasets.img_transforms.default_transform
+          img_size:
+          - 224
+          - 224
+      decoder_path: null
+      kwargs: {}
+      name: franka_cube_stack
+      num_workers: 2
+      proprio_dim: 3
+      state_dim: 14
+    frameskip: 2
+    gpu_batch_size: 4
+    has_decoder: true
+    has_predictor: true
+    img_size: 224
+    model:
+      _target_: models.visual_world_model.VWorldModel
+      image_size: 224
+      num_hist: 5
+      num_pred: 1
+      train_decoder: true
+      train_encoder: false
+      train_predictor: true
+    normalize_action: true
+    num_action_repeat: 1
+    num_hist: 5
+    num_pred: 1
+    num_proprio_repeat: 1
+    plan_settings:
+      alpha:
+      - 0.1
+      - 1
+      goal_H:
+      - 5
+      goal_source:
+      - dset
+      - random_state
+      plan_cfg_path: null
+      planner:
+      - gd
+      - cem
+    predictor:
+      _target_: models.vit.ViTPredictor
+      depth: 6
+      dropout: 0.1
+      emb_dropout: 0
+      heads: 16
+      mlp_dim: 2048
+      pool: mean
+    proprio_emb_dim: 10
+    proprio_encoder:
+      _target_: models.proprio.ProprioceptiveEmbedding
+      num_frames: 2
+      tubelet_size: 1
+      use_3d_pos: false
+    saved_folder: /home/tsp_jw/Desktop/dino_wm/outputs/260216/23-42
+    training:
+      action_encoder_lr: 0.0005
+      batch_size: 4
+      decoder_lr: 0.0001
+      encoder_lr: 1.0e-06
+      epochs: 100
+      num_reconstruct_samples: 6
+      predictor_lr: 0.0002
+      reconstruct_every_x_batch: 500
+      save_every_x_epoch: 1
+      seed: 0
+    wandb_run_id: 5fe7ikqn

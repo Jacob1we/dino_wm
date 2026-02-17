@@ -452,7 +452,7 @@ def img_to_obs(img: np.ndarray, ee_pos: np.ndarray = None) -> dict:
     """Konvertiert uint8 Bild + EEF-Position zu Planner-Obs-Dict.
     
     Args:
-        img: (H, W, 3) uint8 BGR Bild
+        img: (H, W, 3) uint8 RGB Bild
         ee_pos: (3,) EEF-Position [x, y, z] in Weltkoordinaten.
                 Wird vom Preprocessor z-normalisiert (proprio_mean/std).
                 None → Nullen (Fallback, fuehrt zu schlechten Predictions!)

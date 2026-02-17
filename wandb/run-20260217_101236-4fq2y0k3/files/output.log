@@ -1,0 +1,124 @@
+  W&B Run: https://wandb.ai/jacob-weyer-rwth-aachen-university/dino_wm_planning/runs/4fq2y0k3
+✓ Setup komplett
+  Modus: ONLINE
+  CEM: samples=300, steps=30, topk=30, horizon=5
+  Suchraum: 60D (H=5 × D=12)
+Server laeuft auf localhost:5555
+Warte auf Client...
+[+] Client: ('127.0.0.1', 57620)
+  W&B Config aktualisiert mit Client-Config (12 Keys)
+  Client-Config empfangen: ['port', 'n_episodes', 'max_steps', 'headless', 'goal_image', 'settle_steps', 'ee_threshold', 'timeout', 'mode', 'log_dir', 'robot_opacity_for_capture', 'scene_config']
+  Reset
+  Goal gesetzt: (224, 224, 3) uint8, ee_pos=[ 0.5863256  -0.19594651  0.06752064]
+    CEM step 1: loss=0.862643
+    CEM step 2: loss=0.743048
+    CEM step 3: loss=0.730197
+    CEM step 4: loss=0.681210
+    CEM step 5: loss=0.675066
+    CEM step 6: loss=0.675760
+    CEM step 7: loss=0.634815
+    CEM step 8: loss=0.633326
+    CEM step 9: loss=0.625576
+    CEM step 10: loss=0.580574
+    CEM step 11: loss=0.599390
+    CEM step 12: loss=0.560483
+    CEM step 13: loss=0.564752
+    CEM step 14: loss=0.551265
+    CEM step 15: loss=0.536985
+    CEM step 16: loss=0.531692
+    CEM step 17: loss=0.532538
+    CEM step 18: loss=0.528903
+    CEM step 19: loss=0.524355
+    CEM step 20: loss=0.513794
+    CEM step 21: loss=0.513451
+    CEM step 22: loss=0.508129
+    CEM step 23: loss=0.508936
+    CEM step 24: loss=0.509194
+    CEM step 25: loss=0.502863
+    CEM step 26: loss=0.497893
+    CEM step 27: loss=0.490918
+    CEM step 28: loss=0.489701
+    CEM step 29: loss=0.486569
+    CEM step 30: loss=0.484212
+  Plan: 0.862643 → 0.484212 (43.9% Reduktion, 362.1s)
+    Sub-Action 0: target_ee=[0.523, -0.250, 0.161]
+    CEM step 1: loss=0.668141
+    CEM step 2: loss=0.727678
+    CEM step 3: loss=0.620324
+    CEM step 4: loss=0.600155
+    CEM step 5: loss=0.588602
+    CEM step 6: loss=0.552563
+    CEM step 7: loss=0.549736
+    CEM step 8: loss=0.525619
+    CEM step 9: loss=0.517003
+    CEM step 10: loss=0.520186
+    CEM step 11: loss=0.506629
+    CEM step 12: loss=0.493805
+    CEM step 13: loss=0.490516
+    CEM step 14: loss=0.492560
+    CEM step 15: loss=0.488028
+    CEM step 16: loss=0.480569
+    CEM step 17: loss=0.467856
+    CEM step 18: loss=0.474734
+    CEM step 19: loss=0.472516
+[-] Client getrennt
+Traceback (most recent call last):
+  File "/home/tsp_jw/Desktop/dino_wm/planning_server.py", line 553, in <module>
+    actions, _ = planner.plan(
+  File "/home/tsp_jw/Desktop/dino_wm/planning/cem.py", line 108, in plan
+    i_z_obses, i_zs = self.wm.rollout(
+  File "/home/tsp_jw/Desktop/dino_wm/planning_server.py", line 191, in rollout
+    z_obses, zs = self._model.rollout(chunk_obs, chunk_act)
+  File "/home/tsp_jw/Desktop/dino_wm/models/visual_world_model.py", line 305, in rollout
+    z_pred = self.predict(z[:, -self.num_hist :])
+  File "/home/tsp_jw/Desktop/dino_wm/models/visual_world_model.py", line 145, in predict
+    z = self.predictor(z)
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1532, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1541, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/tsp_jw/Desktop/dino_wm/models/vit.py", line 119, in forward
+    x = self.transformer(x)
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1532, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1541, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/tsp_jw/Desktop/dino_wm/models/vit.py", line 95, in forward
+    x = attn(x) + x
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1532, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1541, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/tsp_jw/Desktop/dino_wm/models/vit.py", line 71, in forward
+    dots = torch.matmul(q, k.transpose(-1, -2)) * self.scale
+KeyboardInterrupt
+Traceback (most recent call last):
+  File "/home/tsp_jw/Desktop/dino_wm/planning_server.py", line 553, in <module>
+    actions, _ = planner.plan(
+  File "/home/tsp_jw/Desktop/dino_wm/planning/cem.py", line 108, in plan
+    i_z_obses, i_zs = self.wm.rollout(
+  File "/home/tsp_jw/Desktop/dino_wm/planning_server.py", line 191, in rollout
+    z_obses, zs = self._model.rollout(chunk_obs, chunk_act)
+  File "/home/tsp_jw/Desktop/dino_wm/models/visual_world_model.py", line 305, in rollout
+    z_pred = self.predict(z[:, -self.num_hist :])
+  File "/home/tsp_jw/Desktop/dino_wm/models/visual_world_model.py", line 145, in predict
+    z = self.predictor(z)
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1532, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1541, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/tsp_jw/Desktop/dino_wm/models/vit.py", line 119, in forward
+    x = self.transformer(x)
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1532, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1541, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/tsp_jw/Desktop/dino_wm/models/vit.py", line 95, in forward
+    x = attn(x) + x
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1532, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1541, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/tsp_jw/Desktop/dino_wm/models/vit.py", line 71, in forward
+    dots = torch.matmul(q, k.transpose(-1, -2)) * self.scale
+KeyboardInterrupt

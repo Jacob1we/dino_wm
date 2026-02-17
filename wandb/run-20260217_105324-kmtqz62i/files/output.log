@@ -1,0 +1,367 @@
+  W&B Run: https://wandb.ai/jacob-weyer-rwth-aachen-university/dino_wm_planning/runs/kmtqz62i
+✓ Setup komplett
+  Modus: ONLINE
+  CEM: samples=300, steps=3, topk=30, horizon=5
+  Suchraum: 60D (H=5 × D=12)
+Server laeuft auf localhost:5555
+Warte auf Client...
+[+] Client: ('127.0.0.1', 40002)
+  W&B Config aktualisiert mit Client-Config (12 Keys)
+  Client-Config empfangen: ['port', 'n_episodes', 'max_steps', 'headless', 'goal_image', 'settle_steps', 'ee_threshold', 'timeout', 'mode', 'log_dir', 'robot_opacity_for_capture', 'scene_config']
+  Reset
+  Goal gesetzt: (224, 224, 3) uint8, ee_pos=[ 0.5863256  -0.19594651  0.06752064]
+    CEM step 1: loss=0.508330
+    CEM step 2: loss=0.392335
+    CEM step 3: loss=0.412180
+  Plan: 0.508330 → 0.412180 (18.9% Reduktion, 35.6s)
+    Sub-Action 0: target_ee=[0.498, 0.044, 0.186]
+    CEM step 1: loss=0.429054
+    CEM step 2: loss=0.353442
+    CEM step 3: loss=0.360728
+  Plan: 0.429054 → 0.360728 (15.9% Reduktion, 36.2s)
+    Sub-Action 0: target_ee=[0.520, 0.098, 0.197]
+    CEM step 1: loss=0.383284
+    CEM step 2: loss=0.389063
+    CEM step 3: loss=0.363922
+  Plan: 0.383284 → 0.363922 (5.1% Reduktion, 36.4s)
+    Sub-Action 0: target_ee=[0.417, -0.024, 0.177]
+    CEM step 1: loss=0.391753
+    CEM step 2: loss=0.312194
+    CEM step 3: loss=0.323368
+  Plan: 0.391753 → 0.323368 (17.5% Reduktion, 36.5s)
+    Sub-Action 0: target_ee=[0.466, -0.057, 0.271]
+    CEM step 1: loss=0.423219
+    CEM step 2: loss=0.384899
+    CEM step 3: loss=0.335919
+  Plan: 0.423219 → 0.335919 (20.6% Reduktion, 36.4s)
+    Sub-Action 0: target_ee=[0.495, -0.131, 0.195]
+    CEM step 1: loss=0.412985
+    CEM step 2: loss=0.357666
+    CEM step 3: loss=0.380558
+  Plan: 0.412985 → 0.380558 (7.9% Reduktion, 36.6s)
+    Sub-Action 0: target_ee=[0.492, -0.024, 0.208]
+    CEM step 1: loss=0.397275
+    CEM step 2: loss=0.360832
+    CEM step 3: loss=0.371189
+  Plan: 0.397275 → 0.371189 (6.6% Reduktion, 36.2s)
+    Sub-Action 0: target_ee=[0.531, 0.087, 0.260]
+    CEM step 1: loss=0.422924
+    CEM step 2: loss=0.382840
+    CEM step 3: loss=0.417469
+  Plan: 0.422924 → 0.417469 (1.3% Reduktion, 36.1s)
+    Sub-Action 0: target_ee=[0.594, -0.065, 0.355]
+    CEM step 1: loss=0.478215
+    CEM step 2: loss=0.423488
+    CEM step 3: loss=0.428586
+  Plan: 0.478215 → 0.428586 (10.4% Reduktion, 36.5s)
+    Sub-Action 0: target_ee=[0.576, -0.112, 0.285]
+    CEM step 1: loss=0.495324
+    CEM step 2: loss=0.489292
+    CEM step 3: loss=0.487548
+  Plan: 0.495324 → 0.487548 (1.6% Reduktion, 36.5s)
+    Sub-Action 0: target_ee=[0.491, -0.024, 0.248]
+    CEM step 1: loss=0.463047
+    CEM step 2: loss=0.450742
+    CEM step 3: loss=0.433080
+  Plan: 0.463047 → 0.433080 (6.5% Reduktion, 36.5s)
+    Sub-Action 0: target_ee=[0.475, 0.153, 0.230]
+    CEM step 1: loss=0.453733
+    CEM step 2: loss=0.441879
+    CEM step 3: loss=0.422931
+  Plan: 0.453733 → 0.422931 (6.8% Reduktion, 36.5s)
+    Sub-Action 0: target_ee=[0.431, -0.031, 0.282]
+[-] Client getrennt
+[+] Client: ('127.0.0.1', 38890)
+  W&B Config aktualisiert mit Client-Config (12 Keys)
+  Client-Config empfangen: ['port', 'n_episodes', 'max_steps', 'headless', 'goal_image', 'settle_steps', 'ee_threshold', 'timeout', 'mode', 'log_dir', 'robot_opacity_for_capture', 'scene_config']
+  Reset
+  Goal gesetzt: (224, 224, 3) uint8, ee_pos=[ 0.5863256  -0.19594651  0.06752064]
+    CEM step 1: loss=0.450424
+    CEM step 2: loss=0.407778
+    CEM step 3: loss=0.339961
+  Plan: 0.450424 → 0.339961 (24.5% Reduktion, 35.0s)
+    Sub-Action 0: target_ee=[0.515, 0.087, 0.168]
+    CEM step 1: loss=0.487686
+    CEM step 2: loss=0.477184
+    CEM step 3: loss=0.465463
+  Plan: 0.487686 → 0.465463 (4.6% Reduktion, 36.1s)
+    Sub-Action 0: target_ee=[0.472, 0.056, 0.127]
+    CEM step 1: loss=0.412513
+    CEM step 2: loss=0.362407
+    CEM step 3: loss=0.354932
+  Plan: 0.412513 → 0.354932 (14.0% Reduktion, 36.2s)
+    Sub-Action 0: target_ee=[0.506, 0.047, 0.152]
+    CEM step 1: loss=0.390114
+    CEM step 2: loss=0.353634
+    CEM step 3: loss=0.347883
+  Plan: 0.390114 → 0.347883 (10.8% Reduktion, 35.5s)
+    Sub-Action 0: target_ee=[0.323, -0.104, 0.234]
+    CEM step 1: loss=0.377324
+    CEM step 2: loss=0.377205
+    CEM step 3: loss=0.376126
+  Plan: 0.377324 → 0.376126 (0.3% Reduktion, 35.6s)
+    Sub-Action 0: target_ee=[0.482, -0.022, 0.085]
+    CEM step 1: loss=0.363680
+    CEM step 2: loss=0.382425
+    CEM step 3: loss=0.363447
+  Plan: 0.363680 → 0.363447 (0.1% Reduktion, 35.4s)
+    Sub-Action 0: target_ee=[0.465, 0.080, 0.189]
+    CEM step 1: loss=0.450618
+    CEM step 2: loss=0.445034
+    CEM step 3: loss=0.414964
+  Plan: 0.450618 → 0.414964 (7.9% Reduktion, 35.6s)
+    Sub-Action 0: target_ee=[0.525, 0.098, 0.222]
+    CEM step 1: loss=0.417775
+    CEM step 2: loss=0.421552
+    CEM step 3: loss=0.423316
+  Plan: 0.417775 → 0.423316 (-1.3% Reduktion, 35.4s)
+    Sub-Action 0: target_ee=[0.447, 0.045, 0.210]
+    CEM step 1: loss=0.464995
+    CEM step 2: loss=0.470684
+    CEM step 3: loss=0.456743
+  Plan: 0.464995 → 0.456743 (1.8% Reduktion, 35.8s)
+    Sub-Action 0: target_ee=[0.438, 0.054, 0.245]
+    CEM step 1: loss=0.452197
+    CEM step 2: loss=0.453126
+    CEM step 3: loss=0.424715
+  Plan: 0.452197 → 0.424715 (6.1% Reduktion, 35.7s)
+    Sub-Action 0: target_ee=[0.343, -0.082, 0.211]
+    CEM step 1: loss=0.362325
+    CEM step 2: loss=0.347398
+    CEM step 3: loss=0.376073
+  Plan: 0.362325 → 0.376073 (-3.8% Reduktion, 35.4s)
+    Sub-Action 0: target_ee=[0.191, -0.029, 0.282]
+    CEM step 1: loss=0.454586
+    CEM step 2: loss=0.441712
+    CEM step 3: loss=0.449325
+  Plan: 0.454586 → 0.449325 (1.2% Reduktion, 35.5s)
+    Sub-Action 0: target_ee=[0.200, 0.146, 0.367]
+    CEM step 1: loss=0.433195
+    CEM step 2: loss=0.418130
+    CEM step 3: loss=0.364936
+  Plan: 0.433195 → 0.364936 (15.8% Reduktion, 35.3s)
+    Sub-Action 0: target_ee=[0.427, 0.265, 0.326]
+    CEM step 1: loss=0.445322
+    CEM step 2: loss=0.416968
+    CEM step 3: loss=0.382752
+  Plan: 0.445322 → 0.382752 (14.1% Reduktion, 35.8s)
+    Sub-Action 0: target_ee=[0.388, 0.291, 0.338]
+    CEM step 1: loss=0.395613
+    CEM step 2: loss=0.387909
+    CEM step 3: loss=0.376806
+  Plan: 0.395613 → 0.376806 (4.8% Reduktion, 35.5s)
+    Sub-Action 0: target_ee=[0.172, 0.239, 0.390]
+    CEM step 1: loss=0.437042
+    CEM step 2: loss=0.438905
+    CEM step 3: loss=0.401351
+  Plan: 0.437042 → 0.401351 (8.2% Reduktion, 35.2s)
+    Sub-Action 0: target_ee=[0.114, 0.177, 0.284]
+    CEM step 1: loss=0.408457
+    CEM step 2: loss=0.422651
+    CEM step 3: loss=0.410059
+  Plan: 0.408457 → 0.410059 (-0.4% Reduktion, 35.2s)
+    Sub-Action 0: target_ee=[0.391, 0.040, 0.443]
+    CEM step 1: loss=0.332765
+    CEM step 2: loss=0.338046
+    CEM step 3: loss=0.319347
+  Plan: 0.332765 → 0.319347 (4.0% Reduktion, 35.5s)
+    Sub-Action 0: target_ee=[0.318, 0.026, 0.382]
+    CEM step 1: loss=0.369594
+    CEM step 2: loss=0.365785
+    CEM step 3: loss=0.361638
+  Plan: 0.369594 → 0.361638 (2.2% Reduktion, 34.4s)
+    Sub-Action 0: target_ee=[0.294, -0.059, 0.410]
+[-] Client getrennt
+[+] Client: ('127.0.0.1', 54100)
+  W&B Config aktualisiert mit Client-Config (12 Keys)
+  Client-Config empfangen: ['port', 'n_episodes', 'max_steps', 'headless', 'goal_image', 'settle_steps', 'ee_threshold', 'timeout', 'mode', 'log_dir', 'robot_opacity_for_capture', 'scene_config']
+  Reset
+  Goal gesetzt: (224, 224, 3) uint8, ee_pos=[ 0.5863256  -0.19594651  0.06752064]
+    CEM step 1: loss=0.559532
+    CEM step 2: loss=0.438379
+    CEM step 3: loss=0.388950
+  Plan: 0.559532 → 0.388950 (30.5% Reduktion, 36.0s)
+    Sub-Action 0: target_ee=[0.503, 0.027, 0.193]
+    CEM step 1: loss=0.398042
+    CEM step 2: loss=0.363997
+    CEM step 3: loss=0.382741
+  Plan: 0.398042 → 0.382741 (3.8% Reduktion, 36.4s)
+    Sub-Action 0: target_ee=[0.478, 0.123, 0.209]
+    CEM step 1: loss=0.438433
+    CEM step 2: loss=0.428925
+    CEM step 3: loss=0.375895
+  Plan: 0.438433 → 0.375895 (14.3% Reduktion, 36.5s)
+    Sub-Action 0: target_ee=[0.507, 0.092, 0.146]
+    CEM step 1: loss=0.380759
+    CEM step 2: loss=0.353142
+    CEM step 3: loss=0.321076
+  Plan: 0.380759 → 0.321076 (15.7% Reduktion, 36.6s)
+    Sub-Action 0: target_ee=[0.505, 0.157, 0.155]
+    CEM step 1: loss=0.406687
+    CEM step 2: loss=0.379070
+    CEM step 3: loss=0.303888
+  Plan: 0.406687 → 0.303888 (25.3% Reduktion, 36.7s)
+    Sub-Action 0: target_ee=[0.489, -0.100, 0.176]
+    CEM step 1: loss=0.388136
+    CEM step 2: loss=0.393288
+    CEM step 3: loss=0.349018
+  Plan: 0.388136 → 0.349018 (10.1% Reduktion, 36.7s)
+    Sub-Action 0: target_ee=[0.391, -0.124, 0.220]
+    CEM step 1: loss=0.383251
+    CEM step 2: loss=0.391343
+    CEM step 3: loss=0.397175
+  Plan: 0.383251 → 0.397175 (-3.6% Reduktion, 36.5s)
+    Sub-Action 0: target_ee=[0.484, 0.049, 0.194]
+    CEM step 1: loss=0.388108
+    CEM step 2: loss=0.405614
+    CEM step 3: loss=0.366218
+  Plan: 0.388108 → 0.366218 (5.6% Reduktion, 36.6s)
+    Sub-Action 0: target_ee=[0.388, -0.088, 0.192]
+    CEM step 1: loss=0.383375
+    CEM step 2: loss=0.374906
+    CEM step 3: loss=0.357710
+  Plan: 0.383375 → 0.357710 (6.7% Reduktion, 36.6s)
+    Sub-Action 0: target_ee=[0.460, -0.130, 0.133]
+    CEM step 1: loss=0.415823
+    CEM step 2: loss=0.406990
+    CEM step 3: loss=0.428770
+  Plan: 0.415823 → 0.428770 (-3.1% Reduktion, 36.7s)
+    Sub-Action 0: target_ee=[0.565, -0.127, 0.204]
+    CEM step 1: loss=0.387107
+    CEM step 2: loss=0.382715
+    CEM step 3: loss=0.384893
+  Plan: 0.387107 → 0.384893 (0.6% Reduktion, 36.7s)
+    Sub-Action 0: target_ee=[0.590, -0.202, 0.140]
+    CEM step 1: loss=0.401394
+    CEM step 2: loss=0.432966
+    CEM step 3: loss=0.394155
+  Plan: 0.401394 → 0.394155 (1.8% Reduktion, 36.1s)
+    Sub-Action 0: target_ee=[0.471, -0.109, 0.149]
+    CEM step 1: loss=0.385335
+    CEM step 2: loss=0.395567
+    CEM step 3: loss=0.397513
+  Plan: 0.385335 → 0.397513 (-3.2% Reduktion, 36.2s)
+    Sub-Action 0: target_ee=[0.513, -0.347, 0.174]
+    CEM step 1: loss=0.407877
+    CEM step 2: loss=0.377392
+    CEM step 3: loss=0.351955
+  Plan: 0.407877 → 0.351955 (13.7% Reduktion, 36.0s)
+    Sub-Action 0: target_ee=[0.556, -0.267, 0.123]
+    CEM step 1: loss=0.497101
+    CEM step 2: loss=0.436835
+    CEM step 3: loss=0.424241
+  Plan: 0.497101 → 0.424241 (14.7% Reduktion, 36.2s)
+    Sub-Action 0: target_ee=[0.490, -0.275, 0.202]
+    CEM step 1: loss=0.576945
+    CEM step 2: loss=0.573044
+    CEM step 3: loss=0.494868
+  Plan: 0.576945 → 0.494868 (14.2% Reduktion, 36.3s)
+    Sub-Action 0: target_ee=[0.363, -0.369, 0.089]
+    CEM step 1: loss=0.464409
+    CEM step 2: loss=0.434387
+    CEM step 3: loss=0.425729
+  Plan: 0.464409 → 0.425729 (8.3% Reduktion, 36.5s)
+    Sub-Action 0: target_ee=[0.554, -0.358, 0.117]
+    CEM step 1: loss=0.443132
+    CEM step 2: loss=0.475136
+    CEM step 3: loss=0.449030
+  Plan: 0.443132 → 0.449030 (-1.3% Reduktion, 36.3s)
+    Sub-Action 0: target_ee=[0.541, -0.420, 0.113]
+    CEM step 1: loss=0.467767
+    CEM step 2: loss=0.474244
+    CEM step 3: loss=0.474690
+  Plan: 0.467767 → 0.474690 (-1.5% Reduktion, 36.5s)
+    Sub-Action 0: target_ee=[0.518, -0.257, 0.113]
+    CEM step 1: loss=0.428558
+    CEM step 2: loss=0.433700
+    CEM step 3: loss=0.432453
+  Plan: 0.428558 → 0.432453 (-0.9% Reduktion, 36.5s)
+    Sub-Action 0: target_ee=[0.547, -0.318, 0.116]
+    CEM step 1: loss=0.474373
+    CEM step 2: loss=0.437764
+    CEM step 3: loss=0.441314
+  Plan: 0.474373 → 0.441314 (7.0% Reduktion, 36.2s)
+    Sub-Action 0: target_ee=[0.651, -0.372, 0.159]
+    CEM step 1: loss=0.391502
+    CEM step 2: loss=0.447018
+    CEM step 3: loss=0.453524
+  Plan: 0.391502 → 0.453524 (-15.8% Reduktion, 36.6s)
+    Sub-Action 0: target_ee=[0.709, -0.526, 0.140]
+    CEM step 1: loss=0.460127
+    CEM step 2: loss=0.471562
+    CEM step 3: loss=0.421050
+  Plan: 0.460127 → 0.421050 (8.5% Reduktion, 35.7s)
+    Sub-Action 0: target_ee=[0.457, -0.501, 0.109]
+    CEM step 1: loss=0.378312
+    CEM step 2: loss=0.388684
+    CEM step 3: loss=0.386322
+  Plan: 0.378312 → 0.386322 (-2.1% Reduktion, 36.4s)
+    Sub-Action 0: target_ee=[0.300, -0.533, 0.079]
+    CEM step 1: loss=0.463243
+    CEM step 2: loss=0.468766
+    CEM step 3: loss=0.446868
+  Plan: 0.463243 → 0.446868 (3.5% Reduktion, 35.5s)
+    Sub-Action 0: target_ee=[0.350, -0.561, 0.098]
+    CEM step 1: loss=0.425821
+    CEM step 2: loss=0.434464
+    CEM step 3: loss=0.405660
+  Plan: 0.425821 → 0.405660 (4.7% Reduktion, 35.5s)
+    Sub-Action 0: target_ee=[0.407, -0.508, 0.063]
+    CEM step 1: loss=0.474750
+    CEM step 2: loss=0.463450
+    CEM step 3: loss=0.452018
+  Plan: 0.474750 → 0.452018 (4.8% Reduktion, 35.5s)
+    Sub-Action 0: target_ee=[0.345, -0.522, 0.152]
+    CEM step 1: loss=0.416916
+    CEM step 2: loss=0.408442
+    CEM step 3: loss=0.383701
+  Plan: 0.416916 → 0.383701 (8.0% Reduktion, 36.3s)
+    Sub-Action 0: target_ee=[0.326, -0.661, 0.016]
+    CEM step 1: loss=0.453424
+    CEM step 2: loss=0.443182
+    CEM step 3: loss=0.445942
+  Plan: 0.453424 → 0.445942 (1.7% Reduktion, 36.1s)
+    Sub-Action 0: target_ee=[0.459, -0.708, 0.124]
+    CEM step 1: loss=0.417253
+    CEM step 2: loss=0.433952
+    CEM step 3: loss=0.421616
+  Plan: 0.417253 → 0.421616 (-1.0% Reduktion, 36.6s)
+    Sub-Action 0: target_ee=[0.410, -0.948, 0.100]
+    CEM step 1: loss=0.430017
+    CEM step 2: loss=0.430332
+    CEM step 3: loss=0.394097
+  Plan: 0.430017 → 0.394097 (8.4% Reduktion, 36.2s)
+    Sub-Action 0: target_ee=[0.429, -0.726, 0.180]
+    CEM step 1: loss=0.446960
+    CEM step 2: loss=0.439732
+    CEM step 3: loss=0.434402
+  Plan: 0.446960 → 0.434402 (2.8% Reduktion, 35.9s)
+    Sub-Action 0: target_ee=[0.472, -0.697, 0.188]
+    CEM step 1: loss=0.514846
+    CEM step 2: loss=0.489006
+    CEM step 3: loss=0.486804
+  Plan: 0.514846 → 0.486804 (5.4% Reduktion, 36.6s)
+    Sub-Action 0: target_ee=[0.458, -0.732, 0.091]
+    CEM step 1: loss=0.411833
+    CEM step 2: loss=0.404014
+    CEM step 3: loss=0.424685
+  Plan: 0.411833 → 0.424685 (-3.1% Reduktion, 36.6s)
+    Sub-Action 0: target_ee=[0.340, -0.767, 0.105]
+  Error: [Errno 104] Connection reset by peer
+[-] Client getrennt
+Traceback (most recent call last):
+  File "/home/tsp_jw/Desktop/dino_wm/planning_server.py", line 493, in <module>
+    size_data = conn.recv(8)
+ConnectionResetError: [Errno 104] Connection reset by peer
+Traceback (most recent call last):
+  File "/home/tsp_jw/Desktop/dino_wm/planning_server.py", line 487, in <module>
+    conn, addr = server.accept()
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/socket.py", line 293, in accept
+    fd, addr = self._accept()
+KeyboardInterrupt
+Traceback (most recent call last):
+  File "/home/tsp_jw/Desktop/dino_wm/planning_server.py", line 487, in <module>
+    conn, addr = server.accept()
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/socket.py", line 293, in accept
+    fd, addr = self._accept()
+KeyboardInterrupt

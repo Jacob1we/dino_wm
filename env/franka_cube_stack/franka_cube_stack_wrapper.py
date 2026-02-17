@@ -374,7 +374,7 @@ class FrankaCubeStackWrapper(gym.Env):
         Reset mit kontrolliertem init_state — wie FlexEnvWrapper.prepare().
 
         Returns:
-            obs: {"visual": (H,W,3) BGR, "proprio": (3,)}
+            obs: {"visual": (H,W,3) RGB, "proprio": (3,)}
             state: 14D EEF States
         """
         self._ensure_sim_initialized()
@@ -456,12 +456,11 @@ class FrankaCubeStackWrapper(gym.Env):
     # =========================================================================
 
     def _get_obs(self):
-        """Observation-Dict: visual (BGR!) + proprio (EE pos)."""
+        """Observation-Dict: visual (RGB) + proprio (EE pos)."""
         rgb = self._get_rgb(0)
-        bgr = rgb[:, :, ::-1].copy()  # RGB -> BGR (Training-Konvention)
         ee_pos, _ = self._franka.end_effector.get_world_pose()
         return {
-            "visual": bgr,
+            "visual": rgb,
             "proprio": np.array(ee_pos, dtype=np.float32)[:3],
         }
 

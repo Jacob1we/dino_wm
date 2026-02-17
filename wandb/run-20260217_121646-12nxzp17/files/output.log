@@ -1,0 +1,115 @@
+  W&B Run: https://wandb.ai/jacob-weyer-rwth-aachen-university/dino_wm_planning/runs/12nxzp17
+✓ Setup komplett
+  Modus: ONLINE
+  CEM: samples=300, steps=5, topk=30, horizon=5
+  Suchraum: 60D (H=5 × D=12)
+Server laeuft auf localhost:5555
+Warte auf Client...
+[+] Client: ('127.0.0.1', 58488)
+  W&B Config aktualisiert mit Client-Config (12 Keys)
+  Client-Config empfangen: ['port', 'n_episodes', 'max_steps', 'headless', 'goal_image', 'settle_steps', 'ee_threshold', 'timeout', 'mode', 'log_dir', 'robot_opacity_for_capture', 'scene_config']
+  Reset
+  Goal gesetzt: (224, 224, 3) uint8, ee_pos=[0.4292098  0.04511301 0.41513357]
+    CEM step 1: loss=2.456315
+    CEM step 2: loss=1.762570
+    CEM step 3: loss=1.536793
+    CEM step 4: loss=1.548274
+    CEM step 5: loss=1.466460
+  Plan: 2.456315 → 1.466460 (40.3% Reduktion, 47.5s)
+    Sub-Action 0: target_ee=[0.449, 0.054, 0.150]
+[-] Client getrennt
+[+] Client: ('127.0.0.1', 53126)
+  W&B Config aktualisiert mit Client-Config (12 Keys)
+  Client-Config empfangen: ['port', 'n_episodes', 'max_steps', 'headless', 'goal_image', 'settle_steps', 'ee_threshold', 'timeout', 'mode', 'log_dir', 'robot_opacity_for_capture', 'scene_config']
+  Reset
+  Goal gesetzt: (224, 224, 3) uint8, ee_pos=[0.3188095  0.13228466 0.07317299]
+    CEM step 1: loss=1.105683
+    CEM step 2: loss=0.996111
+    CEM step 3: loss=0.931075
+    CEM step 4: loss=0.862297
+    CEM step 5: loss=0.862461
+  Plan: 1.105683 → 0.862461 (22.0% Reduktion, 59.6s)
+    Sub-Action 0: target_ee=[0.573, -0.013, 0.192]
+    CEM step 1: loss=1.004757
+    CEM step 2: loss=1.090334
+    CEM step 3: loss=0.992917
+    CEM step 4: loss=1.001916
+    CEM step 5: loss=0.959131
+  Plan: 1.004757 → 0.959131 (4.5% Reduktion, 60.6s)
+    Sub-Action 0: target_ee=[0.528, 0.046, 0.167]
+    CEM step 1: loss=1.172958
+    CEM step 2: loss=1.087337
+    CEM step 3: loss=1.025580
+[-] Client getrennt
+Traceback (most recent call last):
+  File "/home/tsp_jw/Desktop/dino_wm/planning_server.py", line 553, in <module>
+    actions, _ = planner.plan(
+  File "/home/tsp_jw/Desktop/dino_wm/planning/cem.py", line 108, in plan
+    i_z_obses, i_zs = self.wm.rollout(
+  File "/home/tsp_jw/Desktop/dino_wm/planning_server.py", line 191, in rollout
+    z_obses, zs = self._model.rollout(chunk_obs, chunk_act)
+  File "/home/tsp_jw/Desktop/dino_wm/models/visual_world_model.py", line 295, in rollout
+    z = self.encode(obs_0, act_0)
+  File "/home/tsp_jw/Desktop/dino_wm/models/visual_world_model.py", line 96, in encode
+    z_dct = self.encode_obs(obs)
+  File "/home/tsp_jw/Desktop/dino_wm/models/visual_world_model.py", line 129, in encode_obs
+    visual_embs = self.encoder.forward(visual)
+  File "/home/tsp_jw/Desktop/dino_wm/models/dino.py", line 23, in forward
+    emb = self.base_model.forward_features(x)[self.feature_key]
+  File "/home/tsp_jw/.cache/torch/hub/facebookresearch_dinov2_main/dinov2/models/vision_transformer.py", line 264, in forward_features
+    x = blk(x)
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1532, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1541, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/tsp_jw/.cache/torch/hub/facebookresearch_dinov2_main/dinov2/layers/block.py", line 310, in forward
+    return super().forward(x_or_x_list)
+  File "/home/tsp_jw/.cache/torch/hub/facebookresearch_dinov2_main/dinov2/layers/block.py", line 113, in forward
+    x = x + ffn_residual_func(x)
+  File "/home/tsp_jw/.cache/torch/hub/facebookresearch_dinov2_main/dinov2/layers/block.py", line 94, in ffn_residual_func
+    return self.ls2(self.mlp(self.norm2(x)))
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1532, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1541, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/site-packages/torch/nn/modules/normalization.py", line 201, in forward
+    return F.layer_norm(
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/site-packages/torch/nn/functional.py", line 2573, in layer_norm
+    return torch.layer_norm(input, normalized_shape, weight, bias, eps, torch.backends.cudnn.enabled)
+KeyboardInterrupt
+Traceback (most recent call last):
+  File "/home/tsp_jw/Desktop/dino_wm/planning_server.py", line 553, in <module>
+    actions, _ = planner.plan(
+  File "/home/tsp_jw/Desktop/dino_wm/planning/cem.py", line 108, in plan
+    i_z_obses, i_zs = self.wm.rollout(
+  File "/home/tsp_jw/Desktop/dino_wm/planning_server.py", line 191, in rollout
+    z_obses, zs = self._model.rollout(chunk_obs, chunk_act)
+  File "/home/tsp_jw/Desktop/dino_wm/models/visual_world_model.py", line 295, in rollout
+    z = self.encode(obs_0, act_0)
+  File "/home/tsp_jw/Desktop/dino_wm/models/visual_world_model.py", line 96, in encode
+    z_dct = self.encode_obs(obs)
+  File "/home/tsp_jw/Desktop/dino_wm/models/visual_world_model.py", line 129, in encode_obs
+    visual_embs = self.encoder.forward(visual)
+  File "/home/tsp_jw/Desktop/dino_wm/models/dino.py", line 23, in forward
+    emb = self.base_model.forward_features(x)[self.feature_key]
+  File "/home/tsp_jw/.cache/torch/hub/facebookresearch_dinov2_main/dinov2/models/vision_transformer.py", line 264, in forward_features
+    x = blk(x)
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1532, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1541, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/tsp_jw/.cache/torch/hub/facebookresearch_dinov2_main/dinov2/layers/block.py", line 310, in forward
+    return super().forward(x_or_x_list)
+  File "/home/tsp_jw/.cache/torch/hub/facebookresearch_dinov2_main/dinov2/layers/block.py", line 113, in forward
+    x = x + ffn_residual_func(x)
+  File "/home/tsp_jw/.cache/torch/hub/facebookresearch_dinov2_main/dinov2/layers/block.py", line 94, in ffn_residual_func
+    return self.ls2(self.mlp(self.norm2(x)))
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1532, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1541, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/site-packages/torch/nn/modules/normalization.py", line 201, in forward
+    return F.layer_norm(
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/site-packages/torch/nn/functional.py", line 2573, in layer_norm
+    return torch.layer_norm(input, normalized_shape, weight, bias, eps, torch.backends.cudnn.enabled)
+KeyboardInterrupt

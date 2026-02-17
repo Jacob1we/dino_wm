@@ -1,0 +1,236 @@
+  W&B Run: https://wandb.ai/jacob-weyer-rwth-aachen-university/dino_wm_planning/runs/ttomab8h
+✓ Setup komplett
+  Modus: ONLINE
+  CEM: samples=300, steps=30, topk=30, horizon=5
+  Suchraum: 60D (H=5 × D=12)
+Server laeuft auf localhost:5555
+Warte auf Client...
+[+] Client: ('127.0.0.1', 37272)
+  W&B Config aktualisiert mit Client-Config (12 Keys)
+  Client-Config empfangen: ['port', 'n_episodes', 'max_steps', 'headless', 'goal_image', 'settle_steps', 'ee_threshold', 'timeout', 'mode', 'log_dir', 'robot_opacity_for_capture', 'scene_config']
+  Reset
+  Goal gesetzt: (224, 224, 3) uint8, ee_pos=[ 0.5863256  -0.19594651  0.06752064]
+    CEM step 1: loss=0.508085
+    CEM step 2: loss=0.366430
+    CEM step 3: loss=0.388729
+    CEM step 4: loss=0.349677
+    CEM step 5: loss=0.344060
+    CEM step 6: loss=0.362078
+    CEM step 7: loss=0.342636
+    CEM step 8: loss=0.345596
+    CEM step 9: loss=0.360992
+    CEM step 10: loss=0.348588
+    CEM step 11: loss=0.338942
+    CEM step 12: loss=0.336221
+    CEM step 13: loss=0.315370
+    CEM step 14: loss=0.321529
+    CEM step 15: loss=0.320033
+    CEM step 16: loss=0.311208
+    CEM step 17: loss=0.304568
+    CEM step 18: loss=0.301074
+    CEM step 19: loss=0.295448
+    CEM step 20: loss=0.296959
+    CEM step 21: loss=0.292560
+    CEM step 22: loss=0.287622
+    CEM step 23: loss=0.281769
+    CEM step 24: loss=0.281539
+    CEM step 25: loss=0.277614
+    CEM step 26: loss=0.276063
+    CEM step 27: loss=0.274743
+    CEM step 28: loss=0.272871
+    CEM step 29: loss=0.270639
+    CEM step 30: loss=0.269272
+  Plan: 0.508085 → 0.269272 (47.0% Reduktion, 356.8s)
+    Sub-Action 0: target_ee=[0.440, 0.068, 0.205]
+    CEM step 1: loss=0.363659
+    CEM step 2: loss=0.383656
+    CEM step 3: loss=0.341024
+    CEM step 4: loss=0.348765
+    CEM step 5: loss=0.354306
+    CEM step 6: loss=0.301989
+    CEM step 7: loss=0.355725
+    CEM step 8: loss=0.325405
+    CEM step 9: loss=0.322866
+    CEM step 10: loss=0.305706
+    CEM step 11: loss=0.298773
+    CEM step 12: loss=0.293533
+    CEM step 13: loss=0.291309
+    CEM step 14: loss=0.293882
+    CEM step 15: loss=0.283463
+    CEM step 16: loss=0.286403
+    CEM step 17: loss=0.279566
+    CEM step 18: loss=0.277881
+    CEM step 19: loss=0.272810
+    CEM step 20: loss=0.267153
+    CEM step 21: loss=0.269597
+    CEM step 22: loss=0.267911
+    CEM step 23: loss=0.265524
+    CEM step 24: loss=0.264677
+    CEM step 25: loss=0.263299
+    CEM step 26: loss=0.262521
+    CEM step 27: loss=0.261482
+    CEM step 28: loss=0.260456
+    CEM step 29: loss=0.259476
+    CEM step 30: loss=0.259146
+  Plan: 0.363659 → 0.259146 (28.7% Reduktion, 354.3s)
+    Sub-Action 0: target_ee=[0.464, 0.088, 0.328]
+    CEM step 1: loss=0.444044
+    CEM step 2: loss=0.399339
+    CEM step 3: loss=0.380526
+    CEM step 4: loss=0.367590
+    CEM step 5: loss=0.348642
+    CEM step 6: loss=0.347670
+    CEM step 7: loss=0.341894
+    CEM step 8: loss=0.339664
+    CEM step 9: loss=0.320898
+    CEM step 10: loss=0.322481
+    CEM step 11: loss=0.317317
+    CEM step 12: loss=0.314087
+    CEM step 13: loss=0.311032
+    CEM step 14: loss=0.309155
+    CEM step 15: loss=0.308394
+    CEM step 16: loss=0.309571
+    CEM step 17: loss=0.308671
+    CEM step 18: loss=0.305835
+    CEM step 19: loss=0.305683
+    CEM step 20: loss=0.305633
+    CEM step 21: loss=0.301929
+    CEM step 22: loss=0.302763
+    CEM step 23: loss=0.301074
+    CEM step 24: loss=0.300951
+    CEM step 25: loss=0.299626
+    CEM step 26: loss=0.298523
+    CEM step 27: loss=0.296895
+    CEM step 28: loss=0.296614
+    CEM step 29: loss=0.295127
+    CEM step 30: loss=0.295289
+  Plan: 0.444044 → 0.295289 (33.5% Reduktion, 337.3s)
+    Sub-Action 0: target_ee=[0.526, -0.163, 0.113]
+    CEM step 1: loss=0.489675
+    CEM step 2: loss=0.450693
+    CEM step 3: loss=0.459457
+    CEM step 4: loss=0.458921
+    CEM step 5: loss=0.442928
+    CEM step 6: loss=0.427501
+    CEM step 7: loss=0.422239
+    CEM step 8: loss=0.408839
+    CEM step 9: loss=0.407816
+    CEM step 10: loss=0.403464
+    CEM step 11: loss=0.399557
+    CEM step 12: loss=0.392968
+    CEM step 13: loss=0.392670
+    CEM step 14: loss=0.386653
+    CEM step 15: loss=0.386101
+    CEM step 16: loss=0.384234
+    CEM step 17: loss=0.381258
+    CEM step 18: loss=0.381811
+    CEM step 19: loss=0.379886
+    CEM step 20: loss=0.378906
+    CEM step 21: loss=0.378794
+    CEM step 22: loss=0.378302
+    CEM step 23: loss=0.376408
+    CEM step 24: loss=0.376120
+    CEM step 25: loss=0.375887
+    CEM step 26: loss=0.376038
+    CEM step 27: loss=0.375495
+    CEM step 28: loss=0.375393
+    CEM step 29: loss=0.374812
+    CEM step 30: loss=0.374586
+  Plan: 0.489675 → 0.374586 (23.5% Reduktion, 305.5s)
+    Sub-Action 0: target_ee=[0.430, -0.323, 0.394]
+    CEM step 1: loss=0.425281
+    CEM step 2: loss=0.422193
+    CEM step 3: loss=0.413744
+    CEM step 4: loss=0.409941
+    CEM step 5: loss=0.400760
+    CEM step 6: loss=0.388790
+    CEM step 7: loss=0.392595
+    CEM step 8: loss=0.387368
+    CEM step 9: loss=0.372752
+    CEM step 10: loss=0.366787
+    CEM step 11: loss=0.368216
+    CEM step 12: loss=0.372963
+    CEM step 13: loss=0.369797
+    CEM step 14: loss=0.360451
+    CEM step 15: loss=0.366115
+    CEM step 16: loss=0.358460
+    CEM step 17: loss=0.359946
+    CEM step 18: loss=0.355101
+    CEM step 19: loss=0.357331
+    CEM step 20: loss=0.356648
+    CEM step 21: loss=0.352169
+    CEM step 22: loss=0.352369
+    CEM step 23: loss=0.350146
+    CEM step 24: loss=0.349972
+    CEM step 25: loss=0.348947
+    CEM step 26: loss=0.348068
+    CEM step 27: loss=0.347817
+    CEM step 28: loss=0.347633
+    CEM step 29: loss=0.347741
+    CEM step 30: loss=0.347497
+  Plan: 0.425281 → 0.347497 (18.3% Reduktion, 308.2s)
+    Sub-Action 0: target_ee=[0.528, -0.442, 0.111]
+    CEM step 1: loss=0.502867
+    CEM step 2: loss=0.465775
+    CEM step 3: loss=0.448776
+[-] Client getrennt
+Traceback (most recent call last):
+  File "/home/tsp_jw/Desktop/dino_wm/planning_server.py", line 553, in <module>
+    actions, _ = planner.plan(
+  File "/home/tsp_jw/Desktop/dino_wm/planning/cem.py", line 108, in plan
+    i_z_obses, i_zs = self.wm.rollout(
+  File "/home/tsp_jw/Desktop/dino_wm/planning_server.py", line 191, in rollout
+    z_obses, zs = self._model.rollout(chunk_obs, chunk_act)
+  File "/home/tsp_jw/Desktop/dino_wm/models/visual_world_model.py", line 299, in rollout
+    z_pred = self.predict(z[:, -self.num_hist :])
+  File "/home/tsp_jw/Desktop/dino_wm/models/visual_world_model.py", line 145, in predict
+    z = self.predictor(z)
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1532, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1541, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/tsp_jw/Desktop/dino_wm/models/vit.py", line 119, in forward
+    x = self.transformer(x)
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1532, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1541, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/tsp_jw/Desktop/dino_wm/models/vit.py", line 95, in forward
+    x = attn(x) + x
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1532, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1541, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/tsp_jw/Desktop/dino_wm/models/vit.py", line 71, in forward
+    dots = torch.matmul(q, k.transpose(-1, -2)) * self.scale
+KeyboardInterrupt
+Traceback (most recent call last):
+  File "/home/tsp_jw/Desktop/dino_wm/planning_server.py", line 553, in <module>
+    actions, _ = planner.plan(
+  File "/home/tsp_jw/Desktop/dino_wm/planning/cem.py", line 108, in plan
+    i_z_obses, i_zs = self.wm.rollout(
+  File "/home/tsp_jw/Desktop/dino_wm/planning_server.py", line 191, in rollout
+    z_obses, zs = self._model.rollout(chunk_obs, chunk_act)
+  File "/home/tsp_jw/Desktop/dino_wm/models/visual_world_model.py", line 299, in rollout
+    z_pred = self.predict(z[:, -self.num_hist :])
+  File "/home/tsp_jw/Desktop/dino_wm/models/visual_world_model.py", line 145, in predict
+    z = self.predictor(z)
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1532, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1541, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/tsp_jw/Desktop/dino_wm/models/vit.py", line 119, in forward
+    x = self.transformer(x)
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1532, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1541, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/tsp_jw/Desktop/dino_wm/models/vit.py", line 95, in forward
+    x = attn(x) + x
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1532, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1541, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/tsp_jw/Desktop/dino_wm/models/vit.py", line 71, in forward
+    dots = torch.matmul(q, k.transpose(-1, -2)) * self.scale
+KeyboardInterrupt

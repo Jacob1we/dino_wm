@@ -4,9 +4,17 @@ Kompatibel mit DINO World Model Training.
 
 Action-Format:
 
-    action = [x_start, y_start, z_start, x_end, y_end, z_end]  (6D, wie DINO WM Rope)
-        - x/y/z_start: EE-Position am Anfang der Bewegung
-        - x/y/z_end: EE-Position am Ende der Bewegung
+    Standard (6D):
+      action = [x_start, y_start, z_start, x_end, y_end, z_end]
+          - x/y/z_start: EE-Position am Anfang der Bewegung
+          - x/y/z_end: EE-Position am Ende der Bewegung
+    
+    Mit Gripper-Tracking (8D, config: track_gripper_state=true):
+      action = [x_start, y_start, z_start, g_start, x_end, y_end, z_end, g_end]
+          - g = 0.0 (Gripper offen) oder 1.0 (Gripper geschlossen)
+          - Gripper geschlossen bei Phasen: GRASP(3), LIFT(4), TRANSPORT(5), DESCEND_PLACE(6)
+    
+    Die Action-Dimension wird automatisch aus den Daten erkannt (action_dim).
 
 Format (Rope kompatibel):
     data_path/
@@ -16,7 +24,7 @@ Format (Rope kompatibel):
     ├── 000000/               # Episode 0
     │   ├── obses.pth         # (T, H, W, C) float32, Werte 0-255
     │   ├── 00.h5             # Timestep 0
-    │   │   ├── action        # (4,) siehe Action-Format
+    │   │   ├── action        # (6,) oder (8,) - siehe Action-Format
     │   │   ├── eef_states    # (1, 1, 14)
     │   │   ├── positions     # (1, n_cubes, 4) Würfel [x, y, z, yaw]
     │   │   ├── info/         # n_cams, n_cubes, timestamp
@@ -43,8 +51,10 @@ class FrankaCubeStackDataset(TrajDataset):
     Lädt Daten im Rope-Format: Episode-Ordner mit obses.pth und H5-Dateien.
     Kompatibel mit dem DINO World Model Training-Pipeline.
     
-    Action-Format (ee_pos, 6D):
-        [x_start, y_start, z_start, x_end, y_end, z_end]
+    Action-Format:
+        6D: [x_start, y_start, z_start, x_end, y_end, z_end]
+        8D: [x_start, y_start, z_start, g_start, x_end, y_end, z_end, g_end]
+    Die Dimension wird automatisch aus den Daten erkannt.
     """
     
     def __init__(
@@ -179,7 +189,10 @@ class FrankaCubeStackDataset(TrajDataset):
         self.actions_tensors = [(a - self.action_mean) / self.action_std for a in self.actions_tensors]
         
         print(f"  Action mode: {self.action_mode}")
-        print(f"  Action format: [x_start, y_start, z_start, x_end, y_end, z_end] (6D)")
+        if self.action_dim == 8:
+            print(f"  Action format: [x_start, y_start, z_start, g_start, x_end, y_end, z_end, g_end] (8D, mit Gripper)")
+        else:
+            print(f"  Action format: [x_start, y_start, z_start, x_end, y_end, z_end] (6D)")
         print(f"  Action dim: {self.action_dim}")
         print(f"  State dim: {self.state_dim}")
         print(f"  EEF dim: {self.eef_dim}")

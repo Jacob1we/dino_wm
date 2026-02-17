@@ -48,56 +48,116 @@ Das **DINO World Model** ist ein visuelles Weltmodell, das lernt, zukünftige vi
 
 ## 2. Datensatz-Struktur
 
-### 2.1 Dein Datensatz: `2026_01_13_1152_fcs_dset`
+### 2.1 Aktueller Datensatz (Primitiv-basiert)
+
+**Aktuell:** `NEps1000_RobOpac0_NPrim20_NCams4_NCube1` (985 Episoden, 20 Primitive/Timesteps)
 
 ```
-2026_01_13_1152_fcs_dset/
-├── states.pth          # Roboter-Zustände: (10, 932, 22)
-├── actions.pth         # Aktionen: (10, 932, 9)
+NEps1000_RobOpac0_NPrim20_NCams4_NCube1/
+├── states.pth          # Würfelpositionen: (985, 20, N_cubes*4)
+├── actions.pth         # Aktionen: (985, 20, 8)  ← 8D mit Gripper
 ├── metadata.pkl        # Metadaten
-├── seq_lengths.pkl     # Sequenzlängen
+├── seq_lengths.pkl     # Sequenzlängen pro Episode
 ├── cameras/            # Kamera-Konfiguration
-└── 000000/ ... 000009/ # 10 Episoden
-    ├── obses.pth       # RGB-Bilder: (932, 256, 256, 3)
-    ├── images/         # PNG-Bilder (optional)
+└── 000000/ ... 000984/ # 985 Episoden
+    ├── obses.pth       # RGB-Bilder: (20, 256, 256, 3) uint8
+    ├── 00.h5 ... 19.h5 # Pro Primitiv eine H5-Datei
+    │   ├── action        # (8,) 8D-Action [start_pos, g_start, end_pos, g_end]
+    │   ├── eef_states    # (1, 1, 14) → 14D EEF-Zustand (Start+End)
+    │   ├── positions     # (1, N_cubes, 4) Würfelpositionen (homogen)
+    │   ├── observations/ # color + depth Bilder
+    │   └── info/         # Metadaten (phase, n_steps, movement_distance, ...)
     └── property_params.pkl
 ```
+
+**Wichtig:** Jeder Timestep = 1 Bewegungsprimitiv (nicht 1 Simulations-Frame!)  
+Ein Primitiv fasst mehrere Simulations-Schritte zu einer diskreten Bewegungseinheit zusammen.
 
 ### 2.2 Datensatz-Dimensionen
 
 | Komponente | Form | Beschreibung |
 |------------|------|--------------|
-| **States** | `(10, 932, 22)` | 10 Episoden, 932 Timesteps, 22 State-Dimensionen |
-| **Actions** | `(10, 932, 9)` | 10 Episoden, 932 Timesteps, 9 Action-Dimensionen |
-| **Images** | `(932, 256, 256, 3)` | 932 RGB-Bilder pro Episode |
+| **Actions** | `(985, 20, 8)` | 985 Episoden, 20 Primitive, **8D** Action (mit Gripper) |
+| **EEF States** | `(1, 1, 14)` pro H5 | 14D End-Effector-Zustand (Start + End des Primitivs) |
+| **Images** | `(20, 256, 256, 3)` pro Episode | 20 RGB-Bilder (1 pro Primitiv, nach Bewegung) |
+| **Proprio** | `(T, 3)` extrahiert | Nur EE-Position (x,y,z) = `eef[:, :3]` |
 
-### 2.3 State-Vektor Aufbau (22 Dimensionen)
+### 2.3 EEF-States Aufbau (14 Dimensionen) — Proprio-Quelle
 
-State = [ee_pos(3), ee_quat(4), gripper(1), joints(7), joint_vel(7)]
-         ├──────────────────┘
-         └── Proprio: Nur EE-Position (erste 3 Dimensionen) wird als
-             "Proprioceptive Input" für das Modell verwendet
+Die `eef_states` speichern den End-Effector-Zustand am **Ende** (current) und **Anfang** (previous) 
+jedes Primitivs. Das Format folgt der Referenz aus `robot_env.py` (Rope/Deformable Datensatz):
 
-### 2.4 Action-Vektor Aufbau (9 Dimensionen)
-Der Action-Vektor enthält die Roboter-Kommandos und setzt sich wie folgt zusammen:
-Action = [joint_cmd(7), gripper_cmd(2)]
-          ├─────────┘    ├──────────┘
-          │              └── Gripper-Fingerposition (links, rechts)
-          └── 7 Joint-Positionen (Soll-Werte für Gelenke 0-6)
+```
+eef_states (14D) = [pos_end(3), pos_start(3), quat_end(4), quat_start(4)]
+                    ├─────────┘ ├───────────┘ ├──────────┘ ├────────────┘
+                    │           │             │            └── Orientierung am Primitiv-START
+                    │           │             └── Orientierung am Primitiv-ENDE (aktuell)
+                    │           └── EE-Position am Primitiv-START (vorherig)
+                    └── EE-Position am Primitiv-ENDE (aktuell)
 
-Index	Dimension	Beschreibung	Typischer Wertebereich
-0-6	joint_cmd[0:7]	Joint-Positionen (Radiant)	ca. -3.0 bis +3.0
-7-8	gripper_cmd[0:2]	Gripper-Finger (links/rechts)	0.0 (geschlossen) bis 0.04 (offen)
+Index  Dim           Beschreibung                      Typ
+─────  ───           ────────────                      ───
+0-2    pos_end       EE-Position NACH Bewegung (x,y,z) float64, Meter (lokal)
+3-5    pos_start     EE-Position VOR Bewegung (x,y,z)  float64, Meter (lokal)
+6-9    quat_end      EE-Quaternion NACH Bewegung        float64, [qx,qy,qz,qw]
+10-13  quat_start    EE-Quaternion VOR Bewegung          float64, [qx,qy,qz,qw]
+```
 
-Beispiel-Action aus deinem Datensatz:
-[-0.095, -0.521, 0.047, -2.841, 0.031, 2.886, 0.842, 0.0, 0.0]
-  ├──────────────────────────────────────────────────────┘  └────┘
-  │                                                         Gripper
-  └── 7 Joint-Sollpositionen                               (geschlossen)
+**Proprio-Extraktion:** Nur `eef[:, :3]` (= `pos_end`, aktuelle EE-Position) wird als 
+Proprioceptive Input für das Modell verwendet → **proprio_dim = 3**.
 
-Hinweis: Bei frameskip > 1 werden mehrere aufeinanderfolgende Actions konkateniert:
-Mit frameskip=5: Effektive Action-Dimension = 9 × 5 = 45
-Format: [action_t, action_t+1, action_t+2, action_t+3, action_t+4]
+**Referenz-Vergleich:**
+| | Franka (unser Datensatz) | Rope/Deformable (Referenz) |
+|---|---|---|
+| eef_states Format | `[pos_end, pos_start, quat_end, quat_start]` | `[pos_cur, pos_prev, quat_cur, quat_prev]` |
+| Proprio verwendet | `eef[:, :3]` = pos_end (3D) | `np.zeros(1)` = Dummy (1D, nicht genutzt) |
+| Semantik [0:3] | Aktuelle EE-Position | Aktuelle Partikelposition |
+| Semantik [3:6] | Vorherige EE-Position | Vorherige Partikelposition |
+
+### 2.4 Action-Vektor Aufbau (8 Dimensionen)
+
+Der Action-Vektor beschreibt eine Bewegungsprimitiv als Start→End-Transition des End-Effectors:
+
+```
+Action (8D) = [x_start, y_start, z_start, g_start, x_end, y_end, z_end, g_end]
+               ├──────────────────────────────────┘ ├──────────────────────────┘
+               │  Primitiv-START (vorher)            │  Primitiv-ENDE (nachher)
+               └── Wo war der EE?                    └── Wohin hat er sich bewegt?
+
+Index  Dim        Beschreibung                          Wertebereich
+─────  ───        ────────────                          ────────────
+0      x_start    Start-Position X (vor/zurück)         ~0.2 - 0.7 m
+1      y_start    Start-Position Y (links/rechts)       ~-0.3 - 0.3 m
+2      z_start    Start-Position Z (Höhe)               ~0.05 - 0.4 m
+3      g_start    Gripper-State am Start                 0.0 (zu) / 0.04 (auf)
+4      x_end      End-Position X                         ~0.2 - 0.7 m
+5      y_end      End-Position Y                         ~-0.3 - 0.3 m
+6      z_end      End-Position Z                         ~0.05 - 0.4 m
+7      g_end      Gripper-State am Ende                  0.0 (zu) / 0.04 (auf)
+```
+
+**Beispiel-Action** (APPROACH-Primitiv):
+```
+[0.475, -0.018, 0.320, 0.040, 0.475, -0.018, 0.160, 0.040]
+ ├───────────────────────────────────┘ ├──────────────────────┘
+ Start: (0.475, -0.018, 0.320), Gripper offen
+                                       End: (0.475, -0.018, 0.160), Gripper offen
+ → Abwärtsbewegung: Δz = -0.16m (Annäherung an Würfel)
+```
+
+**Ohne Gripper-Tracking** (ältere Datensätze): Action ist 6D = `[x_start, y_start, z_start, x_end, y_end, z_end]`
+
+**Hinweis zur zeitlichen Ordnung (Action vs. EEF States):**
+- Action: `[start → end]` = zeitlich vorwärts (Bewegungsbefehl: von wo nach wo)
+- EEF States: `[current, previous]` = aktuell zuerst (Zustandsbeschreibung: wo bin ich, wo war ich)
+- Diese unterschiedliche Konvention ist **kein Problem**, weil sie verschiedene Zwecke erfüllen:
+  Action = Bewegungsrichtung, EEF States = Zustandsinformation. Das Modell lernt die Semantik.
+  Das `proprio` nutzt ohnehin nur `eef[:, :3]` = pos_end = aktuelle Position.
+
+**Kein Frameskip bei Primitiv-Datensätzen:**
+Da jeder Timestep bereits ein ganzes Bewegungsprimitiv repräsentiert (nicht ein einzelner
+Simulations-Frame), wird `frameskip=1` verwendet. Frameskip-Konkatenation entfällt.
+Effektive Action-Dimension = 8 (nicht 8 × frameskip)
 ---
 
 ## 3. Konfiguration und Parameter
@@ -120,7 +180,7 @@ training:
   batch_size: 12
   seed: 0
   save_every_x_epoch: 1
-  encoder_lr: 1e-6      # DINO Encoder (meist eingefroren)
+  encoder_lr: 1e-6      # DINO Encoder (eingefroren)
   decoder_lr: 3e-4      # VQ-VAE Decoder
   predictor_lr: 5e-4    # ViT Predictor
   action_encoder_lr: 5e-4
@@ -373,26 +433,22 @@ Lösung:
 
 ### 3.5 Action & Proprio Embedding Prozess
 
-Die `action_emb_dim: 10` und `proprio_emb_dim: 10` entsprechen **nicht** den Rohdimensionen deiner Daten (Action: 9, Proprio: 3). Stattdessen werden die Rohdaten durch einen **lernbaren Encoder** in diese Embedding-Dimensionen transformiert.
+Die `action_emb_dim: 10` und `proprio_emb_dim: 10` entsprechen **nicht** den Rohdimensionen der Daten (Action: 8, Proprio: 3). Stattdessen werden die Rohdaten durch einen **lernbaren Encoder** in diese Embedding-Dimensionen transformiert.
 
-#### Schritt 1: Frameskip-Konkatenation (nur für Actions)
+#### Schritt 1: Kein Frameskip bei Primitiv-Datensätzen
 
-Bevor die Aktionen eingebettet werden, werden sie durch den `frameskip` konkateniert:
+Bei Primitiv-basierten Datensätzen repräsentiert jeder Timestep bereits ein ganzes Bewegungsprimitiv 
+(mehrere Simulations-Schritte zusammengefasst). Daher wird `frameskip=1` verwendet:
 
 ```
-Deine Original-Aktionen:     9 Dimensionen pro Frame
+Primitiv-basiert (frameskip=1):
+┌──────────────────────────────────────┐
+│  Action pro Primitiv: 8 Dimensionen  │
+│  [x_s, y_s, z_s, g_s, x_e, y_e, z_e, g_e]  │
+│  Keine Konkatenation nötig!          │
+└──────────────────────────────────────┘
 
-Mit frameskip=5:
-┌─────────┬─────────┬─────────┬─────────┬─────────┐
-│Action t │Action t+1│Action t+2│Action t+3│Action t+4│
-│  (9)    │   (9)   │   (9)   │   (9)   │   (9)   │
-└─────────┴─────────┴─────────┴─────────┴─────────┘
-                         │
-                         ▼ Konkatenation
-              ┌─────────────────────────┐
-              │   Kombinierte Action    │
-              │      (9 × 5 = 45)       │
-              └─────────────────────────┘
+Effektive Action-Dimension = 8 × 1 = 8 (nicht vergrößert durch frameskip)
 ```
 
 #### Schritt 2: Embedding durch Conv1d
@@ -402,10 +458,10 @@ Der `ProprioceptiveEmbedding`-Encoder transformiert die Rohdaten in kompakte Emb
 ```
 ACTION ENCODER:
 ───────────────
-Input:  (Batch, Time, 45)   ← 45 = action_dim × frameskip = 9 × 5
+Input:  (Batch, Time, 8)    ← 8D: [start_pos(3), g_start(1), end_pos(3), g_end(1)]
               │
               ▼
-        Conv1d(45 → 10)     ← Lernbare Projektion
+        Conv1d(8 → 10)      ← Lernbare Projektion (kernel_size=1)
               │
               ▼
 Output: (Batch, Time, 10)   ← action_emb_dim
@@ -413,20 +469,24 @@ Output: (Batch, Time, 10)   ← action_emb_dim
 
 PROPRIO ENCODER:
 ────────────────
-Input:  (Batch, Time, 3)    ← EE-Position (x, y, z)
+Input:  (Batch, Time, 3)    ← 3D: EE-Position [x, y, z] (= eef[:, :3] = pos_end)
               │
               ▼
-        Conv1d(3 → 10)      ← Lernbare Projektion
+        Conv1d(3 → 10)      ← Lernbare Projektion (kernel_size=1)
               │
               ▼
 Output: (Batch, Time, 10)   ← proprio_emb_dim
 ```
 
+**Hinweis:** `Conv1d(kernel_size=1, stride=1)` ist äquivalent zu einer punktweisen linearen 
+Transformation (Fully-Connected Layer pro Zeitschritt). Es werden KEINE temporalen Faltungen 
+über benachbarte Zeitschritte durchgeführt.
+
 #### Warum diese Transformation?
 
 | Aspekt | Erklärung |
 |--------|-----------|
-| **Dimensionsreduktion** | 45 → 10 komprimiert die Action-Information |
+| **Dimensionsanpassung** | 8D Action / 3D Proprio → einheitlich 10D Embedding |
 | **Lernbare Features** | Netzwerk lernt, welche Action-Kombinationen wichtig sind |
 | **Kompatibilität** | Kleinere Embedding-Dimension passt besser zu DINO (384 dim) |
 | **Regularisierung** | Verhindert Overfitting auf hochdimensionale Inputs |
@@ -448,16 +508,29 @@ Pro Patch im Latent-Space werden alle Embeddings konkateniert:
 ```python
 # Aus models/proprio.py - ProprioceptiveEmbedding:
 self.patch_embed = nn.Conv1d(
-    in_chans,      # 45 für Actions (9×5), 3 für Proprio
+    in_chans,      # 8 für Actions (8D Primitiv), 3 für Proprio
     emb_dim,       # 10 (action_emb_dim / proprio_emb_dim)
     kernel_size=1,
     stride=1
+)
+
+# Aus train.py - Dynamische Dimensionen aus Datensatz:
+proprio_encoder = ProprioceptiveEmbedding(
+    in_chans=datasets["train"].proprio_dim,  # 3 (auto-detektiert)
+    emb_dim=cfg.proprio_emb_dim              # 10 (aus Config)
+)
+action_encoder = ProprioceptiveEmbedding(
+    in_chans=datasets["train"].action_dim,   # 8 (auto-detektiert aus H5)
+    emb_dim=cfg.action_emb_dim               # 10 (aus Config)
 )
 ```
 
 **Zusammenfassung des Datenflusses:**
 ```
-Actions:  (B, T, 9) ──frameskip(5)──► (B, T, 9*5=45) ──Conv1d──► (B, T, 10)
+Actions:  (B, T, 8)  ─────────────────► (B, T, 8)  ──Conv1d──► (B, T, 10)
+                      (kein frameskip)
+Proprio:  (B, T, 3)  ─────────────────► (B, T, 3)  ──Conv1d──► (B, T, 10)
+                      eef[:, :3]
 Proprio:  (B, T, 3) ─────────────────────────► Conv1d──► (B, T, 10)
 ```
 
@@ -1535,20 +1608,40 @@ Er wird **gemeinsam** mit dem Action Encoder, dem ViT Predictor und dem VQ-VAE D
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│  DATENSATZ-QUELLE                                                           │
-│  Pfad: fcs_datasets/primLogger_NEps500_ActInt10_RobOpac10_NCams4_NCube1/   │
+│  DATENSATZ-QUELLE (Primitiv-basiert)                                        │
+│  Pfad: fcs_datasets/NEps1000_RobOpac0_NPrim20_NCams4_NCube1/              │
 │                                                                             │
 │  Pro Episode (z.B. 000042/):                                                │
-│  ├── obses.pth         # (T, H, W, C) = (25, 256, 256, 3) BGR uint8       │
-│  ├── 00.h5             # Timestep 0                                        │
-│  │   ├── action        # (action_dim,) z.B. (6,) für ee_pos               │
+│  ├── obses.pth         # (T, H, W, C) = (20, 256, 256, 3) BGR uint8       │
+│  ├── 00.h5             # Primitiv 0 (= Timestep 0)                        │
+│  │   ├── action        # (8,) 8D-Action                                   │
+│  │   │                   [x_s, y_s, z_s, g_s, x_e, y_e, z_e, g_e]         │
 │  │   ├── eef_states    # (1, 1, 14) → 14D EEF-Zustand                     │
-│  │   │                   [ee_x, ee_y, ee_z, qx, qy, qz, qw, ...]          │
-│  │   └── info/         # action_mode Attribut                              │
-│  ├── 01.h5                                                                  │
-│  └── ...                                                                    │
+│  │   │                   [pos_end(3), pos_start(3), quat_end(4),           │
+│  │   │                    quat_start(4)]                                    │
+│  │   ├── positions     # (1, N_cubes, 4) Würfelpositionen (homogen)        │
+│  │   └── info/         # n_steps, movement_distance, phase,                │
+│  │                       primitive_name, primitive_type                      │
+│  ├── 01.h5 ... 19.h5                                                       │
+│  └── property_params.pkl                                                    │
 │                                                                             │
-│  500 Episoden × 25 Timesteps = 12.500 Datenpunkte                          │
+│  985 Episoden × 20 Primitive = 19.700 Datenpunkte                          │
+│                                                                             │
+│  DETAIL: eef_states[0, 0, :] = 14D Vektor:                                │
+│  ┌──────────────────────────────────────────────────────────────────┐       │
+│  │ [0:3]  pos_end   = EE-Position NACH Bewegung (aktuell)          │       │
+│  │ [3:6]  pos_start = EE-Position VOR Bewegung (vorherig)          │       │
+│  │ [6:10] quat_end  = EE-Quaternion NACH Bewegung                  │       │
+│  │ [10:14]quat_start= EE-Quaternion VOR Bewegung                   │       │
+│  └──────────────────────────────────────────────────────────────────┘       │
+│                                                                             │
+│  DETAIL: action[:] = 8D Vektor:                                            │
+│  ┌──────────────────────────────────────────────────────────────────┐       │
+│  │ [0:3]  start_pos = EE-Position am Primitiv-Start                │       │
+│  │ [3]    g_start   = Gripper-State am Start (0.0/0.04)            │       │
+│  │ [4:7]  end_pos   = EE-Position am Primitiv-Ende                 │       │
+│  │ [7]    g_end     = Gripper-State am Ende (0.0/0.04)             │       │
+│  └──────────────────────────────────────────────────────────────────┘       │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -1556,24 +1649,28 @@ Er wird **gemeinsam** mit dem Action Encoder, dem ViT Predictor und dem VQ-VAE D
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│  SCHRITT A: H5-Dateien lesen (pro Episode, pro Timestep)                    │
+│  SCHRITT A: H5-Dateien lesen (pro Episode, pro Primitiv/Timestep)           │
 │  ─────────────────────────────────────────────────────────────────────────  │
 │                                                                             │
 │  Code (franka_cube_stack_dset.py, __init__):                                │
 │  ──────────────────────────────────────────                                 │
-│  for t in range(episode_length):        # t = 0..24                        │
+│  for t in range(episode_length):        # t = 0..19 (20 Primitive)         │
 │      with h5py.File(f"{t:02d}.h5") as f:                                   │
-│          action = f["action"][:]        # → numpy (6,)                     │
+│          action = f["action"][:]        # → numpy (8,) 8D-Action           │
 │          eef = f["eef_states"][:]       # → numpy (1, 1, 14)               │
 │          eef_states.append(eef.flatten())  # → numpy (14,)                 │
 │                                                                             │
 │  Variablen nach dem Loop:                                                   │
-│  self.all_actions[i]    : numpy (25, 6)   # 25 Timesteps × 6D Actions     │
-│  self.all_eef_states[i] : numpy (25, 14)  # 25 Timesteps × 14D EEF        │
+│  self.all_actions[i]    : numpy (20, 8)   # 20 Primitive × 8D Actions     │
+│  self.all_eef_states[i] : numpy (20, 14)  # 20 Primitive × 14D EEF        │
 │                                                                             │
 │  Konvertierung zu Tensoren:                                                 │
-│  self.actions_tensors[i] = torch.from_numpy(actions).float()  # (25, 6)    │
-│  self.eef_tensors[i]    = torch.from_numpy(eef).float()       # (25, 14)   │
+│  self.actions_tensors[i] = torch.from_numpy(actions).float()  # (20, 8)    │
+│  self.eef_tensors[i]    = torch.from_numpy(eef).float()       # (20, 14)   │
+│                                                                             │
+│  Automatische Dimensions-Erkennung:                                         │
+│  self.action_dim = actions.shape[-1]  # → 8 (auto-detektiert aus H5)       │
+│  self.proprio_dim = 3                 # → fest: nur eef[:, :3] = pos_end   │
 └─────────────────────────────────────────────────────────────────────────────┘
                                     │
                                     ▼
@@ -1585,13 +1682,13 @@ Er wird **gemeinsam** mit dem Action Encoder, dem ViT Predictor und dem VQ-VAE D
 │  ──────────────────────────────────────────────────────────────────         │
 │                                                                             │
 │  # Alle EEF-Daten aller Episoden zusammenfassen:                            │
-│  all_eef_flat = torch.cat(self.eef_tensors, dim=0)  # (12500, 14)         │
+│  all_eef_flat = torch.cat(self.eef_tensors, dim=0)  # (19700, 14)         │
 │                                                                             │
-│  # Proprio-Statistiken: NUR erste 3 Dimensionen (EE-Position x,y,z)       │
+│  # Proprio-Statistiken: NUR erste 3 Dimensionen (= pos_end = aktuelle Pos) │
 │  self.proprio_mean = all_eef_flat[:, :3].mean(dim=0)  # (3,)              │
 │  self.proprio_std  = all_eef_flat[:, :3].std(dim=0) + 1e-6  # (3,)        │
 │                                                                             │
-│  Typische Werte (500 Episoden):                                             │
+│  Typische Werte (985 Episoden):                                             │
 │  ┌─────────────────────────────────────────────────────────────────┐        │
 │  │  proprio_mean ≈ [0.476, 0.017, 0.161]   (Meter, Weltkoord.)    │        │
 │  │  proprio_std  ≈ [0.124, 0.161, 0.072]   (Streuung in Meter)    │        │
@@ -1620,25 +1717,27 @@ Er wird **gemeinsam** mit dem Action Encoder, dem ViT Predictor und dem VQ-VAE D
 │      eef = self.eef_tensors[idx][frames]        # (T_slice, 14)            │
 │      proprio = (eef[:, :3] - self.proprio_mean) / self.proprio_std          │
 │      #           ↑                                                          │
-│      #  Nur erste 3 Dims: EE-Position [x, y, z]                            │
+│      #  Nur erste 3 Dims: pos_end = EE-Position NACH Bewegung [x, y, z]    │
+│      #  = Aktuelle Position des End-Effectors                               │
 │      #                                                                      │
 │      obs = {"visual": image, "proprio": proprio}                            │
 │      return obs, act, state, {}                                             │
 │                                                                             │
-│  Tensor-Dimensionen (Beispiel: frameskip=2, num_hist=4, num_pred=1):        │
+│  Tensor-Dimensionen (Beispiel: frameskip=1, num_hist=4, num_pred=1):        │
 │  ──────────────────────────────────────────────────────────────────         │
 │  Input frames (nach TrajSlicerDataset):                                     │
-│    frames = [start, start+2, start+4, start+6, start+8]  # 5 Frames       │
-│                     ↑ frameskip=2, Schritt 2                                │
+│    frames = [start, start+1, start+2, start+3, start+4]  # 5 Frames       │
+│              ↑ frameskip=1 bei Primitiv-Datensätzen (jeder Schritt)         │
 │                                                                             │
-│  eef:    (5, 14)   ← 5 selektierte Zeitschritte, 14D EEF                  │
-│  eef[:, :3]: (5, 3)  ← NUR Position [x, y, z]                              │
-│  proprio: (5, 3)   ← z-normalisiert                                        │
+│  eef:     (5, 14)   ← 5 selektierte Zeitschritte, 14D EEF                 │
+│  eef[:, :3]: (5, 3) ← NUR pos_end [x, y, z] (aktuelle EE-Position)        │
+│  proprio: (5, 3)    ← z-normalisiert                                       │
 │                                                                             │
 │  Normalisierung (Element-weise):                                            │
 │  ┌─────────────────────────────────────────────────────────────────┐        │
 │  │  proprio[t] = (eef[t, :3] - proprio_mean) / proprio_std        │        │
 │  │                                                                  │        │
+│  │  eef[t, :3] = pos_end = EE-Position am Ende des Primitivs t     │        │
 │  │  Beispiel: eef = [0.45, 0.02, 0.16]                              │        │
 │  │  proprio  = ([0.45, 0.02, 0.16] - [0.476, 0.017, 0.161])        │        │
 │  │             / [0.124, 0.161, 0.072]                              │        │
@@ -1654,38 +1753,40 @@ Er wird **gemeinsam** mit dem Action Encoder, dem ViT Predictor und dem VQ-VAE D
 │  SCHRITT D: Frameskip und Slicing                                           │
 │  ─────────────────────────────────────────────────────────────────────────  │
 │                                                                             │
+│  WICHTIG für Primitiv-Datensätze: frameskip = 1                             │
+│  → Jeder Timestep ist bereits ein Bewegungsprimitiv!                        │
+│  → Kein temporales Subsampling nötig.                                       │
+│                                                                             │
 │  Code (traj_dset.py, TrajSlicerDataset.__getitem__):                        │
 │  ──────────────────────────────────────────────────                         │
 │  def __getitem__(self, idx):                                                │
-│      i, start, end = self.slices[idx]    # z.B. (42, 3, 13)               │
+│      i, start, end = self.slices[idx]    # z.B. (42, 3, 8)                │
 │      obs, act, state, _ = self.dataset[i]  # Volle Episode laden          │
 │      for k, v in obs.items():                                               │
-│          obs[k] = v[start:end:self.frameskip]  # Subsampling               │
-│      # ↑ Gilt für ALLE obs-Keys: "visual" UND "proprio"!                   │
+│          obs[k] = v[start:end:self.frameskip]  # frameskip=1: alle         │
 │      state = state[start:end:self.frameskip]                                │
 │      act = act[start:end]                                                   │
 │      act = rearrange(act, "(n f) d -> n (f d)", n=self.num_frames)         │
 │      return obs, act, state                                                 │
 │                                                                             │
-│  Beispiel (frameskip=2, num_frames=5, start=3, end=13):                     │
+│  Beispiel (frameskip=1, num_frames=5, start=3, end=8):                      │
 │  ─────────────────────────────────────────────────────                      │
 │                                                                             │
-│  Original-Sequenz der Episode:                                              │
-│  Index:  0  1  2 [3] 4 [5] 6 [7] 8 [9] 10[11] 12                          │
-│                  ↑     ↑     ↑     ↑      ↑                                │
-│  Subsampled:    F0    F1    F2    F3     F4                                 │
+│  Primitiv-Sequenz der Episode:                                              │
+│  Index:  0  1  2 [3] [4] [5] [6] [7]  8  9 ...                            │
+│                  ↑    ↑    ↑    ↑    ↑                                     │
+│  Frames:        F0   F1   F2   F3   F4     (alle, frameskip=1)             │
 │                                                                             │
-│  obs['proprio']: v[3:13:2] = v[[3, 5, 7, 9, 11]]  → (5, 3)               │
-│  obs['visual']:  v[3:13:2] = v[[3, 5, 7, 9, 11]]  → (5, 3, 224, 224)     │
+│  obs['proprio']: v[3:8:1] = v[[3, 4, 5, 6, 7]]  → (5, 3)                 │
+│  obs['visual']:  v[3:8:1] = v[[3, 4, 5, 6, 7]]  → (5, 3, 224, 224)       │
 │                                                                             │
-│  act: v[3:13] = 10 Actions → rearrange zu (5, 12)                          │
-│       ↑ Alle 10 Raw-Actions, dann Reshape: (5×2, 6) → (5, 2×6=12)         │
-│       ↑ n=num_frames=5, f=frameskip=2, d=action_dim=6                      │
+│  act: v[3:8] = 5 Actions → rearrange zu (5, 8)                             │
+│       ↑ n=num_frames=5, f=frameskip=1, d=action_dim=8                      │
+│       ↑ (5×1, 8) → (5, 1×8=8)  ← Keine Konkatenation!                    │
 │                                                                             │
 │  KRITISCH: Proprio wird mit demselben Frameskip subsampled wie Visual!      │
 │  → Proprio und Visual sind zeitlich perfekt synchron.                       │
-│  → Actions werden NICHT subsampled, sondern konkateniert (frameskip         │
-│    aufeinanderfolgende Actions → eine kombinierte Action)                   │
+│  → Bei frameskip=1: Actions werden 1:1 durchgereicht (8D bleibt 8D)        │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -1696,7 +1797,7 @@ Er wird **gemeinsam** mit dem Action Encoder, dem ViT Predictor und dem VQ-VAE D
 │  DATALOADER OUTPUT (1 Batch)                                                │
 │  ─────────────────────────────────────────────────────────────────────────  │
 │                                                                             │
-│  Konfiguration: B=8, num_hist=4, num_pred=1, frameskip=2, action_dim=6     │
+│  Konfiguration: B=8, num_hist=4, num_pred=1, frameskip=1, action_dim=8     │
 │                 proprio_dim=3, img_size=224                                 │
 │                                                                             │
 │  obs, act, state = next(dataloader)                                         │
@@ -1706,15 +1807,15 @@ Er wird **gemeinsam** mit dem Action Encoder, dem ViT Predictor und dem VQ-VAE D
 │  ├─────────────────────┼────────────────────────┼──────────────────────┤   │
 │  │ obs['visual']       │ (8, 5, 3, 224, 224)    │ 5 RGB Bilder         │   │
 │  │ obs['proprio']      │ (8, 5, 3)              │ 5 EE-Positionen      │   │
-│  │ act                 │ (8, 5, 12)             │ 5 × (6×2) Actions    │   │
+│  │ act                 │ (8, 5, 8)              │ 5 × 8D Actions       │   │
 │  │ state               │ (8, 5, 14)             │ 5 EEF-Zustände       │   │
 │  └─────────────────────┴────────────────────────┴──────────────────────┘   │
 │                                                                             │
 │  Wobei:                                                                     │
 │  - 5 = num_hist + num_pred = 4 + 1 = 5 Zeitschritte                       │
-│  - 12 = action_dim × frameskip = 6 × 2                                     │
-│  - 3 = proprio_dim (EE x, y, z)                                            │
-│  - 14 = eef_dim (voller EEF-Zustand)                                       │
+│  - 8 = action_dim (8D Primitiv-Action, kein frameskip)                     │
+│  - 3 = proprio_dim (EE x, y, z = eef[:, :3] = pos_end)                    │
+│  - 14 = eef_dim (voller EEF-Zustand mit Start+End)                         │
 │                                                                             │
 │  obs['proprio'] Beispiel-Werte (z-normalisiert):                            │
 │  ┌─────────────────────────────────────────────────────────────────────┐   │

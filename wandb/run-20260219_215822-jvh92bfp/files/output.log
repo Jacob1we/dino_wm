@@ -1,0 +1,65 @@
+  W&B Run: https://wandb.ai/jacob-weyer-rwth-aachen-university/dino_wm_planning/runs/jvh92bfp
+✓ Setup komplett
+  Modus: ONLINE
+  CEM: samples=300, steps=30, topk=30, horizon=5
+  Suchraum: 80D (H=5 × D=16)
+Server laeuft auf localhost:5555
+Warte auf Client...
+[+] Client: ('127.0.0.1', 48750)
+  W&B Config aktualisiert mit Client-Config (12 Keys)
+  Client-Config empfangen: ['port', 'n_episodes', 'max_steps', 'headless', 'goal_image', 'settle_steps', 'ee_threshold', 'timeout', 'mode', 'log_dir', 'robot_opacity_for_capture', 'scene_config']
+  Reset
+  Goal gesetzt: (224, 224, 3) uint8, ee_pos=[0.36049223 0.0566565  0.06966189]
+    CEM step 1: loss=1.195354
+    CEM step 2: loss=1.092312
+    CEM step 3: loss=1.069074
+    CEM step 4: loss=0.989628
+    CEM step 5: loss=1.018110
+    CEM step 6: loss=1.026078
+    CEM step 7: loss=0.995945
+    CEM step 8: loss=0.995593
+    CEM step 9: loss=0.965061
+    CEM step 10: loss=0.967226
+    CEM step 11: loss=0.939272
+    CEM step 12: loss=0.934625
+    CEM step 13: loss=0.931973
+    CEM step 14: loss=0.917364
+    CEM step 15: loss=0.915215
+    CEM step 16: loss=0.869809
+    CEM step 17: loss=0.884516
+    CEM step 18: loss=0.883090
+    CEM step 19: loss=0.874589
+    CEM step 20: loss=0.870600
+    CEM step 21: loss=0.871045
+    CEM step 22: loss=0.864154
+    CEM step 23: loss=0.860225
+    CEM step 24: loss=0.857881
+    CEM step 25: loss=0.855003
+    CEM step 26: loss=0.847257
+    CEM step 27: loss=0.848921
+    CEM step 28: loss=0.846667
+    CEM step 29: loss=0.842959
+    CEM step 30: loss=0.833928
+  Plan: 1.195354 → 0.833928 (30.2% Reduktion, 352.2s)
+    Sub-Action 0: target_ee=[-1.227, 0.603, -0.108]
+[-] Client getrennt
+Traceback (most recent call last):
+  File "/home/tsp_jw/Desktop/dino_wm/planning_server.py", line 553, in <module>
+    actions, _ = planner.plan(
+  File "/home/tsp_jw/Desktop/dino_wm/planning/cem.py", line 108, in plan
+    i_z_obses, i_zs = self.wm.rollout(
+  File "/home/tsp_jw/Desktop/dino_wm/planning_server.py", line 197, in rollout
+    torch.cuda.empty_cache()
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/site-packages/torch/cuda/memory.py", line 162, in empty_cache
+    torch._C._cuda_emptyCache()
+KeyboardInterrupt
+Traceback (most recent call last):
+  File "/home/tsp_jw/Desktop/dino_wm/planning_server.py", line 553, in <module>
+    actions, _ = planner.plan(
+  File "/home/tsp_jw/Desktop/dino_wm/planning/cem.py", line 108, in plan
+    i_z_obses, i_zs = self.wm.rollout(
+  File "/home/tsp_jw/Desktop/dino_wm/planning_server.py", line 197, in rollout
+    torch.cuda.empty_cache()
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/site-packages/torch/cuda/memory.py", line 162, in empty_cache
+    torch._C._cuda_emptyCache()
+KeyboardInterrupt

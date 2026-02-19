@@ -1,0 +1,66 @@
+  W&B Run: https://wandb.ai/jacob-weyer-rwth-aachen-university/dino_wm_planning/runs/jnjb1lvm
+✓ Setup komplett
+  Modus: ONLINE
+  CEM: samples=300, steps=5, topk=30, horizon=5
+  Suchraum: 80D (H=5 × D=16)
+Server laeuft auf localhost:5555
+Warte auf Client...
+[+] Client: ('127.0.0.1', 60554)
+  W&B Config aktualisiert mit Client-Config (12 Keys)
+  Client-Config empfangen: ['port', 'n_episodes', 'max_steps', 'headless', 'goal_image', 'settle_steps', 'ee_threshold', 'timeout', 'mode', 'log_dir', 'robot_opacity_for_capture', 'scene_config']
+  Reset
+  Goal gesetzt: (224, 224, 3) uint8, ee_pos=[0.4292098  0.04511301 0.41513357]
+    CEM step 1: loss=5.848255
+    CEM step 2: loss=3.917904
+    CEM step 3: loss=3.243262
+    CEM step 4: loss=2.783923
+    CEM step 5: loss=2.427270
+  Plan: 5.848255 → 2.427270 (58.5% Reduktion, 58.3s)
+    Sub-Action 0: target_ee=[0.332, 0.493, -0.076]
+[-] Client getrennt
+[+] Client: ('127.0.0.1', 52688)
+  W&B Config aktualisiert mit Client-Config (12 Keys)
+  Client-Config empfangen: ['port', 'n_episodes', 'max_steps', 'headless', 'goal_image', 'settle_steps', 'ee_threshold', 'timeout', 'mode', 'log_dir', 'robot_opacity_for_capture', 'scene_config']
+  Reset
+  Goal gesetzt: (224, 224, 3) uint8, ee_pos=[0.36049223 0.0566565  0.06966189]
+    CEM step 1: loss=1.318541
+    CEM step 2: loss=1.145203
+    CEM step 3: loss=1.127016
+    CEM step 4: loss=1.105960
+    CEM step 5: loss=1.080251
+  Plan: 1.318541 → 1.080251 (18.1% Reduktion, 60.0s)
+    Sub-Action 0: target_ee=[0.843, 0.480, 0.003]
+    CEM step 1: loss=1.186837
+    CEM step 2: loss=1.099992
+    CEM step 3: loss=1.095220
+    CEM step 4: loss=1.052345
+    CEM step 5: loss=1.070473
+  Plan: 1.186837 → 1.070473 (9.8% Reduktion, 60.6s)
+    Sub-Action 0: target_ee=[0.604, 0.532, -0.026]
+    CEM step 1: loss=1.106490
+    CEM step 2: loss=1.119189
+    CEM step 3: loss=1.106281
+    CEM step 4: loss=1.101302
+    CEM step 5: loss=1.096680
+  Plan: 1.106490 → 1.096680 (0.9% Reduktion, 61.1s)
+    Sub-Action 0: target_ee=[0.036, 0.726, -0.249]
+    CEM step 1: loss=1.128173
+    CEM step 2: loss=1.032042
+    CEM step 3: loss=1.071275
+    CEM step 4: loss=1.022762
+    CEM step 5: loss=1.035631
+  Plan: 1.128173 → 1.035631 (8.2% Reduktion, 53.5s)
+    Sub-Action 0: target_ee=[-0.043, 0.579, 0.102]
+[-] Client getrennt
+Traceback (most recent call last):
+  File "/home/tsp_jw/Desktop/dino_wm/planning_server.py", line 487, in <module>
+    conn, addr = server.accept()
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/socket.py", line 293, in accept
+    fd, addr = self._accept()
+KeyboardInterrupt
+Traceback (most recent call last):
+  File "/home/tsp_jw/Desktop/dino_wm/planning_server.py", line 487, in <module>
+    conn, addr = server.accept()
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/socket.py", line 293, in accept
+    fd, addr = self._accept()
+KeyboardInterrupt

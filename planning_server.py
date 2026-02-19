@@ -567,7 +567,7 @@ while True:
                     wandb_run.log_plan_summary(t_plan, len(sub_actions), mode="plan")
                     # Diagnostik: denormalisierte Zielposition
                     for si, sa in enumerate(sub_actions):
-                        print(f"    Sub-Action {si}: target_ee=[{sa[3]:.3f}, {sa[4]:.3f}, {sa[5]:.3f}]")
+                        print(f"    Sub-Action {si}: target_ee=[{sa[4]:.3f}, {sa[5]:.3f}, {sa[6]:.3f}]")
                     response = {
                         "status": "ok",
                         "actions": sub_actions.tolist(),

@@ -1,0 +1,32 @@
+  W&B Run: https://wandb.ai/jacob-weyer-rwth-aachen-university/dino_wm_planning/runs/6i2ognxe
+✓ Setup komplett
+  Modus: ONLINE
+  CEM: samples=300, steps=3, topk=30, horizon=5
+  Suchraum: 80D (H=5 × D=16)
+Server laeuft auf localhost:5555
+Warte auf Client...
+[+] Client: ('127.0.0.1', 46050)
+  W&B Config aktualisiert mit Client-Config (12 Keys)
+  Client-Config empfangen: ['port', 'n_episodes', 'max_steps', 'headless', 'goal_image', 'settle_steps', 'ee_threshold', 'timeout', 'mode', 'log_dir', 'robot_opacity_for_capture', 'scene_config']
+  Reset
+  Goal gesetzt: (224, 224, 3) uint8, ee_pos=[0.36049223 0.0566565  0.06966189]
+    CEM step 1: loss=1.195480
+    CEM step 2: loss=1.069261
+    CEM step 3: loss=1.084670
+  Plan: 1.195480 → 1.084670 (9.3% Reduktion, 33.9s)
+    Sub-Action 0: target_ee=[0.557, -0.077, 0.212]
+    CEM step 1: loss=1.094190
+    CEM step 2: loss=1.161449
+    CEM step 3: loss=1.119266
+  Plan: 1.094190 → 1.119266 (-2.3% Reduktion, 34.4s)
+    Sub-Action 0: target_ee=[0.430, -0.061, 0.182]
+    CEM step 1: loss=1.175346
+    CEM step 2: loss=1.139855
+    CEM step 3: loss=1.103953
+  Plan: 1.175346 → 1.103953 (6.1% Reduktion, 34.8s)
+    Sub-Action 0: target_ee=[0.516, -0.113, 0.171]
+    CEM step 1: loss=1.082154
+    CEM step 2: loss=1.098216
+    CEM step 3: loss=1.049176
+  Plan: 1.082154 → 1.049176 (3.0% Reduktion, 34.9s)
+    Sub-Action 0: target_ee=[0.370, -0.041, 0.175]

@@ -16,6 +16,7 @@
 8. [W&B Metriken und Monitoring](#8-wb-metriken-und-monitoring)
 9. [Training starten](#9-training-starten)
 10. [Glossar](#10-glossar)
+11. [🚨 KRITISCH: Action-Observation Temporale Alignment-Analyse (20.02.2026)](#-kritisch-action-observation-temporale-alignment-analyse-20022026)
 
 ---
 
@@ -2962,4 +2963,234 @@ Für deinen Datensatz `2026_01_13_1152_fcs_dset`:
 ---
 
 *Dokumentation erstellt am 13.01.2026*
+
+---
+
+## 🚨 KRITISCH: Action-Observation Temporale Alignment-Analyse (20.02.2026)
+
+### Problemstellung
+
+Es wurde eine **fundamentale Inkompatibilität** zwischen dem FCS-Datensatz (Franka Cube Stacking) und der Referenz-Konvention des DINO-WM Papers (Rope/Deformable Environments) bei der zeitlichen Zuordnung von Actions und Observations identifiziert.
+
+**Kernfrage:** Beschreibt `action[t]` den Übergang von `obs[t]` zu `obs[t+1]` (vorwärtsblickend) oder den Übergang, der zu `obs[t]` führte (rückwärtsblickend)?
+
+### Analyse der Referenz-Konvention (Rope / Deformable Environment)
+
+#### Datenfluss bei der Generierung
+
+In `FlexEnvWrapper.rollout()` ([env/deformable_env/FlexEnvWrapper.py](env/deformable_env/FlexEnvWrapper.py#L156)):
+```python
+def rollout(self, seed, init_state, actions):
+    obs, state_dct = self.prepare(seed, init_state)  # obs_initial (VOR jeder Action)
+    obses, rewards, dones, infos = self.step_multiple(actions)  # T Action-Ergebnisse
+    for k in obses.keys():
+        obses[k] = np.vstack([np.expand_dims(obs[k], 0), obses[k]])  # obs_initial VORANSTELLEN
+    # Ergebnis: T+1 Beobachtungen für T Actions
+```
+
+- `obs_initial` = Zustand **VOR** der ersten Action
+- `step_multiple()` liefert T Bilder — jeweils am **ENDE** jeder Action
+- `rollout()` stellt `obs_initial` voran → **T+1 Beobachtungen für T Actions**
+
+#### Konvention in den .pth-Dateien
+
+In `DeformDataset.get_frames()` ([datasets/deformable_env_dset.py](datasets/deformable_env_dset.py#L95)):
+```python
+image = torch.load(obs_dir / "obses.pth")
+act = self.actions[idx, frames]
+image = image[frames]  # Gleicher Index!
+```
+
+In `plan.py` `sample_traj_segment_from_dset()` ([plan.py](plan.py#L263)):
+```python
+obs = {key: arr[offset : offset + traj_len] for key, arr in obs.items()}
+act = act[offset : offset + self.frameskip * self.goal_H]
+# traj_len = frameskip * goal_H + 1 → obs hat EINE MEHR Einträge als act!
+```
+
+**Beweis:** Das Planning nimmt `traj_len = frameskip * goal_H + 1` Observations aber nur `frameskip * goal_H` Actions. Die eine Extra-Observation ist die **initiale Beobachtung VOR der ersten Action**.
+
+#### Rope-Konvention zusammengefasst
+
+```
+Zeitachse:  obs[0]  →(act[0])→  obs[1]  →(act[1])→  obs[2]  → ...
+              ↑                    ↑                    ↑
+          INITIAL              Ergebnis              Ergebnis
+        (vor Action)          von act[0]            von act[1]
+```
+
+- `obs[t]` = Zustand **VOR** Ausführung von `act[t]`
+- `act[t]` beschreibt die Transition `obs[t] → obs[t+1]` (vorwärtsblickend)
+- `act[t]` wird **VON `obs[t]` aus** ausgeführt
+
+### Analyse der FCS-Konvention (Franka Cube Stacking)
+
+#### Datenfluss im primitive_data_logger.py
+
+In `_save_primitive_h5()` ([isaacsim/00_Franka_Cube_Stack/...primitive_data_logger.py](../isaacsim/00_Franka_Cube_Stack/Franka_Cube_Stacking/primitive_data_logger.py#L722)):
+```python
+# Bilder am ENDE des Primitivs (nach der Bewegung)
+rgb = end_data["rgb_images"]
+# EEF-Position am ENDE des Primitivs
+ee_pos = end_data["ee_pos"] - env_offset
+```
+
+In `end_episode()`:
+```python
+# obses.pth wird aus ep["imgs_list"] erstellt — NUR End-of-Primitive Bilder
+obses = torch.stack(ep["imgs_list"]).squeeze(1)
+torch.save(obses, obses_path)
+```
+
+#### Verifizierung mit echten Daten
+
+```
+=== Episode 0 (20 Primitive) ===
+  obses.pth: 20 Bilder — GLEICHE Anzahl wie Actions
+  Timing-Check: action[t].start_pos vs eef_states[t-1][:3]
+  t=1: start=[0.4894,0.0899,0.4166] vs eef[0]=[0.4853,0.0852,0.4180] => OK (d<0.01)
+  t=2: start=[0.5238,0.1816,0.3655] vs eef[1]=[0.5207,0.1711,0.3736] => OK (d≈0.014)
+```
+
+**Bestätigt:** `action[t].start_pos ≈ eef_states[t-1]` — Action t startet dort, wo Action t-1 endete. Also beschreibt `action[t]` den Übergang von `obs[t-1]` nach `obs[t]`.
+
+#### FCS-Konvention zusammengefasst
+
+```
+Zeitachse:  ???  →(act[0])→  obs[0]  →(act[1])→  obs[1]  →(act[2])→  obs[2]
+              ↑                ↑                    ↑                    ↑
+          INITIAL           Ergebnis             Ergebnis             Ergebnis
+       (NICHT GESPEICHERT)  von act[0]           von act[1]           von act[2]
+```
+
+- `obs[t]` = Zustand **NACH** Ausführung von `act[t]` (Ergebnis)
+- `act[t]` beschreibt die Transition `obs[t-1] → obs[t]` (rückwärtsblickend)
+- `act[t]` hat `obs[t]` **PRODUZIERT**
+- Es gibt **KEIN** initiales Bild vor der ersten Action
+
+### Der Off-by-One Fehler
+
+#### Im TrajSlicerDataset (Training)
+
+Mit `frameskip=2`, `num_frames=7`:
+```python
+obs_window = [obs[start], obs[start+2], obs[start+4], ..., obs[start+12]]  # 7 Bilder
+act_window = [(act[start],act[start+1]), (act[start+2],act[start+3]), ...]  # 7 Gruppen
+```
+
+**In Rope-Konvention (korrekt):**
+- `act_group[0] = (act[start], act[start+1])`
+- `act[start]` transitiert `obs[start] → obs[start+1]`
+- `act[start+1]` transitiert `obs[start+1] → obs[start+2]`
+- Kombiniert: `obs[start] → obs[start+2]` = `obs_window[0] → obs_window[1]` ✓
+
+**In FCS-Konvention (FEHLERHAFT):**
+- `act_group[0] = (act[start], act[start+1])`
+- `act[start]` transitiert `obs[start-1] → obs[start]` ← **RÜCKWÄRTS** (aus dem Window hinaus!)
+- `act[start+1]` transitiert `obs[start] → obs[start+1]` ← Nur EIN Schritt vorwärts
+- Kombiniert: `obs[start-1] → obs[start+1]`, NICHT `obs[start] → obs[start+2]` ❌
+- **Das Modell erhält Actions, die NICHT zur beobachteten Transition passen!**
+
+#### Auswirkung auf das Training
+
+Das VWorldModel lernt in `forward()` ([models/visual_world_model.py](models/visual_world_model.py#L192)):
+```python
+z_src = z[:, :num_hist]     # Encode(obs[0..5], act[0..5])
+z_tgt = z[:, num_pred:]     # Encode(obs[1..6], act[1..6])
+z_pred = predict(z_src)     # Vorhersage
+loss = criterion(z_pred, z_tgt)  # Soll z_tgt matchen
+```
+
+- In **Rope**: `z_src[0] = (obs[0], act[0])` wobei `act[0]` von `obs[0]` wegführt → Modell lernt: "gegeben Zustand + ausgehende Action → vorhersage nächster Zustand"
+- In **FCS**: `z_src[0] = (obs[0], act[0])` wobei `act[0]` zu `obs[0]` **hinführte** → Modell lernt: "gegeben Ergebnis + Action die es produzierte → vorhersage nächstes Ergebnis"
+
+Das Modell lernt eine **semantisch verschobene Korrelation**. Die Actions beschreiben nicht die Transition zwischen den beobachteten Zuständen, sondern eine um 1 verschobene Transition.
+
+#### Auswirkung auf das Planning (CEM)
+
+Beim Planning (`VWorldModel.rollout()`):
+1. CEM schlägt Actions vor als "was soll der Roboter **als nächstes tun**" (vorwärtsblickend)
+2. Das Modell erwartet aber Actions als "was hat den **aktuellen Zustand produziert**" (rückwärtsblickend)
+3. → **Semantischer Mismatch** zwischen CEM und Modell
+
+Dies könnte eine **Hauptursache** für die CEM-Divergenz sein (neben den fehlenden Action Bounds).
+
+### Implementierter Fix: START-Bild statt END-Bild im Data Logger (21.02.2026)
+
+**Entscheidung:** Der Fix wurde im `primitive_data_logger.py` implementiert (nicht im Dataloader), weil:
+1. Daten sind an der Quelle korrekt — jeder Loader/jedes Tool bekommt die richtige Semantik
+2. Kein Datenverlust (weiterhin T obs + T act pro Episode, statt T-1 beim Loader-Shift)
+3. Kein Workaround in jedem neuen Loader nötig
+4. Debugging einfacher — Rohdaten auf Disk haben die richtige Semantik
+
+**Konkrete Änderung in `_save_primitive_h5()`:**
+
+```python
+# VORHER (falsch): Bild am ENDE des Primitivs
+rgb = end_data["rgb_images"]     # obs[t] = Zustand NACH act[t] ❌
+
+# NACHHER (korrekt): Bild am START des Primitivs
+rgb = obs_data["rgb_images"]     # obs[t] = Zustand VOR act[t] ✓
+# obs_data = start_data (übergeben von _finalize_primitive_fixed/phase)
+```
+
+Alle drei Aufrufstellen (`_finalize_primitive_fixed`, `_finalize_primitive_phase`, `_segment_into_fixed_primitives`) übergeben jetzt `start_data` statt `end_data` als Beobachtungsdaten. Die Action bleibt unverändert (`[start_pos → end_pos]`).
+
+**Resultierende Konvention (identisch mit Rope):**
+```
+obs[0]  →(act[0])→  obs[1]  →(act[1])→  obs[2]  → ...
+  ↑                    ↑                    ↑
+START Prim 0       START Prim 1          START Prim 2
+(VOR Bewegung)     (= ENDE Prim 0)      (= ENDE Prim 1)
+```
+
+### Gleicher Fix im MinDataLogger (21.02.2026)
+
+Der `min_data_logger.py` hatte den **gleichen backward-looking Bug**: Jede H5-Datei enthielt das Bild vom aktuellen Zustand (`image[t]`) zusammen mit `action = [prev_pos, curr_pos]` — d.h. das Bild zeigte den Zustand NACH der Action.
+
+**Fix: Buffer-Ansatz für Forward-Looking Alignment:**
+```python
+# VORHER (falsch, backward-looking):
+# H5(t): image=image[t], action=[pos(t-1), pos(t)] → Bild zeigt Zustand NACH Action ❌
+
+# NACHHER (korrekt, forward-looking):
+# Step 0: buffer {image0, pos0}    → kein H5 (kein Forward-Action bekannt)
+# Step 1: save H5 (image0, [pos0→pos1]) → buffer {image1, pos1}
+# Step 2: save H5 (image1, [pos1→pos2]) → buffer {image2, pos2}
+# end():  save H5 (image2, [pos2→pos2]) → Dummy-Action (letzter Obs) ✓
+```
+
+Neue Hilfsmethoden:
+- `_save_step_h5()`: Zentrale H5-Speicherlogik (obs_data + action)
+- `_flush_buffer_final()`: Speichert letzten Buffer mit Dummy-Action in `end_episode()`
+- `_save_last_frame_if_needed()`: Angepasst auf `buffered_at_frame`-Tracking
+
+### Anpassungen im Anwendungscode (21.02.2026)
+
+**`fcs_main_parallel.py`:** Keine Code-Änderungen nötig (log_step()-API unverändert).
+Dokumentation aktualisiert:
+- `collect_timestep_data()`: Docstring dokumentiert Erfassungsreihenfolge (VOR Action-Ausführung)
+- `save_successful_episode()`: Docstring referenziert Rope-Konvention beider Logger
+- Hauptschleife: Kommentar betont WICHTIG: Erfassung VOR action-Ausführung
+
+**`planning_client.py`:** Keine Code-Änderungen nötig (PlanningLogger = separater, simpler Logger).
+Dokumentation aktualisiert:
+- `PlanningLogger`: Docstring dokumentiert temporale Konvention
+- `log_step_if_active()`: Docstring dokumentiert Aufruf-Semantik (VOR nächster Action)
+
+#### Konsequenz
+
+⚠️ **Der Datensatz muss NEU GENERIERT werden. Das aktuell trainierte Modell (260218/11-58) wurde mit der falschen Konvention trainiert und muss nach der Neugenerierung NEU TRAINIERT werden.**
+
+### Überprüfungs-Checkliste
+
+| Prüfpunkt | Rope (Referenz) | FCS (alt, fehlerhaft) | FCS (nach Fix) |
+|-----------|-----------------|----------------------|-----------------|
+| `obs[t]` zeigt Zustand... | VOR `act[t]` | NACH `act[t]` ❌ | VOR `act[t]` ✓ |
+| `act[t]` beschreibt... | `obs[t]→obs[t+1]` | `obs[t-1]→obs[t]` ❌ | `obs[t]→obs[t+1]` ✓ |
+| Bild-Zeitpunkt | START (vor Bewegung) | ENDE (nach Bewegung) ❌ | START (vor Bewegung) ✓ |
+| Actions pro Episode | T | T | T |
+| Obs pro Episode | T | T | T |
+| act_group passt zu obs_window | ✓ | ❌ (verschoben) | ✓ |
+| Datenverlust | — | — | Keiner ✓ |
 

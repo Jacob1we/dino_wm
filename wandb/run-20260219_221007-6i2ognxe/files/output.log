@@ -30,3 +30,67 @@ Warte auf Client...
     CEM step 3: loss=1.049176
   Plan: 1.082154 → 1.049176 (3.0% Reduktion, 34.9s)
     Sub-Action 0: target_ee=[0.370, -0.041, 0.175]
+    CEM step 1: loss=1.116453
+    CEM step 2: loss=1.058017
+    CEM step 3: loss=1.032158
+  Plan: 1.116453 → 1.032158 (7.6% Reduktion, 34.9s)
+    Sub-Action 0: target_ee=[0.400, 0.047, 0.104]
+    CEM step 1: loss=1.187599
+    CEM step 2: loss=1.133061
+    CEM step 3: loss=1.096148
+  Plan: 1.187599 → 1.096148 (7.7% Reduktion, 35.0s)
+    Sub-Action 0: target_ee=[0.518, -0.112, 0.173]
+    CEM step 1: loss=1.090144
+    CEM step 2: loss=1.075389
+    CEM step 3: loss=1.082761
+  Plan: 1.090144 → 1.082761 (0.7% Reduktion, 35.0s)
+    Sub-Action 0: target_ee=[0.357, -0.181, 0.067]
+    CEM step 1: loss=1.126845
+    CEM step 2: loss=1.099487
+    CEM step 3: loss=1.087460
+  Plan: 1.126845 → 1.087460 (3.5% Reduktion, 35.2s)
+    Sub-Action 0: target_ee=[0.425, -0.154, 0.139]
+    CEM step 1: loss=1.211912
+    CEM step 2: loss=1.099837
+    CEM step 3: loss=1.128395
+  Plan: 1.211912 → 1.128395 (6.9% Reduktion, 35.0s)
+    Sub-Action 0: target_ee=[0.539, -0.159, 0.152]
+    CEM step 1: loss=1.177806
+    CEM step 2: loss=1.126070
+    CEM step 3: loss=1.136249
+  Plan: 1.177806 → 1.136249 (3.5% Reduktion, 35.4s)
+    Sub-Action 0: target_ee=[0.596, -0.198, 0.183]
+    CEM step 1: loss=1.114797
+    CEM step 2: loss=1.151538
+    CEM step 3: loss=1.075572
+  Plan: 1.114797 → 1.075572 (3.5% Reduktion, 45.2s)
+    Sub-Action 0: target_ee=[0.409, -0.217, 0.176]
+    CEM step 1: loss=1.067189
+    CEM step 2: loss=1.109824
+    CEM step 3: loss=1.085991
+  Plan: 1.067189 → 1.085991 (-1.8% Reduktion, 45.6s)
+    Sub-Action 0: target_ee=[0.555, -0.270, 0.243]
+    CEM step 1: loss=1.080525
+    CEM step 2: loss=0.997343
+    CEM step 3: loss=0.999188
+  Plan: 1.080525 → 0.999188 (7.5% Reduktion, 45.6s)
+    Sub-Action 0: target_ee=[0.415, -0.187, 0.212]
+    CEM step 1: loss=1.095683
+    CEM step 2: loss=1.078074
+    CEM step 3: loss=1.079402
+  Plan: 1.095683 → 1.079402 (1.5% Reduktion, 45.5s)
+    Sub-Action 0: target_ee=[0.378, -0.283, 0.149]
+    CEM step 1: loss=1.152926
+    CEM step 2: loss=1.084342
+    CEM step 3: loss=1.055042
+  Plan: 1.152926 → 1.055042 (8.5% Reduktion, 45.4s)
+    Sub-Action 0: target_ee=[0.477, -0.064, 0.172]
+[-] Client getrennt
+Traceback (most recent call last):
+  File "/home/tsp_jw/Desktop/dino_wm/planning_server.py", line 493, in <module>
+    size_data = conn.recv(8)
+KeyboardInterrupt
+Traceback (most recent call last):
+  File "/home/tsp_jw/Desktop/dino_wm/planning_server.py", line 493, in <module>
+    size_data = conn.recv(8)
+KeyboardInterrupt

@@ -62,6 +62,13 @@
     - 12.3 [Bug-Katalog mit Fixes](#123-bug-katalog-mit-fixes)
     - 12.4 [Verbleibende strukturelle Unterschiede](#124-verbleibende-strukturelle-unterschiede)
     - 12.5 [Zusammenfassung der Änderungen](#125-zusammenfassung-der-änderungen)
+13. [🚨 KRITISCH: Temporale Alignment-Analyse — Action-Observation Mismatch (20.02.2026)](#13--kritisch-temporale-alignment-analyse--action-observation-mismatch-20022026)
+    - 13.1 [Zusammenfassung](#131-zusammenfassung)
+    - 13.2 [Auswirkung auf CEM-Planning](#132-auswirkung-auf-cem-planning)
+    - 13.3 [Zusammenhang mit CEM-Divergenz](#133-zusammenhang-mit-cem-divergenz)
+    - 13.4 [Verifizierungsdaten](#134-verifizierungsdaten)
+    - 13.5 [Empfohlener Fix und Workflow](#135-empfohlener-fix-und-workflow)
+    - 13.6 [Querverweise](#136-querverweise)
 
 ---
 
@@ -3024,3 +3031,116 @@ Bugfixes behoben werden:
 
 Die CEM-Parameter-Korrektur (num_samples/opt_steps/topk auf cem.yaml-Defaults)
 wurde bereits separat durchgeführt und ist hier nicht erneut dokumentiert.
+---
+
+## 13. 🚨 KRITISCH: Temporale Alignment-Analyse — Action-Observation Mismatch (20.02.2026)
+
+### 13.1 Zusammenfassung
+
+Bei der Analyse der CEM-Divergenz wurde ein **fundamentaler Off-by-One-Fehler** in der zeitlichen Zuordnung von Actions und Observations im FCS-Datensatz identifiziert. Die Konvention im FCS-Datensatz (`primitive_data_logger.py`) weicht von der Referenz-Konvention (Rope/Deformable Environment) des DINO-WM Papers ab.
+
+| Eigenschaft | Rope (Referenz) | FCS (aktuell) |
+|-------------|-----------------|---------------|
+| `obs[t]` zeigt | Zustand **VOR** `act[t]` | Zustand **NACH** `act[t]` |
+| `act[t]` bedeutet | "Auszuführen VON `obs[t]`" | "Hat `obs[t]` PRODUZIERT" |
+| Initiales Bild | ✓ (als `obs[0]`) | ❌ (fehlt) |
+| Semantik | Vorwärtsblickend | Rückwärtsblickend |
+
+### 13.2 Auswirkung auf CEM-Planning
+
+#### Das Problem im Modell-Rollout
+
+In `VWorldModel.rollout()` ([models/visual_world_model.py](models/visual_world_model.py#L261)):
+```python
+z = self.encode(obs_0, act_0)     # Historische obs + gepaarte Actions kodieren
+while t < action.shape[1]:
+    z_pred = self.predict(z[:, -num_hist:])
+    z_new = z_pred[:, -1:, ...]
+    z_new = self.replace_actions_from_z(z_new, action[:, t:t+1, :])  # CEM-Action einsetzen
+    z = torch.cat([z, z_new], dim=1)
+```
+
+1. **CEM schlägt Action vor** als "was soll der Roboter **als nächstes tun**" → vorwärtsblickend
+2. **Das Modell wurde trainiert** mit Actions die bedeuten "was hat diesen Zustand **produziert**" → rückwärtsblickend
+3. **Semantischer Mismatch**: Das Modell interpretiert die CEM-Action anders als beabsichtigt
+
+#### Konkretes Beispiel mit frameskip=2
+
+**Rope (korrekt):**
+```
+Training-Window: obs[0] obs[2] obs[4] obs[6] obs[8] obs[10] obs[12]
+Action-Groups:   (a0,a1) (a2,a3) (a4,a5) (a6,a7) (a8,a9) (a10,a11) (a12,a13)
+
+act_group[0] = (a0, a1):
+  a0: obs[0] → obs[1]     ← vorwärts VON obs[0]
+  a1: obs[1] → obs[2]     ← vorwärts
+  Kombiniert: obs[0] → obs[2] = obs_window[0] → obs_window[1] ✓
+```
+
+**FCS (fehlerhaft):**
+```
+Training-Window: obs[0] obs[2] obs[4] obs[6] obs[8] obs[10] obs[12]
+Action-Groups:   (a0,a1) (a2,a3) (a4,a5) (a6,a7) (a8,a9) (a10,a11) (a12,a13)
+
+act_group[0] = (a0, a1):
+  a0: obs[-1] → obs[0]    ← RÜCKWÄRTS! (obs[-1] nicht im Window)
+  a1: obs[0] → obs[1]     ← nur EIN Schritt vorwärts
+  Kombiniert: obs[-1] → obs[1], NICHT obs[0] → obs[2] ❌
+```
+
+**Das Modell erhält Action-Groups die NICHT zur beobachteten Obs-Transition passen.** Die erste Action jeder Gruppe ist rückwärtsblickend (beschreibt die Vergangenheit), die zweite reicht nur einen Schritt statt zwei.
+
+### 13.3 Zusammenhang mit CEM-Divergenz
+
+Die CEM-Divergenz (EEF driftet zu unmöglichen Positionen wie x=1.385, y=-1.596) hat vermutlich **zwei Ursachen**:
+
+1. **Fehlende Action Bounds** (bereits gefixt: Clamping auf [-3,3])
+2. **Temporaler Mismatch** (dieser Bug): Das Modell kann die CEM-Actions nicht korrekt als Zustandstransitionen interpretieren, da es mit einer anderen semantischen Konvention trainiert wurde
+
+### 13.4 Verifizierungsdaten
+
+Aus dem Verifikationsskript:
+```
+Episode 0: 20 Bilder (obses.pth), 20 H5-Dateien — GLEICHE Anzahl (kein initiales Bild)
+
+Timing-Check: action[t].start_pos ≈ eef_states[t-1][:3]
+  t=1: start=[0.489,0.090,0.417] vs eef[0]=[0.485,0.085,0.418] → d=0.007 OK
+  t=2: start=[0.524,0.182,0.366] vs eef[1]=[0.521,0.171,0.374] → d=0.014 OK
+  t=5: start=[0.589,0.110,0.187] vs eef[4]=[0.585,0.114,0.188] → d=0.005 OK
+```
+
+**Bestätigt:** `action[t].start_pos ≈ eef[t-1]` = Action t startet wo Action t-1 endete → `act[t]` transitiert `obs[t-1] → obs[t]`.
+
+### 13.5 Implementierter Fix und Workflow (21.02.2026)
+
+#### Schritt 1: Data Logger gefixt
+
+**`primitive_data_logger.py`** → `_save_primitive_h5()`: Bild/EEF/Würfelpositionen werden jetzt vom **START** des Primitivs gespeichert (statt vom Ende). Damit ist `obs[t]` = Zustand **VOR** `action[t]` — identisch mit der Rope-Referenz.
+
+**`min_data_logger.py`** → Buffer-Ansatz: Observation wird gepuffert und erst beim nächsten Step zusammen mit der Forward-Action `[buffered_pos → curr_pos]` als H5 gespeichert. Der letzte Buffer wird in `end_episode()` mit Dummy-Action gespeichert. Neue Hilfsmethoden: `_save_step_h5()`, `_flush_buffer_final()`.
+
+**Kein Datenverlust** — weiterhin T Bilder + T Actions pro Episode bei beiden Loggern.
+
+#### Schritt 1b: Anwendungscode angepasst
+
+**`fcs_main_parallel.py`**: Keine Code-Änderungen nötig (log_step()-API unverändert). Dokumentation aktualisiert in `collect_timestep_data()`, `save_successful_episode()` und Hauptschleife.
+
+**`planning_client.py`**: Keine Code-Änderungen nötig (PlanningLogger = separater, simpler Logger). Dokumentation aktualisiert in `PlanningLogger`-Docstring und `log_step_if_active()`.
+
+#### Schritt 2: Datensatz NEU generieren
+
+Der bestehende Datensatz wurde mit der alten Konvention (END-Bild) generiert und ist inkompatibel.
+
+#### Schritt 3: Modell NEU trainieren
+
+Das aktuell trainierte Modell (260218/11-58) hat die falsche Konvention gelernt. **Neutraining erforderlich.**
+
+#### Schritt 4: CEM-Planning mit neuem Modell
+
+Nach dem Neutraining interpretiert das Modell CEM-Actions korrekt als vorwärtsblickende Transitionen.
+
+### 13.6 Querverweise
+
+- **Training-Dokumentation**: Detaillierte Code-Analyse und Fix-Implementierung → siehe Abschnitt "KRITISCH: Action-Observation Temporale Alignment-Analyse"
+- **CEM Fixes**: Action Bounds, Gripper-Quantisierung, Sigma Floor → siehe Abschnitt 10
+- **Datensatz-Verifikation**: Actions, Proprio, RGB-Check → siehe Abschnitt 11

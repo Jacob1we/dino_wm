@@ -1,0 +1,1777 @@
+  W&B Run: https://wandb.ai/jacob-weyer-rwth-aachen-university/dino_wm_planning/runs/ka1tokev
+  Gripper-Indices (full 16D): [3, 7, 11, 15]
+✓ Setup komplett
+  Modus: ONLINE
+  CEM: samples=300, steps=5, topk=30, horizon=5
+  Action Bounds: [-3.0, 3.0] (normalized), sigma_min=0.01
+  Suchraum: 80D (H=5 × D=16)
+Server laeuft auf localhost:5555
+Warte auf Client...
+[+] Client: ('127.0.0.1', 56630)
+  W&B Config aktualisiert mit Client-Config (12 Keys)
+  Client-Config empfangen: ['port', 'n_episodes', 'max_steps', 'headless', 'goal_image', 'settle_steps', 'ee_threshold', 'timeout', 'mode', 'log_dir', 'robot_opacity_for_capture', 'scene_config']
+  Reset
+  Goal gesetzt: (224, 224, 3) uint8, ee_pos=[0.36049223 0.0566565  0.06966189]
+    CEM step 1: loss=1.355886
+    CEM step 2: loss=1.122192
+    CEM step 3: loss=1.058602
+    CEM step 4: loss=1.019282
+    CEM step 5: loss=1.040962
+  Plan: 1.355886 → 1.040962 (23.2% Reduktion, 76.7s)
+    Sub-Action 0: target_ee=[0.461, -0.043, 0.232]
+    CEM step 1: loss=1.143602
+    CEM step 2: loss=1.116898
+    CEM step 3: loss=1.124264
+    CEM step 4: loss=1.116745
+    CEM step 5: loss=1.071296
+  Plan: 1.143602 → 1.071296 (6.3% Reduktion, 76.0s)
+    Sub-Action 0: target_ee=[0.519, -0.002, 0.198]
+    CEM step 1: loss=1.110440
+    CEM step 2: loss=1.131825
+    CEM step 3: loss=1.099983
+    CEM step 4: loss=1.078117
+    CEM step 5: loss=1.048662
+  Plan: 1.110440 → 1.048662 (5.6% Reduktion, 76.3s)
+    Sub-Action 0: target_ee=[0.510, -0.165, 0.121]
+    CEM step 1: loss=1.080460
+    CEM step 2: loss=1.062682
+    CEM step 3: loss=1.075329
+    CEM step 4: loss=1.042732
+    CEM step 5: loss=1.027476
+  Plan: 1.080460 → 1.027476 (4.9% Reduktion, 76.2s)
+    Sub-Action 0: target_ee=[0.638, -0.237, 0.093]
+    CEM step 1: loss=1.087386
+    CEM step 2: loss=1.087750
+    CEM step 3: loss=1.095762
+    CEM step 4: loss=1.090064
+    CEM step 5: loss=1.075369
+  Plan: 1.087386 → 1.075369 (1.1% Reduktion, 76.2s)
+    Sub-Action 0: target_ee=[0.440, -0.088, 0.038]
+    CEM step 1: loss=1.096040
+    CEM step 2: loss=1.078575
+    CEM step 3: loss=1.057439
+    CEM step 4: loss=1.072029
+    CEM step 5: loss=1.097227
+  Plan: 1.096040 → 1.097227 (-0.1% Reduktion, 76.1s)
+    Sub-Action 0: target_ee=[0.458, -0.159, 0.168]
+    CEM step 1: loss=1.117051
+    CEM step 2: loss=1.022027
+    CEM step 3: loss=1.038191
+    CEM step 4: loss=1.027638
+    CEM step 5: loss=1.027968
+  Plan: 1.117051 → 1.027968 (8.0% Reduktion, 75.7s)
+    Sub-Action 0: target_ee=[0.491, 0.039, 0.156]
+    CEM step 1: loss=1.107422
+    CEM step 2: loss=1.072716
+    CEM step 3: loss=1.039490
+    CEM step 4: loss=1.074438
+    CEM step 5: loss=1.043934
+  Plan: 1.107422 → 1.043934 (5.7% Reduktion, 76.4s)
+    Sub-Action 0: target_ee=[0.542, -0.192, 0.172]
+    CEM step 1: loss=1.111739
+    CEM step 2: loss=1.094831
+    CEM step 3: loss=1.071329
+    CEM step 4: loss=1.081676
+    CEM step 5: loss=1.030106
+  Plan: 1.111739 → 1.030106 (7.3% Reduktion, 75.7s)
+    Sub-Action 0: target_ee=[0.492, -0.064, 0.189]
+    CEM step 1: loss=1.074517
+    CEM step 2: loss=1.073707
+    CEM step 3: loss=1.067364
+    CEM step 4: loss=1.059583
+    CEM step 5: loss=1.050143
+  Plan: 1.074517 → 1.050143 (2.3% Reduktion, 76.4s)
+    Sub-Action 0: target_ee=[0.504, 0.066, 0.131]
+    CEM step 1: loss=1.166584
+    CEM step 2: loss=1.103815
+    CEM step 3: loss=1.130902
+    CEM step 4: loss=1.108710
+    CEM step 5: loss=1.131254
+  Plan: 1.166584 → 1.131254 (3.0% Reduktion, 76.1s)
+    Sub-Action 0: target_ee=[0.463, -0.079, 0.117]
+    CEM step 1: loss=1.217078
+    CEM step 2: loss=1.209420
+    CEM step 3: loss=1.146031
+    CEM step 4: loss=1.176596
+    CEM step 5: loss=1.110414
+  Plan: 1.217078 → 1.110414 (8.8% Reduktion, 75.6s)
+    Sub-Action 0: target_ee=[0.682, -0.057, 0.241]
+    CEM step 1: loss=1.057772
+    CEM step 2: loss=1.017335
+    CEM step 3: loss=1.042859
+    CEM step 4: loss=1.046977
+    CEM step 5: loss=1.031963
+  Plan: 1.057772 → 1.031963 (2.4% Reduktion, 76.0s)
+    Sub-Action 0: target_ee=[0.458, 0.234, 0.122]
+    CEM step 1: loss=1.150686
+    CEM step 2: loss=1.090718
+    CEM step 3: loss=1.084908
+    CEM step 4: loss=1.084396
+    CEM step 5: loss=1.048833
+  Plan: 1.150686 → 1.048833 (8.9% Reduktion, 75.8s)
+    Sub-Action 0: target_ee=[0.360, 0.164, 0.117]
+    CEM step 1: loss=1.115656
+    CEM step 2: loss=1.031207
+    CEM step 3: loss=1.011879
+    CEM step 4: loss=1.029547
+    CEM step 5: loss=1.047062
+  Plan: 1.115656 → 1.047062 (6.1% Reduktion, 76.3s)
+    Sub-Action 0: target_ee=[0.488, 0.056, 0.132]
+    CEM step 1: loss=1.111679
+    CEM step 2: loss=1.068430
+    CEM step 3: loss=1.047821
+    CEM step 4: loss=1.090803
+    CEM step 5: loss=1.066931
+  Plan: 1.111679 → 1.066931 (4.0% Reduktion, 76.2s)
+    Sub-Action 0: target_ee=[0.632, 0.228, 0.117]
+    CEM step 1: loss=1.108801
+    CEM step 2: loss=1.118623
+    CEM step 3: loss=1.104484
+    CEM step 4: loss=1.098959
+    CEM step 5: loss=1.102075
+  Plan: 1.108801 → 1.102075 (0.6% Reduktion, 76.2s)
+    Sub-Action 0: target_ee=[0.554, 0.031, 0.170]
+    CEM step 1: loss=1.073908
+    CEM step 2: loss=1.082606
+    CEM step 3: loss=1.082251
+    CEM step 4: loss=1.023599
+    CEM step 5: loss=1.013360
+  Plan: 1.073908 → 1.013360 (5.6% Reduktion, 75.8s)
+    Sub-Action 0: target_ee=[0.432, 0.096, 0.144]
+    CEM step 1: loss=1.129534
+    CEM step 2: loss=1.067040
+    CEM step 3: loss=1.043365
+    CEM step 4: loss=1.078402
+    CEM step 5: loss=1.022820
+  Plan: 1.129534 → 1.022820 (9.4% Reduktion, 75.9s)
+    Sub-Action 0: target_ee=[0.611, 0.130, 0.146]
+    CEM step 1: loss=1.179704
+    CEM step 2: loss=1.083198
+    CEM step 3: loss=1.071780
+    CEM step 4: loss=1.084879
+    CEM step 5: loss=1.062200
+  Plan: 1.179704 → 1.062200 (10.0% Reduktion, 76.0s)
+    Sub-Action 0: target_ee=[0.549, 0.044, 0.123]
+    CEM step 1: loss=1.086949
+    CEM step 2: loss=1.051503
+    CEM step 3: loss=1.087096
+    CEM step 4: loss=1.015007
+    CEM step 5: loss=1.043478
+  Plan: 1.086949 → 1.043478 (4.0% Reduktion, 76.4s)
+    Sub-Action 0: target_ee=[0.550, 0.065, 0.251]
+    CEM step 1: loss=1.120131
+    CEM step 2: loss=1.108546
+    CEM step 3: loss=1.078621
+    CEM step 4: loss=1.072274
+    CEM step 5: loss=1.074977
+  Plan: 1.120131 → 1.074977 (4.0% Reduktion, 76.2s)
+    Sub-Action 0: target_ee=[0.524, 0.179, 0.029]
+    CEM step 1: loss=1.102176
+    CEM step 2: loss=1.124039
+    CEM step 3: loss=1.082000
+    CEM step 4: loss=1.079225
+    CEM step 5: loss=1.077177
+  Plan: 1.102176 → 1.077177 (2.3% Reduktion, 76.0s)
+    Sub-Action 0: target_ee=[0.473, -0.156, 0.219]
+    CEM step 1: loss=1.054933
+    CEM step 2: loss=1.046482
+    CEM step 3: loss=1.070653
+    CEM step 4: loss=1.062726
+    CEM step 5: loss=1.049456
+  Plan: 1.054933 → 1.049456 (0.5% Reduktion, 76.2s)
+    Sub-Action 0: target_ee=[0.419, 0.056, 0.161]
+    CEM step 1: loss=1.097162
+    CEM step 2: loss=1.107948
+    CEM step 3: loss=1.099627
+    CEM step 4: loss=1.078451
+    CEM step 5: loss=1.064719
+  Plan: 1.097162 → 1.064719 (3.0% Reduktion, 76.3s)
+    Sub-Action 0: target_ee=[0.547, 0.205, 0.096]
+    CEM step 1: loss=1.045940
+    CEM step 2: loss=1.073822
+    CEM step 3: loss=1.077942
+    CEM step 4: loss=1.108338
+    CEM step 5: loss=1.057478
+  Plan: 1.045940 → 1.057478 (-1.1% Reduktion, 74.9s)
+    Sub-Action 0: target_ee=[0.471, 0.303, 0.154]
+    CEM step 1: loss=1.132231
+    CEM step 2: loss=1.202167
+    CEM step 3: loss=1.106968
+    CEM step 4: loss=1.071410
+    CEM step 5: loss=1.075248
+  Plan: 1.132231 → 1.075248 (5.0% Reduktion, 76.1s)
+    Sub-Action 0: target_ee=[0.383, 0.184, 0.074]
+    CEM step 1: loss=1.127502
+    CEM step 2: loss=1.087751
+    CEM step 3: loss=1.090213
+    CEM step 4: loss=1.015347
+    CEM step 5: loss=1.095330
+  Plan: 1.127502 → 1.095330 (2.9% Reduktion, 76.2s)
+    Sub-Action 0: target_ee=[0.374, 0.158, 0.050]
+    CEM step 1: loss=1.218343
+    CEM step 2: loss=1.135851
+    CEM step 3: loss=1.120235
+    CEM step 4: loss=1.118091
+    CEM step 5: loss=1.099147
+  Plan: 1.218343 → 1.099147 (9.8% Reduktion, 76.4s)
+    Sub-Action 0: target_ee=[0.478, 0.162, 0.110]
+    CEM step 1: loss=1.135071
+    CEM step 2: loss=1.140435
+    CEM step 3: loss=1.155876
+    CEM step 4: loss=1.151635
+    CEM step 5: loss=1.113493
+  Plan: 1.135071 → 1.113493 (1.9% Reduktion, 76.3s)
+    Sub-Action 0: target_ee=[0.619, -0.222, 0.136]
+    CEM step 1: loss=1.080853
+    CEM step 2: loss=1.074833
+    CEM step 3: loss=1.080238
+    CEM step 4: loss=1.077907
+    CEM step 5: loss=1.051052
+  Plan: 1.080853 → 1.051052 (2.8% Reduktion, 76.5s)
+    Sub-Action 0: target_ee=[0.573, -0.122, 0.275]
+    CEM step 1: loss=1.107838
+    CEM step 2: loss=1.114236
+    CEM step 3: loss=1.074081
+    CEM step 4: loss=1.080735
+    CEM step 5: loss=1.079318
+  Plan: 1.107838 → 1.079318 (2.6% Reduktion, 76.4s)
+    Sub-Action 0: target_ee=[0.530, -0.001, 0.180]
+    CEM step 1: loss=1.103905
+    CEM step 2: loss=1.082200
+    CEM step 3: loss=1.106848
+    CEM step 4: loss=1.078088
+    CEM step 5: loss=1.044628
+  Plan: 1.103905 → 1.044628 (5.4% Reduktion, 76.3s)
+    Sub-Action 0: target_ee=[0.613, -0.196, 0.122]
+    CEM step 1: loss=1.065769
+    CEM step 2: loss=1.159765
+    CEM step 3: loss=1.048494
+    CEM step 4: loss=1.091461
+    CEM step 5: loss=1.071422
+  Plan: 1.065769 → 1.071422 (-0.5% Reduktion, 76.2s)
+    Sub-Action 0: target_ee=[0.440, 0.054, 0.125]
+    CEM step 1: loss=1.164567
+    CEM step 2: loss=1.070831
+    CEM step 3: loss=1.056851
+    CEM step 4: loss=1.067248
+    CEM step 5: loss=1.042886
+  Plan: 1.164567 → 1.042886 (10.4% Reduktion, 76.3s)
+    Sub-Action 0: target_ee=[0.626, 0.110, 0.052]
+    CEM step 1: loss=1.090603
+    CEM step 2: loss=1.050249
+    CEM step 3: loss=1.069312
+    CEM step 4: loss=1.069938
+    CEM step 5: loss=1.027209
+  Plan: 1.090603 → 1.027209 (5.8% Reduktion, 75.6s)
+    Sub-Action 0: target_ee=[0.477, -0.174, 0.103]
+    CEM step 1: loss=1.155154
+    CEM step 2: loss=1.093940
+    CEM step 3: loss=1.020718
+    CEM step 4: loss=1.060746
+    CEM step 5: loss=1.039820
+  Plan: 1.155154 → 1.039820 (10.0% Reduktion, 75.8s)
+    Sub-Action 0: target_ee=[0.397, 0.132, 0.040]
+    CEM step 1: loss=1.134812
+    CEM step 2: loss=1.101717
+    CEM step 3: loss=1.064240
+    CEM step 4: loss=1.089812
+    CEM step 5: loss=1.058825
+  Plan: 1.134812 → 1.058825 (6.7% Reduktion, 75.5s)
+    Sub-Action 0: target_ee=[0.549, 0.072, 0.116]
+    CEM step 1: loss=1.074847
+    CEM step 2: loss=1.066124
+    CEM step 3: loss=1.001442
+    CEM step 4: loss=1.048334
+    CEM step 5: loss=1.031920
+  Plan: 1.074847 → 1.031920 (4.0% Reduktion, 75.7s)
+    Sub-Action 0: target_ee=[0.377, 0.056, 0.055]
+    CEM step 1: loss=1.066056
+    CEM step 2: loss=1.052831
+    CEM step 3: loss=1.054751
+    CEM step 4: loss=1.049065
+    CEM step 5: loss=1.043293
+  Plan: 1.066056 → 1.043293 (2.1% Reduktion, 76.0s)
+    Sub-Action 0: target_ee=[0.627, -0.003, 0.079]
+    CEM step 1: loss=1.121079
+    CEM step 2: loss=1.032027
+    CEM step 3: loss=1.078340
+    CEM step 4: loss=1.085882
+    CEM step 5: loss=1.028307
+  Plan: 1.121079 → 1.028307 (8.3% Reduktion, 75.5s)
+    Sub-Action 0: target_ee=[0.517, 0.116, 0.084]
+    CEM step 1: loss=1.080770
+    CEM step 2: loss=1.158004
+    CEM step 3: loss=1.103364
+    CEM step 4: loss=1.093975
+    CEM step 5: loss=1.034530
+  Plan: 1.080770 → 1.034530 (4.3% Reduktion, 75.5s)
+    Sub-Action 0: target_ee=[0.628, 0.147, 0.090]
+    CEM step 1: loss=1.112395
+    CEM step 2: loss=1.063345
+    CEM step 3: loss=1.053901
+    CEM step 4: loss=1.079021
+    CEM step 5: loss=1.038250
+  Plan: 1.112395 → 1.038250 (6.7% Reduktion, 76.1s)
+    Sub-Action 0: target_ee=[0.527, 0.157, 0.126]
+    CEM step 1: loss=1.183832
+    CEM step 2: loss=1.151018
+    CEM step 3: loss=1.135080
+    CEM step 4: loss=1.096571
+    CEM step 5: loss=1.096286
+  Plan: 1.183832 → 1.096286 (7.4% Reduktion, 75.7s)
+    Sub-Action 0: target_ee=[0.495, 0.030, 0.032]
+    CEM step 1: loss=1.097792
+    CEM step 2: loss=1.068726
+    CEM step 3: loss=1.047774
+    CEM step 4: loss=1.034948
+    CEM step 5: loss=1.043295
+  Plan: 1.097792 → 1.043295 (5.0% Reduktion, 75.6s)
+    Sub-Action 0: target_ee=[0.501, 0.176, 0.039]
+    CEM step 1: loss=1.085257
+    CEM step 2: loss=1.018497
+    CEM step 3: loss=1.054461
+    CEM step 4: loss=1.043835
+    CEM step 5: loss=1.018496
+  Plan: 1.085257 → 1.018496 (6.2% Reduktion, 74.8s)
+    Sub-Action 0: target_ee=[0.548, 0.078, 0.101]
+    CEM step 1: loss=1.049129
+    CEM step 2: loss=1.042747
+    CEM step 3: loss=1.008762
+    CEM step 4: loss=0.993976
+    CEM step 5: loss=1.025848
+  Plan: 1.049129 → 1.025848 (2.2% Reduktion, 76.0s)
+    Sub-Action 0: target_ee=[0.424, 0.301, 0.199]
+    CEM step 1: loss=1.096615
+    CEM step 2: loss=1.074057
+    CEM step 3: loss=1.088238
+    CEM step 4: loss=1.070827
+    CEM step 5: loss=1.042815
+  Plan: 1.096615 → 1.042815 (4.9% Reduktion, 75.6s)
+    Sub-Action 0: target_ee=[0.454, 0.061, 0.114]
+    CEM step 1: loss=1.106086
+    CEM step 2: loss=1.119571
+    CEM step 3: loss=1.050177
+    CEM step 4: loss=1.043000
+    CEM step 5: loss=1.044310
+  Plan: 1.106086 → 1.044310 (5.6% Reduktion, 75.6s)
+    Sub-Action 0: target_ee=[0.433, 0.168, 0.070]
+    CEM step 1: loss=1.085383
+    CEM step 2: loss=1.066730
+    CEM step 3: loss=1.075419
+    CEM step 4: loss=1.031818
+    CEM step 5: loss=1.017410
+  Plan: 1.085383 → 1.017410 (6.3% Reduktion, 76.3s)
+    Sub-Action 0: target_ee=[0.406, 0.232, 0.026]
+  Episode-Log: {'episode_id': 0, 'n_steps': 50, 'duration_s': 4021.88, 'mode': 'online', 'final_cube_positions': [[0.3796270489692688, 0.09676872193813324, 0.024999236688017845]], 'final_ee_pos': [0.41613537073135376, 0.1590447723865509, 0.09193605184555054]}
+  Reset
+  Goal gesetzt: (224, 224, 3) uint8, ee_pos=[0.36049223 0.0566565  0.06966189]
+    CEM step 1: loss=1.537608
+    CEM step 2: loss=1.092429
+    CEM step 3: loss=1.162686
+    CEM step 4: loss=1.072940
+    CEM step 5: loss=1.055030
+  Plan: 1.537608 → 1.055030 (31.4% Reduktion, 75.6s)
+    Sub-Action 0: target_ee=[0.517, 0.039, 0.121]
+    CEM step 1: loss=1.105510
+    CEM step 2: loss=1.055912
+    CEM step 3: loss=1.094552
+    CEM step 4: loss=1.067914
+    CEM step 5: loss=1.063883
+  Plan: 1.105510 → 1.063883 (3.8% Reduktion, 75.0s)
+    Sub-Action 0: target_ee=[0.583, 0.033, 0.137]
+    CEM step 1: loss=1.124195
+    CEM step 2: loss=1.071067
+    CEM step 3: loss=1.117313
+    CEM step 4: loss=1.089764
+    CEM step 5: loss=1.057113
+  Plan: 1.124195 → 1.057113 (6.0% Reduktion, 75.8s)
+    Sub-Action 0: target_ee=[0.372, -0.076, 0.157]
+    CEM step 1: loss=1.032894
+    CEM step 2: loss=1.036434
+    CEM step 3: loss=1.053158
+    CEM step 4: loss=0.988064
+    CEM step 5: loss=1.023476
+  Plan: 1.032894 → 1.023476 (0.9% Reduktion, 76.2s)
+    Sub-Action 0: target_ee=[0.486, 0.206, 0.212]
+    CEM step 1: loss=1.111557
+    CEM step 2: loss=1.118375
+    CEM step 3: loss=1.042013
+    CEM step 4: loss=1.086618
+    CEM step 5: loss=1.047371
+  Plan: 1.111557 → 1.047371 (5.8% Reduktion, 75.9s)
+    Sub-Action 0: target_ee=[0.439, -0.035, 0.169]
+    CEM step 1: loss=1.138995
+    CEM step 2: loss=1.153474
+    CEM step 3: loss=1.085778
+    CEM step 4: loss=1.081836
+    CEM step 5: loss=1.073495
+  Plan: 1.138995 → 1.073495 (5.8% Reduktion, 76.3s)
+    Sub-Action 0: target_ee=[0.472, 0.179, 0.118]
+    CEM step 1: loss=1.063632
+    CEM step 2: loss=1.112778
+    CEM step 3: loss=1.127085
+    CEM step 4: loss=1.068945
+    CEM step 5: loss=1.108432
+  Plan: 1.063632 → 1.108432 (-4.2% Reduktion, 76.0s)
+    Sub-Action 0: target_ee=[0.606, 0.162, 0.113]
+    CEM step 1: loss=1.053170
+    CEM step 2: loss=1.090876
+    CEM step 3: loss=1.063440
+    CEM step 4: loss=1.056399
+    CEM step 5: loss=1.053068
+  Plan: 1.053170 → 1.053068 (0.0% Reduktion, 75.9s)
+    Sub-Action 0: target_ee=[0.507, 0.023, 0.132]
+    CEM step 1: loss=1.061859
+    CEM step 2: loss=1.050767
+    CEM step 3: loss=1.073017
+    CEM step 4: loss=1.023390
+    CEM step 5: loss=1.032267
+  Plan: 1.061859 → 1.032267 (2.8% Reduktion, 75.0s)
+    Sub-Action 0: target_ee=[0.334, -0.066, 0.101]
+    CEM step 1: loss=1.085737
+    CEM step 2: loss=1.107579
+    CEM step 3: loss=1.045317
+    CEM step 4: loss=1.056525
+    CEM step 5: loss=1.019501
+  Plan: 1.085737 → 1.019501 (6.1% Reduktion, 76.0s)
+    Sub-Action 0: target_ee=[0.298, -0.104, 0.126]
+    CEM step 1: loss=1.182463
+    CEM step 2: loss=1.102602
+    CEM step 3: loss=1.100231
+    CEM step 4: loss=1.069781
+    CEM step 5: loss=1.081146
+  Plan: 1.182463 → 1.081146 (8.6% Reduktion, 76.1s)
+    Sub-Action 0: target_ee=[0.556, 0.188, 0.084]
+    CEM step 1: loss=1.172354
+    CEM step 2: loss=1.096619
+    CEM step 3: loss=1.051929
+    CEM step 4: loss=1.045755
+    CEM step 5: loss=1.070302
+  Plan: 1.172354 → 1.070302 (8.7% Reduktion, 76.0s)
+    Sub-Action 0: target_ee=[0.481, 0.160, 0.100]
+    CEM step 1: loss=1.053116
+    CEM step 2: loss=1.036649
+    CEM step 3: loss=1.013388
+    CEM step 4: loss=1.059702
+    CEM step 5: loss=1.018212
+  Plan: 1.053116 → 1.018212 (3.3% Reduktion, 76.3s)
+    Sub-Action 0: target_ee=[0.424, 0.240, 0.098]
+    CEM step 1: loss=1.026805
+    CEM step 2: loss=1.019285
+    CEM step 3: loss=1.023412
+    CEM step 4: loss=1.009420
+    CEM step 5: loss=0.981618
+  Plan: 1.026805 → 0.981618 (4.4% Reduktion, 76.4s)
+    Sub-Action 0: target_ee=[0.499, 0.208, 0.093]
+    CEM step 1: loss=1.086038
+    CEM step 2: loss=1.051496
+    CEM step 3: loss=1.014022
+    CEM step 4: loss=1.015542
+    CEM step 5: loss=0.995123
+  Plan: 1.086038 → 0.995123 (8.4% Reduktion, 75.3s)
+    Sub-Action 0: target_ee=[0.589, -0.146, 0.187]
+    CEM step 1: loss=1.043117
+    CEM step 2: loss=1.055154
+    CEM step 3: loss=1.042484
+    CEM step 4: loss=1.024715
+    CEM step 5: loss=1.048997
+  Plan: 1.043117 → 1.048997 (-0.6% Reduktion, 76.1s)
+    Sub-Action 0: target_ee=[0.533, 0.123, 0.083]
+    CEM step 1: loss=1.024093
+    CEM step 2: loss=1.017419
+    CEM step 3: loss=1.035322
+    CEM step 4: loss=1.014130
+    CEM step 5: loss=1.023974
+  Plan: 1.024093 → 1.023974 (0.0% Reduktion, 75.9s)
+    Sub-Action 0: target_ee=[0.559, 0.263, 0.063]
+    CEM step 1: loss=1.144861
+    CEM step 2: loss=1.113110
+    CEM step 3: loss=1.110223
+    CEM step 4: loss=1.059812
+    CEM step 5: loss=1.060489
+  Plan: 1.144861 → 1.060489 (7.4% Reduktion, 75.6s)
+    Sub-Action 0: target_ee=[0.398, 0.157, 0.137]
+    CEM step 1: loss=1.150269
+    CEM step 2: loss=1.116212
+    CEM step 3: loss=1.110046
+    CEM step 4: loss=1.088154
+    CEM step 5: loss=1.074465
+  Plan: 1.150269 → 1.074465 (6.6% Reduktion, 76.0s)
+    Sub-Action 0: target_ee=[0.511, 0.279, 0.072]
+    CEM step 1: loss=1.105897
+    CEM step 2: loss=1.074171
+    CEM step 3: loss=1.058799
+    CEM step 4: loss=1.094009
+    CEM step 5: loss=1.035435
+  Plan: 1.105897 → 1.035435 (6.4% Reduktion, 75.5s)
+    Sub-Action 0: target_ee=[0.373, 0.262, 0.094]
+    CEM step 1: loss=1.085786
+    CEM step 2: loss=1.112901
+    CEM step 3: loss=1.057201
+    CEM step 4: loss=1.060953
+    CEM step 5: loss=1.070628
+  Plan: 1.085786 → 1.070628 (1.4% Reduktion, 76.2s)
+    Sub-Action 0: target_ee=[0.527, 0.197, 0.099]
+    CEM step 1: loss=1.059656
+    CEM step 2: loss=1.046609
+    CEM step 3: loss=1.035688
+    CEM step 4: loss=1.047853
+    CEM step 5: loss=1.043262
+  Plan: 1.059656 → 1.043262 (1.5% Reduktion, 75.7s)
+    Sub-Action 0: target_ee=[0.468, 0.313, 0.077]
+    CEM step 1: loss=1.031016
+    CEM step 2: loss=1.049476
+    CEM step 3: loss=1.009763
+    CEM step 4: loss=1.040009
+    CEM step 5: loss=1.023787
+  Plan: 1.031016 → 1.023787 (0.7% Reduktion, 75.5s)
+    Sub-Action 0: target_ee=[0.378, 0.104, 0.052]
+    CEM step 1: loss=1.141369
+    CEM step 2: loss=1.069858
+    CEM step 3: loss=1.085585
+    CEM step 4: loss=1.070905
+    CEM step 5: loss=1.082151
+  Plan: 1.141369 → 1.082151 (5.2% Reduktion, 76.0s)
+    Sub-Action 0: target_ee=[0.464, 0.153, 0.065]
+    CEM step 1: loss=1.087665
+    CEM step 2: loss=1.033029
+    CEM step 3: loss=1.036372
+    CEM step 4: loss=1.069183
+    CEM step 5: loss=1.047200
+  Plan: 1.087665 → 1.047200 (3.7% Reduktion, 76.5s)
+    Sub-Action 0: target_ee=[0.310, 0.296, 0.039]
+    CEM step 1: loss=1.161893
+    CEM step 2: loss=1.036038
+    CEM step 3: loss=1.072962
+    CEM step 4: loss=1.036396
+    CEM step 5: loss=1.032157
+  Plan: 1.161893 → 1.032157 (11.2% Reduktion, 76.3s)
+    Sub-Action 0: target_ee=[0.542, 0.382, 0.122]
+    CEM step 1: loss=1.071269
+    CEM step 2: loss=1.082575
+    CEM step 3: loss=1.103508
+    CEM step 4: loss=1.102642
+    CEM step 5: loss=1.020072
+  Plan: 1.071269 → 1.020072 (4.8% Reduktion, 76.4s)
+    Sub-Action 0: target_ee=[0.505, 0.349, 0.070]
+    CEM step 1: loss=1.151464
+    CEM step 2: loss=1.097056
+    CEM step 3: loss=1.113569
+    CEM step 4: loss=1.103528
+    CEM step 5: loss=1.095750
+  Plan: 1.151464 → 1.095750 (4.8% Reduktion, 76.3s)
+    Sub-Action 0: target_ee=[0.387, 0.190, 0.072]
+    CEM step 1: loss=1.143720
+    CEM step 2: loss=1.116799
+    CEM step 3: loss=1.105998
+    CEM step 4: loss=1.063606
+    CEM step 5: loss=1.060187
+  Plan: 1.143720 → 1.060187 (7.3% Reduktion, 75.7s)
+    Sub-Action 0: target_ee=[0.566, 0.095, 0.039]
+    CEM step 1: loss=1.104182
+    CEM step 2: loss=1.088248
+    CEM step 3: loss=1.067092
+    CEM step 4: loss=1.087217
+    CEM step 5: loss=1.057107
+  Plan: 1.104182 → 1.057107 (4.3% Reduktion, 76.3s)
+    Sub-Action 0: target_ee=[0.405, 0.181, 0.087]
+    CEM step 1: loss=1.119562
+    CEM step 2: loss=1.044005
+    CEM step 3: loss=1.041980
+    CEM step 4: loss=1.027439
+    CEM step 5: loss=1.023974
+  Plan: 1.119562 → 1.023974 (8.5% Reduktion, 76.4s)
+    Sub-Action 0: target_ee=[0.261, 0.035, 0.185]
+    CEM step 1: loss=1.106825
+    CEM step 2: loss=1.066576
+    CEM step 3: loss=1.079492
+    CEM step 4: loss=1.047276
+    CEM step 5: loss=0.991663
+  Plan: 1.106825 → 0.991663 (10.4% Reduktion, 76.4s)
+    Sub-Action 0: target_ee=[0.495, 0.239, 0.080]
+    CEM step 1: loss=1.130882
+    CEM step 2: loss=1.080787
+    CEM step 3: loss=1.085736
+    CEM step 4: loss=1.063324
+    CEM step 5: loss=1.066159
+  Plan: 1.130882 → 1.066159 (5.7% Reduktion, 76.3s)
+    Sub-Action 0: target_ee=[0.648, 0.163, 0.089]
+    CEM step 1: loss=1.013235
+    CEM step 2: loss=1.071917
+    CEM step 3: loss=1.045798
+    CEM step 4: loss=1.044878
+    CEM step 5: loss=1.035873
+  Plan: 1.013235 → 1.035873 (-2.2% Reduktion, 76.5s)
+    Sub-Action 0: target_ee=[0.407, -0.083, 0.139]
+    CEM step 1: loss=1.097751
+    CEM step 2: loss=1.097036
+    CEM step 3: loss=1.067037
+    CEM step 4: loss=1.003259
+    CEM step 5: loss=1.053685
+  Plan: 1.097751 → 1.053685 (4.0% Reduktion, 75.5s)
+    Sub-Action 0: target_ee=[0.550, 0.113, 0.121]
+    CEM step 1: loss=1.107933
+    CEM step 2: loss=1.113796
+    CEM step 3: loss=1.076423
+    CEM step 4: loss=1.078352
+    CEM step 5: loss=1.070431
+  Plan: 1.107933 → 1.070431 (3.4% Reduktion, 76.6s)
+    Sub-Action 0: target_ee=[0.543, 0.012, 0.117]
+    CEM step 1: loss=1.115853
+    CEM step 2: loss=1.063619
+    CEM step 3: loss=1.081720
+    CEM step 4: loss=1.066634
+    CEM step 5: loss=1.021080
+  Plan: 1.115853 → 1.021080 (8.5% Reduktion, 76.2s)
+    Sub-Action 0: target_ee=[0.427, 0.291, 0.105]
+    CEM step 1: loss=1.103303
+    CEM step 2: loss=1.091833
+    CEM step 3: loss=1.057359
+    CEM step 4: loss=1.046283
+    CEM step 5: loss=1.041587
+  Plan: 1.103303 → 1.041587 (5.6% Reduktion, 76.6s)
+    Sub-Action 0: target_ee=[0.415, 0.079, 0.146]
+    CEM step 1: loss=1.142828
+    CEM step 2: loss=1.046677
+    CEM step 3: loss=1.023853
+    CEM step 4: loss=1.045947
+    CEM step 5: loss=1.063645
+  Plan: 1.142828 → 1.063645 (6.9% Reduktion, 76.5s)
+    Sub-Action 0: target_ee=[0.604, 0.071, 0.072]
+    CEM step 1: loss=1.164195
+    CEM step 2: loss=1.065412
+    CEM step 3: loss=1.057152
+    CEM step 4: loss=1.053287
+    CEM step 5: loss=1.027495
+  Plan: 1.164195 → 1.027495 (11.7% Reduktion, 76.5s)
+    Sub-Action 0: target_ee=[0.357, 0.177, 0.055]
+    CEM step 1: loss=1.104119
+    CEM step 2: loss=1.062572
+    CEM step 3: loss=1.021385
+    CEM step 4: loss=1.040817
+    CEM step 5: loss=1.000431
+  Plan: 1.104119 → 1.000431 (9.4% Reduktion, 76.2s)
+    Sub-Action 0: target_ee=[0.288, -0.030, 0.054]
+    CEM step 1: loss=1.111024
+    CEM step 2: loss=1.088978
+    CEM step 3: loss=1.039841
+    CEM step 4: loss=1.043807
+    CEM step 5: loss=1.033203
+  Plan: 1.111024 → 1.033203 (7.0% Reduktion, 76.4s)
+    Sub-Action 0: target_ee=[0.619, 0.123, 0.088]
+    CEM step 1: loss=1.090654
+    CEM step 2: loss=1.055162
+    CEM step 3: loss=1.059305
+    CEM step 4: loss=1.065765
+    CEM step 5: loss=1.026824
+  Plan: 1.090654 → 1.026824 (5.9% Reduktion, 76.7s)
+    Sub-Action 0: target_ee=[0.466, 0.025, 0.055]
+    CEM step 1: loss=1.144413
+    CEM step 2: loss=1.043350
+    CEM step 3: loss=1.071890
+    CEM step 4: loss=1.098765
+    CEM step 5: loss=1.066120
+  Plan: 1.144413 → 1.066120 (6.8% Reduktion, 76.5s)
+    Sub-Action 0: target_ee=[0.541, -0.112, 0.080]
+    CEM step 1: loss=1.084982
+    CEM step 2: loss=1.111492
+    CEM step 3: loss=1.027527
+    CEM step 4: loss=1.055223
+    CEM step 5: loss=0.996339
+  Plan: 1.084982 → 0.996339 (8.2% Reduktion, 76.7s)
+    Sub-Action 0: target_ee=[0.442, -0.141, 0.239]
+    CEM step 1: loss=1.103922
+    CEM step 2: loss=1.063180
+    CEM step 3: loss=1.059047
+    CEM step 4: loss=1.037299
+    CEM step 5: loss=1.063769
+  Plan: 1.103922 → 1.063769 (3.6% Reduktion, 76.0s)
+    Sub-Action 0: target_ee=[0.553, -0.166, 0.101]
+    CEM step 1: loss=1.117872
+    CEM step 2: loss=1.103478
+    CEM step 3: loss=1.070377
+    CEM step 4: loss=1.036167
+    CEM step 5: loss=1.023678
+  Plan: 1.117872 → 1.023678 (8.4% Reduktion, 76.4s)
+    Sub-Action 0: target_ee=[0.584, -0.016, 0.140]
+    CEM step 1: loss=1.028261
+    CEM step 2: loss=1.130334
+    CEM step 3: loss=1.169676
+    CEM step 4: loss=1.074889
+    CEM step 5: loss=1.074033
+  Plan: 1.028261 → 1.074033 (-4.5% Reduktion, 75.8s)
+    Sub-Action 0: target_ee=[0.629, -0.214, 0.069]
+    CEM step 1: loss=1.194245
+    CEM step 2: loss=1.057903
+    CEM step 3: loss=1.138475
+    CEM step 4: loss=1.112160
+    CEM step 5: loss=1.114851
+  Plan: 1.194245 → 1.114851 (6.6% Reduktion, 76.1s)
+    Sub-Action 0: target_ee=[0.533, -0.277, 0.063]
+    CEM step 1: loss=1.108994
+    CEM step 2: loss=1.098155
+    CEM step 3: loss=1.096456
+    CEM step 4: loss=1.123067
+    CEM step 5: loss=1.059981
+  Plan: 1.108994 → 1.059981 (4.4% Reduktion, 76.3s)
+    Sub-Action 0: target_ee=[0.597, 0.038, 0.176]
+  Episode-Log: {'episode_id': 1, 'n_steps': 50, 'duration_s': 4021.46, 'mode': 'online', 'final_cube_positions': [[0.5989694595336914, -0.2895396649837494, 0.02499924786388874]], 'final_ee_pos': [0.5491291284561157, -0.1869179904460907, 0.1326974630355835]}
+  Reset
+  Goal gesetzt: (224, 224, 3) uint8, ee_pos=[0.36049223 0.0566565  0.06966189]
+    CEM step 1: loss=1.390927
+    CEM step 2: loss=1.152296
+    CEM step 3: loss=1.142857
+    CEM step 4: loss=1.173501
+    CEM step 5: loss=1.123724
+  Plan: 1.390927 → 1.123724 (19.2% Reduktion, 76.4s)
+    Sub-Action 0: target_ee=[0.608, 0.008, 0.166]
+    CEM step 1: loss=1.132648
+    CEM step 2: loss=1.069002
+    CEM step 3: loss=1.058190
+    CEM step 4: loss=1.081233
+    CEM step 5: loss=1.070343
+  Plan: 1.132648 → 1.070343 (5.5% Reduktion, 76.1s)
+    Sub-Action 0: target_ee=[0.552, 0.037, 0.179]
+    CEM step 1: loss=1.134296
+    CEM step 2: loss=1.094948
+    CEM step 3: loss=1.076319
+    CEM step 4: loss=1.062883
+    CEM step 5: loss=1.060897
+  Plan: 1.134296 → 1.060897 (6.5% Reduktion, 76.0s)
+    Sub-Action 0: target_ee=[0.628, 0.036, 0.158]
+    CEM step 1: loss=1.146098
+    CEM step 2: loss=1.112476
+    CEM step 3: loss=1.140445
+    CEM step 4: loss=1.112408
+    CEM step 5: loss=1.083121
+  Plan: 1.146098 → 1.083121 (5.5% Reduktion, 76.1s)
+    Sub-Action 0: target_ee=[0.529, -0.033, 0.236]
+    CEM step 1: loss=1.165744
+    CEM step 2: loss=1.151783
+    CEM step 3: loss=1.099725
+    CEM step 4: loss=1.123833
+    CEM step 5: loss=1.079548
+  Plan: 1.165744 → 1.079548 (7.4% Reduktion, 74.9s)
+    Sub-Action 0: target_ee=[0.559, -0.041, 0.214]
+    CEM step 1: loss=1.089316
+    CEM step 2: loss=1.054638
+    CEM step 3: loss=1.045151
+    CEM step 4: loss=1.054382
+    CEM step 5: loss=1.022803
+  Plan: 1.089316 → 1.022803 (6.1% Reduktion, 75.9s)
+    Sub-Action 0: target_ee=[0.498, -0.036, 0.176]
+    CEM step 1: loss=1.114676
+    CEM step 2: loss=1.088247
+    CEM step 3: loss=1.086044
+    CEM step 4: loss=1.051190
+    CEM step 5: loss=1.048802
+  Plan: 1.114676 → 1.048802 (5.9% Reduktion, 76.2s)
+    Sub-Action 0: target_ee=[0.483, -0.026, 0.104]
+    CEM step 1: loss=1.286347
+    CEM step 2: loss=1.128181
+    CEM step 3: loss=1.106583
+    CEM step 4: loss=1.150820
+    CEM step 5: loss=1.098953
+  Plan: 1.286347 → 1.098953 (14.6% Reduktion, 75.8s)
+    Sub-Action 0: target_ee=[0.535, -0.047, 0.150]
+    CEM step 1: loss=1.063871
+    CEM step 2: loss=1.109529
+    CEM step 3: loss=1.040295
+    CEM step 4: loss=1.034554
+    CEM step 5: loss=1.012260
+  Plan: 1.063871 → 1.012260 (4.9% Reduktion, 76.3s)
+    Sub-Action 0: target_ee=[0.572, -0.029, 0.115]
+    CEM step 1: loss=1.069313
+    CEM step 2: loss=1.082593
+    CEM step 3: loss=1.070788
+    CEM step 4: loss=1.090826
+    CEM step 5: loss=1.014547
+  Plan: 1.069313 → 1.014547 (5.1% Reduktion, 75.7s)
+    Sub-Action 0: target_ee=[0.448, -0.096, 0.194]
+    CEM step 1: loss=1.088902
+    CEM step 2: loss=1.094868
+    CEM step 3: loss=1.076150
+    CEM step 4: loss=1.046386
+    CEM step 5: loss=1.047925
+  Plan: 1.088902 → 1.047925 (3.8% Reduktion, 76.4s)
+    Sub-Action 0: target_ee=[0.460, -0.131, 0.118]
+    CEM step 1: loss=1.079205
+    CEM step 2: loss=1.101543
+    CEM step 3: loss=1.150198
+    CEM step 4: loss=1.098922
+    CEM step 5: loss=1.053614
+  Plan: 1.079205 → 1.053614 (2.4% Reduktion, 75.5s)
+    Sub-Action 0: target_ee=[0.466, -0.029, 0.125]
+    CEM step 1: loss=1.195365
+    CEM step 2: loss=1.094369
+    CEM step 3: loss=1.193775
+    CEM step 4: loss=1.139478
+    CEM step 5: loss=1.115199
+  Plan: 1.195365 → 1.115199 (6.7% Reduktion, 76.5s)
+    Sub-Action 0: target_ee=[0.462, -0.155, 0.186]
+    CEM step 1: loss=1.114525
+    CEM step 2: loss=1.111579
+    CEM step 3: loss=1.078228
+    CEM step 4: loss=1.099475
+    CEM step 5: loss=1.042730
+  Plan: 1.114525 → 1.042730 (6.4% Reduktion, 76.5s)
+    Sub-Action 0: target_ee=[0.456, 0.126, 0.265]
+    CEM step 1: loss=1.087365
+    CEM step 2: loss=1.079911
+    CEM step 3: loss=1.063780
+    CEM step 4: loss=1.054864
+    CEM step 5: loss=1.067662
+  Plan: 1.087365 → 1.067662 (1.8% Reduktion, 76.3s)
+    Sub-Action 0: target_ee=[0.660, -0.133, 0.127]
+    CEM step 1: loss=1.124404
+    CEM step 2: loss=1.070117
+    CEM step 3: loss=1.093840
+    CEM step 4: loss=1.077735
+    CEM step 5: loss=1.076826
+  Plan: 1.124404 → 1.076826 (4.2% Reduktion, 76.1s)
+    Sub-Action 0: target_ee=[0.561, 0.076, 0.145]
+    CEM step 1: loss=1.169041
+    CEM step 2: loss=1.069182
+    CEM step 3: loss=1.087969
+    CEM step 4: loss=1.092354
+    CEM step 5: loss=1.091816
+  Plan: 1.169041 → 1.091816 (6.6% Reduktion, 76.5s)
+    Sub-Action 0: target_ee=[0.458, 0.048, 0.088]
+    CEM step 1: loss=1.216416
+    CEM step 2: loss=1.114793
+    CEM step 3: loss=1.093736
+    CEM step 4: loss=1.092031
+    CEM step 5: loss=1.069615
+  Plan: 1.216416 → 1.069615 (12.1% Reduktion, 76.5s)
+    Sub-Action 0: target_ee=[0.525, -0.123, 0.184]
+    CEM step 1: loss=1.131865
+    CEM step 2: loss=1.032741
+    CEM step 3: loss=1.072032
+    CEM step 4: loss=1.056180
+    CEM step 5: loss=1.054764
+  Plan: 1.131865 → 1.054764 (6.8% Reduktion, 75.7s)
+    Sub-Action 0: target_ee=[0.261, 0.075, 0.231]
+    CEM step 1: loss=1.127594
+    CEM step 2: loss=1.089232
+    CEM step 3: loss=1.058445
+    CEM step 4: loss=1.059216
+    CEM step 5: loss=1.040051
+  Plan: 1.127594 → 1.040051 (7.8% Reduktion, 76.7s)
+    Sub-Action 0: target_ee=[0.544, -0.067, 0.059]
+    CEM step 1: loss=1.162489
+    CEM step 2: loss=1.095037
+    CEM step 3: loss=1.076080
+    CEM step 4: loss=1.027654
+    CEM step 5: loss=1.023723
+  Plan: 1.162489 → 1.023723 (11.9% Reduktion, 76.1s)
+    Sub-Action 0: target_ee=[0.638, 0.169, 0.091]
+    CEM step 1: loss=1.165165
+    CEM step 2: loss=1.147880
+    CEM step 3: loss=1.103399
+    CEM step 4: loss=1.085346
+    CEM step 5: loss=1.067444
+  Plan: 1.165165 → 1.067444 (8.4% Reduktion, 76.4s)
+    Sub-Action 0: target_ee=[0.664, 0.028, 0.141]
+    CEM step 1: loss=1.114884
+    CEM step 2: loss=1.080560
+    CEM step 3: loss=1.088847
+    CEM step 4: loss=1.046056
+    CEM step 5: loss=1.081262
+  Plan: 1.114884 → 1.081262 (3.0% Reduktion, 76.4s)
+    Sub-Action 0: target_ee=[0.688, 0.174, 0.126]
+    CEM step 1: loss=1.100050
+    CEM step 2: loss=1.069750
+    CEM step 3: loss=1.084413
+    CEM step 4: loss=1.118496
+    CEM step 5: loss=1.073915
+  Plan: 1.100050 → 1.073915 (2.4% Reduktion, 76.7s)
+    Sub-Action 0: target_ee=[0.678, -0.146, 0.130]
+    CEM step 1: loss=1.125674
+    CEM step 2: loss=1.110277
+    CEM step 3: loss=1.026756
+    CEM step 4: loss=1.025283
+    CEM step 5: loss=1.028239
+  Plan: 1.125674 → 1.028239 (8.7% Reduktion, 76.3s)
+    Sub-Action 0: target_ee=[0.468, 0.022, 0.124]
+    CEM step 1: loss=1.159226
+    CEM step 2: loss=1.106583
+    CEM step 3: loss=1.097567
+    CEM step 4: loss=1.101532
+    CEM step 5: loss=1.039083
+  Plan: 1.159226 → 1.039083 (10.4% Reduktion, 76.1s)
+    Sub-Action 0: target_ee=[0.705, -0.036, 0.159]
+    CEM step 1: loss=1.113322
+    CEM step 2: loss=1.100672
+    CEM step 3: loss=1.031791
+    CEM step 4: loss=1.028990
+    CEM step 5: loss=1.006107
+  Plan: 1.113322 → 1.006107 (9.6% Reduktion, 76.6s)
+    Sub-Action 0: target_ee=[0.528, -0.061, 0.206]
+    CEM step 1: loss=1.150314
+    CEM step 2: loss=1.095555
+    CEM step 3: loss=1.071107
+    CEM step 4: loss=1.020373
+    CEM step 5: loss=1.046755
+  Plan: 1.150314 → 1.046755 (9.0% Reduktion, 76.5s)
+    Sub-Action 0: target_ee=[0.663, 0.127, 0.156]
+    CEM step 1: loss=1.102785
+    CEM step 2: loss=1.092141
+    CEM step 3: loss=1.054970
+    CEM step 4: loss=1.109358
+    CEM step 5: loss=1.058729
+  Plan: 1.102785 → 1.058729 (4.0% Reduktion, 76.4s)
+    Sub-Action 0: target_ee=[0.712, 0.053, 0.177]
+    CEM step 1: loss=1.182756
+    CEM step 2: loss=1.098746
+    CEM step 3: loss=1.046420
+    CEM step 4: loss=1.029896
+    CEM step 5: loss=1.072624
+  Plan: 1.182756 → 1.072624 (9.3% Reduktion, 77.0s)
+    Sub-Action 0: target_ee=[0.681, 0.001, 0.042]
+    CEM step 1: loss=1.015503
+    CEM step 2: loss=1.111646
+    CEM step 3: loss=1.035483
+    CEM step 4: loss=1.048673
+    CEM step 5: loss=1.045558
+  Plan: 1.015503 → 1.045558 (-3.0% Reduktion, 76.1s)
+    Sub-Action 0: target_ee=[0.628, 0.274, 0.160]
+    CEM step 1: loss=1.032897
+    CEM step 2: loss=1.067147
+    CEM step 3: loss=1.137090
+    CEM step 4: loss=1.083051
+    CEM step 5: loss=1.100332
+  Plan: 1.032897 → 1.100332 (-6.5% Reduktion, 75.9s)
+    Sub-Action 0: target_ee=[0.706, -0.095, 0.181]
+    CEM step 1: loss=1.080350
+    CEM step 2: loss=1.190854
+    CEM step 3: loss=1.086631
+    CEM step 4: loss=1.052787
+    CEM step 5: loss=1.057378
+  Plan: 1.080350 → 1.057378 (2.1% Reduktion, 76.2s)
+    Sub-Action 0: target_ee=[0.666, -0.009, 0.172]
+    CEM step 1: loss=1.093405
+    CEM step 2: loss=1.108806
+    CEM step 3: loss=1.059738
+    CEM step 4: loss=1.038764
+    CEM step 5: loss=1.008473
+  Plan: 1.093405 → 1.008473 (7.8% Reduktion, 76.2s)
+    Sub-Action 0: target_ee=[0.614, -0.100, 0.110]
+    CEM step 1: loss=1.155464
+    CEM step 2: loss=1.076203
+    CEM step 3: loss=1.108198
+    CEM step 4: loss=1.091228
+    CEM step 5: loss=1.076239
+  Plan: 1.155464 → 1.076239 (6.9% Reduktion, 75.7s)
+    Sub-Action 0: target_ee=[0.698, 0.165, 0.108]
+    CEM step 1: loss=1.137500
+    CEM step 2: loss=1.158946
+    CEM step 3: loss=1.069592
+    CEM step 4: loss=1.075173
+    CEM step 5: loss=1.041191
+  Plan: 1.137500 → 1.041191 (8.5% Reduktion, 76.0s)
+    Sub-Action 0: target_ee=[0.634, 0.218, 0.082]
+    CEM step 1: loss=1.190625
+    CEM step 2: loss=1.069497
+    CEM step 3: loss=1.118842
+    CEM step 4: loss=1.074051
+    CEM step 5: loss=1.049766
+  Plan: 1.190625 → 1.049766 (11.8% Reduktion, 76.0s)
+    Sub-Action 0: target_ee=[0.761, -0.009, 0.065]
+    CEM step 1: loss=1.147929
+    CEM step 2: loss=1.040709
+    CEM step 3: loss=1.064597
+    CEM step 4: loss=1.042049
+    CEM step 5: loss=1.023412
+  Plan: 1.147929 → 1.023412 (10.8% Reduktion, 76.4s)
+    Sub-Action 0: target_ee=[0.632, 0.035, 0.077]
+    CEM step 1: loss=1.180518
+    CEM step 2: loss=1.103943
+    CEM step 3: loss=1.061128
+    CEM step 4: loss=1.065290
+    CEM step 5: loss=1.087311
+  Plan: 1.180518 → 1.087311 (7.9% Reduktion, 75.9s)
+    Sub-Action 0: target_ee=[0.704, 0.082, 0.070]
+    CEM step 1: loss=1.118057
+    CEM step 2: loss=1.087965
+    CEM step 3: loss=1.049320
+    CEM step 4: loss=1.088305
+    CEM step 5: loss=1.014507
+  Plan: 1.118057 → 1.014507 (9.3% Reduktion, 76.5s)
+    Sub-Action 0: target_ee=[0.634, 0.175, 0.029]
+    CEM step 1: loss=1.184018
+    CEM step 2: loss=1.060055
+    CEM step 3: loss=1.047399
+    CEM step 4: loss=1.036046
+    CEM step 5: loss=1.007944
+  Plan: 1.184018 → 1.007944 (14.9% Reduktion, 76.2s)
+    Sub-Action 0: target_ee=[0.548, -0.127, 0.081]
+    CEM step 1: loss=1.131666
+    CEM step 2: loss=1.099309
+    CEM step 3: loss=1.080150
+    CEM step 4: loss=1.053163
+    CEM step 5: loss=1.043375
+  Plan: 1.131666 → 1.043375 (7.8% Reduktion, 76.3s)
+    Sub-Action 0: target_ee=[0.627, 0.118, 0.066]
+    CEM step 1: loss=1.075771
+    CEM step 2: loss=1.059587
+    CEM step 3: loss=1.068096
+    CEM step 4: loss=1.045523
+    CEM step 5: loss=1.041474
+  Plan: 1.075771 → 1.041474 (3.2% Reduktion, 76.8s)
+    Sub-Action 0: target_ee=[0.582, 0.107, 0.160]
+    CEM step 1: loss=1.083759
+    CEM step 2: loss=1.091358
+    CEM step 3: loss=1.031150
+    CEM step 4: loss=1.005323
+    CEM step 5: loss=0.997819
+  Plan: 1.083759 → 0.997819 (7.9% Reduktion, 76.1s)
+    Sub-Action 0: target_ee=[0.550, 0.120, 0.052]
+    CEM step 1: loss=1.113472
+    CEM step 2: loss=1.096555
+    CEM step 3: loss=1.082382
+    CEM step 4: loss=1.082640
+    CEM step 5: loss=1.071823
+  Plan: 1.113472 → 1.071823 (3.7% Reduktion, 76.3s)
+    Sub-Action 0: target_ee=[0.534, 0.082, 0.084]
+    CEM step 1: loss=1.099675
+    CEM step 2: loss=1.021250
+    CEM step 3: loss=1.047698
+    CEM step 4: loss=1.065752
+    CEM step 5: loss=1.030560
+  Plan: 1.099675 → 1.030560 (6.3% Reduktion, 76.2s)
+    Sub-Action 0: target_ee=[0.618, -0.022, 0.002]
+    CEM step 1: loss=1.072859
+    CEM step 2: loss=1.089731
+    CEM step 3: loss=1.094877
+    CEM step 4: loss=1.081187
+    CEM step 5: loss=1.029230
+  Plan: 1.072859 → 1.029230 (4.1% Reduktion, 76.2s)
+    Sub-Action 0: target_ee=[0.462, 0.191, 0.122]
+    CEM step 1: loss=1.068642
+    CEM step 2: loss=1.136955
+    CEM step 3: loss=1.135312
+    CEM step 4: loss=1.102518
+    CEM step 5: loss=1.100426
+  Plan: 1.068642 → 1.100426 (-3.0% Reduktion, 75.9s)
+    Sub-Action 0: target_ee=[0.559, 0.093, 0.065]
+    CEM step 1: loss=1.152312
+    CEM step 2: loss=1.114670
+    CEM step 3: loss=1.100078
+    CEM step 4: loss=1.060181
+    CEM step 5: loss=1.068380
+  Plan: 1.152312 → 1.068380 (7.3% Reduktion, 76.1s)
+    Sub-Action 0: target_ee=[0.365, 0.167, 0.013]
+    CEM step 1: loss=1.086127
+    CEM step 2: loss=1.068172
+    CEM step 3: loss=1.096169
+    CEM step 4: loss=1.054603
+    CEM step 5: loss=1.056902
+  Plan: 1.086127 → 1.056902 (2.7% Reduktion, 76.3s)
+    Sub-Action 0: target_ee=[0.526, 0.186, 0.072]
+  Episode-Log: {'episode_id': 2, 'n_steps': 50, 'duration_s': 4028.07, 'mode': 'online', 'final_cube_positions': [[0.34461215138435364, 0.29933369159698486, 0.02499932423233986]], 'final_ee_pos': [0.41654789447784424, 0.0983562022447586, 0.060905661433935165]}
+  Reset
+  Goal gesetzt: (224, 224, 3) uint8, ee_pos=[0.36049223 0.0566565  0.06966189]
+    CEM step 1: loss=1.156068
+    CEM step 2: loss=1.162119
+    CEM step 3: loss=1.129393
+    CEM step 4: loss=1.013178
+    CEM step 5: loss=1.032294
+  Plan: 1.156068 → 1.032294 (10.7% Reduktion, 75.8s)
+    Sub-Action 0: target_ee=[0.521, -0.049, 0.158]
+    CEM step 1: loss=1.102206
+    CEM step 2: loss=1.076096
+    CEM step 3: loss=0.991643
+    CEM step 4: loss=1.029732
+    CEM step 5: loss=0.989776
+  Plan: 1.102206 → 0.989776 (10.2% Reduktion, 75.7s)
+    Sub-Action 0: target_ee=[0.485, -0.063, 0.240]
+    CEM step 1: loss=1.151531
+    CEM step 2: loss=1.081066
+    CEM step 3: loss=1.096856
+    CEM step 4: loss=1.025028
+    CEM step 5: loss=1.041985
+  Plan: 1.151531 → 1.041985 (9.5% Reduktion, 76.1s)
+    Sub-Action 0: target_ee=[0.509, 0.090, 0.184]
+    CEM step 1: loss=1.091884
+    CEM step 2: loss=1.119357
+    CEM step 3: loss=1.068269
+    CEM step 4: loss=1.045697
+    CEM step 5: loss=1.057153
+  Plan: 1.091884 → 1.057153 (3.2% Reduktion, 75.7s)
+    Sub-Action 0: target_ee=[0.444, -0.088, 0.179]
+    CEM step 1: loss=1.062708
+    CEM step 2: loss=0.991364
+    CEM step 3: loss=1.032321
+    CEM step 4: loss=1.029574
+    CEM step 5: loss=0.997280
+  Plan: 1.062708 → 0.997280 (6.2% Reduktion, 75.8s)
+    Sub-Action 0: target_ee=[0.466, -0.140, 0.185]
+    CEM step 1: loss=1.095186
+    CEM step 2: loss=1.025754
+    CEM step 3: loss=1.007001
+    CEM step 4: loss=1.007377
+    CEM step 5: loss=1.023060
+  Plan: 1.095186 → 1.023060 (6.6% Reduktion, 76.0s)
+    Sub-Action 0: target_ee=[0.455, 0.020, 0.159]
+    CEM step 1: loss=1.103556
+    CEM step 2: loss=1.076670
+    CEM step 3: loss=1.064300
+    CEM step 4: loss=1.066733
+    CEM step 5: loss=1.047432
+  Plan: 1.103556 → 1.047432 (5.1% Reduktion, 75.9s)
+    Sub-Action 0: target_ee=[0.463, -0.005, 0.208]
+    CEM step 1: loss=1.013806
+    CEM step 2: loss=1.106243
+    CEM step 3: loss=1.074654
+    CEM step 4: loss=1.041237
+    CEM step 5: loss=1.040609
+  Plan: 1.013806 → 1.040609 (-2.6% Reduktion, 75.3s)
+    Sub-Action 0: target_ee=[0.361, 0.120, 0.199]
+    CEM step 1: loss=1.177579
+    CEM step 2: loss=1.039112
+    CEM step 3: loss=1.059624
+    CEM step 4: loss=1.030586
+    CEM step 5: loss=1.098368
+  Plan: 1.177579 → 1.098368 (6.7% Reduktion, 76.3s)
+    Sub-Action 0: target_ee=[0.374, 0.129, 0.150]
+    CEM step 1: loss=1.066172
+    CEM step 2: loss=1.023184
+    CEM step 3: loss=1.070365
+    CEM step 4: loss=1.050535
+    CEM step 5: loss=1.002517
+  Plan: 1.066172 → 1.002517 (6.0% Reduktion, 76.0s)
+    Sub-Action 0: target_ee=[0.429, -0.015, 0.078]
+    CEM step 1: loss=1.099006
+    CEM step 2: loss=1.095240
+    CEM step 3: loss=1.071374
+    CEM step 4: loss=1.045431
+    CEM step 5: loss=0.997352
+  Plan: 1.099006 → 0.997352 (9.2% Reduktion, 76.0s)
+    Sub-Action 0: target_ee=[0.282, -0.033, 0.201]
+    CEM step 1: loss=1.089514
+    CEM step 2: loss=1.067591
+    CEM step 3: loss=1.035188
+    CEM step 4: loss=1.016071
+    CEM step 5: loss=1.011205
+  Plan: 1.089514 → 1.011205 (7.2% Reduktion, 76.0s)
+    Sub-Action 0: target_ee=[0.373, 0.040, 0.114]
+    CEM step 1: loss=1.105755
+    CEM step 2: loss=1.055711
+    CEM step 3: loss=1.043175
+    CEM step 4: loss=0.997531
+    CEM step 5: loss=0.986670
+  Plan: 1.105755 → 0.986670 (10.8% Reduktion, 75.9s)
+    Sub-Action 0: target_ee=[0.282, -0.202, 0.072]
+    CEM step 1: loss=1.039552
+    CEM step 2: loss=1.059846
+    CEM step 3: loss=1.014994
+    CEM step 4: loss=1.030828
+    CEM step 5: loss=0.992813
+  Plan: 1.039552 → 0.992813 (4.5% Reduktion, 76.3s)
+    Sub-Action 0: target_ee=[0.341, 0.040, 0.188]
+    CEM step 1: loss=1.103643
+    CEM step 2: loss=1.084471
+    CEM step 3: loss=1.062419
+    CEM step 4: loss=1.084018
+    CEM step 5: loss=0.985780
+  Plan: 1.103643 → 0.985780 (10.7% Reduktion, 75.5s)
+    Sub-Action 0: target_ee=[0.384, -0.162, 0.186]
+    CEM step 1: loss=1.063482
+    CEM step 2: loss=1.024116
+    CEM step 3: loss=1.052411
+    CEM step 4: loss=0.991946
+    CEM step 5: loss=0.973725
+  Plan: 1.063482 → 0.973725 (8.4% Reduktion, 76.4s)
+    Sub-Action 0: target_ee=[0.328, 0.103, 0.210]
+    CEM step 1: loss=1.152483
+    CEM step 2: loss=1.048513
+    CEM step 3: loss=1.032356
+    CEM step 4: loss=1.034759
+    CEM step 5: loss=1.006956
+  Plan: 1.152483 → 1.006956 (12.6% Reduktion, 75.9s)
+    Sub-Action 0: target_ee=[0.384, 0.229, 0.160]
+    CEM step 1: loss=1.069465
+    CEM step 2: loss=1.032455
+    CEM step 3: loss=1.004159
+    CEM step 4: loss=1.012629
+    CEM step 5: loss=1.016245
+  Plan: 1.069465 → 1.016245 (5.0% Reduktion, 76.0s)
+    Sub-Action 0: target_ee=[0.411, 0.118, 0.156]
+    CEM step 1: loss=1.014226
+    CEM step 2: loss=0.980412
+    CEM step 3: loss=1.039805
+    CEM step 4: loss=1.029513
+    CEM step 5: loss=1.008679
+  Plan: 1.014226 → 1.008679 (0.5% Reduktion, 76.3s)
+    Sub-Action 0: target_ee=[0.365, 0.068, 0.153]
+    CEM step 1: loss=1.064623
+    CEM step 2: loss=1.081638
+    CEM step 3: loss=1.011636
+    CEM step 4: loss=1.062324
+    CEM step 5: loss=1.013087
+  Plan: 1.064623 → 1.013087 (4.8% Reduktion, 76.1s)
+    Sub-Action 0: target_ee=[0.398, -0.003, 0.173]
+    CEM step 1: loss=1.081470
+    CEM step 2: loss=1.031739
+    CEM step 3: loss=1.015339
+    CEM step 4: loss=0.979456
+    CEM step 5: loss=0.998620
+  Plan: 1.081470 → 0.998620 (7.7% Reduktion, 76.3s)
+    Sub-Action 0: target_ee=[0.443, 0.191, 0.191]
+    CEM step 1: loss=1.033922
+    CEM step 2: loss=1.005419
+    CEM step 3: loss=1.032801
+    CEM step 4: loss=1.024579
+    CEM step 5: loss=0.996436
+  Plan: 1.033922 → 0.996436 (3.6% Reduktion, 75.0s)
+    Sub-Action 0: target_ee=[0.367, 0.308, 0.203]
+    CEM step 1: loss=0.973447
+    CEM step 2: loss=1.075807
+    CEM step 3: loss=1.026878
+    CEM step 4: loss=0.997153
+    CEM step 5: loss=1.014862
+  Plan: 0.973447 → 1.014862 (-4.3% Reduktion, 76.3s)
+    Sub-Action 0: target_ee=[0.269, 0.129, 0.107]
+    CEM step 1: loss=1.105740
+    CEM step 2: loss=1.019032
+    CEM step 3: loss=0.993432
+    CEM step 4: loss=1.005878
+    CEM step 5: loss=1.000189
+  Plan: 1.105740 → 1.000189 (9.5% Reduktion, 76.3s)
+    Sub-Action 0: target_ee=[0.231, 0.261, 0.194]
+    CEM step 1: loss=1.120245
+    CEM step 2: loss=1.033234
+    CEM step 3: loss=0.966933
+    CEM step 4: loss=1.003111
+    CEM step 5: loss=0.983729
+  Plan: 1.120245 → 0.983729 (12.2% Reduktion, 76.2s)
+    Sub-Action 0: target_ee=[0.523, 0.158, 0.175]
+    CEM step 1: loss=1.062662
+    CEM step 2: loss=1.017925
+    CEM step 3: loss=0.987842
+    CEM step 4: loss=0.944009
+    CEM step 5: loss=0.976856
+  Plan: 1.062662 → 0.976856 (8.1% Reduktion, 75.9s)
+    Sub-Action 0: target_ee=[0.300, 0.248, 0.258]
+    CEM step 1: loss=1.063041
+    CEM step 2: loss=1.080430
+    CEM step 3: loss=1.031189
+    CEM step 4: loss=1.014976
+    CEM step 5: loss=0.984317
+  Plan: 1.063041 → 0.984317 (7.4% Reduktion, 75.8s)
+    Sub-Action 0: target_ee=[0.375, 0.290, 0.114]
+    CEM step 1: loss=0.987172
+    CEM step 2: loss=1.104024
+    CEM step 3: loss=1.103967
+    CEM step 4: loss=1.040781
+    CEM step 5: loss=0.981123
+  Plan: 0.987172 → 0.981123 (0.6% Reduktion, 75.8s)
+    Sub-Action 0: target_ee=[0.439, 0.222, 0.150]
+    CEM step 1: loss=1.055855
+    CEM step 2: loss=1.035437
+    CEM step 3: loss=1.007488
+    CEM step 4: loss=0.995970
+    CEM step 5: loss=0.986289
+  Plan: 1.055855 → 0.986289 (6.6% Reduktion, 75.7s)
+    Sub-Action 0: target_ee=[0.325, 0.304, 0.208]
+    CEM step 1: loss=0.971518
+    CEM step 2: loss=0.951413
+    CEM step 3: loss=0.975679
+    CEM step 4: loss=0.977281
+    CEM step 5: loss=0.946552
+  Plan: 0.971518 → 0.946552 (2.6% Reduktion, 75.9s)
+    Sub-Action 0: target_ee=[0.338, 0.257, 0.254]
+    CEM step 1: loss=0.999874
+    CEM step 2: loss=0.999068
+    CEM step 3: loss=0.969668
+    CEM step 4: loss=0.956208
+    CEM step 5: loss=0.970743
+  Plan: 0.999874 → 0.970743 (2.9% Reduktion, 76.1s)
+    Sub-Action 0: target_ee=[0.429, 0.163, 0.239]
+    CEM step 1: loss=0.981509
+    CEM step 2: loss=1.020574
+    CEM step 3: loss=0.952167
+    CEM step 4: loss=0.954379
+    CEM step 5: loss=0.964279
+  Plan: 0.981509 → 0.964279 (1.8% Reduktion, 75.9s)
+    Sub-Action 0: target_ee=[0.379, 0.210, 0.218]
+    CEM step 1: loss=1.020436
+    CEM step 2: loss=1.012091
+    CEM step 3: loss=1.020773
+    CEM step 4: loss=1.021708
+    CEM step 5: loss=1.011429
+  Plan: 1.020436 → 1.011429 (0.9% Reduktion, 76.3s)
+    Sub-Action 0: target_ee=[0.327, 0.235, 0.115]
+    CEM step 1: loss=1.033138
+    CEM step 2: loss=1.031907
+    CEM step 3: loss=0.994520
+    CEM step 4: loss=1.037045
+    CEM step 5: loss=0.974861
+  Plan: 1.033138 → 0.974861 (5.6% Reduktion, 76.1s)
+    Sub-Action 0: target_ee=[0.297, 0.190, 0.212]
+    CEM step 1: loss=1.064610
+    CEM step 2: loss=1.040078
+    CEM step 3: loss=1.099336
+    CEM step 4: loss=1.084564
+    CEM step 5: loss=1.050721
+  Plan: 1.064610 → 1.050721 (1.3% Reduktion, 76.1s)
+    Sub-Action 0: target_ee=[0.408, 0.226, 0.068]
+    CEM step 1: loss=1.025621
+    CEM step 2: loss=1.017859
+    CEM step 3: loss=0.988700
+    CEM step 4: loss=1.040051
+    CEM step 5: loss=0.961351
+  Plan: 1.025621 → 0.961351 (6.3% Reduktion, 76.1s)
+    Sub-Action 0: target_ee=[0.365, 0.125, 0.072]
+    CEM step 1: loss=1.107012
+    CEM step 2: loss=1.089772
+    CEM step 3: loss=1.050004
+    CEM step 4: loss=1.010377
+    CEM step 5: loss=0.967559
+  Plan: 1.107012 → 0.967559 (12.6% Reduktion, 76.0s)
+    Sub-Action 0: target_ee=[0.358, 0.327, 0.135]
+    CEM step 1: loss=0.990751
+    CEM step 2: loss=1.020543
+    CEM step 3: loss=1.013659
+    CEM step 4: loss=1.022321
+    CEM step 5: loss=0.950891
+  Plan: 0.990751 → 0.950891 (4.0% Reduktion, 76.0s)
+    Sub-Action 0: target_ee=[0.355, 0.324, 0.120]
+    CEM step 1: loss=1.070093
+    CEM step 2: loss=1.000125
+    CEM step 3: loss=1.003558
+    CEM step 4: loss=0.988140
+    CEM step 5: loss=0.948550
+  Plan: 1.070093 → 0.948550 (11.4% Reduktion, 75.7s)
+    Sub-Action 0: target_ee=[0.363, 0.315, 0.241]
+    CEM step 1: loss=1.005303
+    CEM step 2: loss=0.978215
+    CEM step 3: loss=1.032582
+    CEM step 4: loss=1.011607
+    CEM step 5: loss=1.010462
+  Plan: 1.005303 → 1.010462 (-0.5% Reduktion, 76.0s)
+    Sub-Action 0: target_ee=[0.333, -0.073, 0.255]
+    CEM step 1: loss=1.062054
+    CEM step 2: loss=1.085845
+    CEM step 3: loss=1.065294
+    CEM step 4: loss=1.030999
+    CEM step 5: loss=0.991464
+  Plan: 1.062054 → 0.991464 (6.6% Reduktion, 76.5s)
+    Sub-Action 0: target_ee=[0.359, 0.177, 0.239]
+    CEM step 1: loss=1.053711
+    CEM step 2: loss=1.071397
+    CEM step 3: loss=1.045653
+    CEM step 4: loss=0.985106
+    CEM step 5: loss=0.973051
+  Plan: 1.053711 → 0.973051 (7.7% Reduktion, 75.7s)
+    Sub-Action 0: target_ee=[0.401, 0.228, 0.254]
+    CEM step 1: loss=1.052920
+    CEM step 2: loss=1.027132
+    CEM step 3: loss=1.045167
+    CEM step 4: loss=1.028101
+    CEM step 5: loss=1.037792
+  Plan: 1.052920 → 1.037792 (1.4% Reduktion, 75.7s)
+    Sub-Action 0: target_ee=[0.590, 0.232, 0.232]
+    CEM step 1: loss=1.148613
+    CEM step 2: loss=1.067648
+    CEM step 3: loss=1.037552
+    CEM step 4: loss=1.015874
+    CEM step 5: loss=0.972918
+  Plan: 1.148613 → 0.972918 (15.3% Reduktion, 76.1s)
+    Sub-Action 0: target_ee=[0.347, 0.204, 0.249]
+    CEM step 1: loss=0.992570
+    CEM step 2: loss=1.007820
+    CEM step 3: loss=0.944994
+    CEM step 4: loss=0.995555
+    CEM step 5: loss=0.981995
+  Plan: 0.992570 → 0.981995 (1.1% Reduktion, 75.9s)
+    Sub-Action 0: target_ee=[0.300, 0.282, 0.154]
+    CEM step 1: loss=1.123485
+    CEM step 2: loss=1.046067
+    CEM step 3: loss=0.998381
+    CEM step 4: loss=0.994345
+    CEM step 5: loss=0.983509
+  Plan: 1.123485 → 0.983509 (12.5% Reduktion, 75.8s)
+    Sub-Action 0: target_ee=[0.531, 0.192, 0.232]
+    CEM step 1: loss=1.027385
+    CEM step 2: loss=1.021938
+    CEM step 3: loss=1.048705
+    CEM step 4: loss=1.002192
+    CEM step 5: loss=1.002841
+  Plan: 1.027385 → 1.002841 (2.4% Reduktion, 75.9s)
+    Sub-Action 0: target_ee=[0.420, 0.177, 0.168]
+    CEM step 1: loss=1.049009
+    CEM step 2: loss=1.038358
+    CEM step 3: loss=1.024061
+    CEM step 4: loss=1.011194
+    CEM step 5: loss=0.990475
+  Plan: 1.049009 → 0.990475 (5.6% Reduktion, 75.2s)
+    Sub-Action 0: target_ee=[0.554, 0.374, 0.090]
+    CEM step 1: loss=1.063809
+    CEM step 2: loss=0.981228
+    CEM step 3: loss=1.002027
+    CEM step 4: loss=1.011289
+    CEM step 5: loss=0.991674
+  Plan: 1.063809 → 0.991674 (6.8% Reduktion, 76.2s)
+    Sub-Action 0: target_ee=[0.674, 0.114, 0.044]
+    CEM step 1: loss=1.062132
+    CEM step 2: loss=0.996666
+    CEM step 3: loss=1.024392
+    CEM step 4: loss=1.001658
+    CEM step 5: loss=1.007752
+  Plan: 1.062132 → 1.007752 (5.1% Reduktion, 76.4s)
+    Sub-Action 0: target_ee=[0.624, 0.036, 0.097]
+  Episode-Log: {'episode_id': 3, 'n_steps': 50, 'duration_s': 4020.13, 'mode': 'online', 'final_cube_positions': [[0.5459024310112, -0.21470561623573303, 0.02499951794743538]], 'final_ee_pos': [0.5189089775085449, 0.08120682835578918, 0.16656960546970367]}
+  Reset
+  Goal gesetzt: (224, 224, 3) uint8, ee_pos=[0.36049223 0.0566565  0.06966189]
+    CEM step 1: loss=1.420552
+    CEM step 2: loss=1.183082
+    CEM step 3: loss=1.119624
+    CEM step 4: loss=1.082165
+    CEM step 5: loss=1.086514
+  Plan: 1.420552 → 1.086514 (23.5% Reduktion, 76.1s)
+    Sub-Action 0: target_ee=[0.426, -0.076, 0.152]
+    CEM step 1: loss=1.092114
+    CEM step 2: loss=1.144171
+    CEM step 3: loss=1.073123
+    CEM step 4: loss=1.105349
+    CEM step 5: loss=1.032859
+  Plan: 1.092114 → 1.032859 (5.4% Reduktion, 76.3s)
+    Sub-Action 0: target_ee=[0.422, -0.022, 0.084]
+    CEM step 1: loss=1.019207
+    CEM step 2: loss=1.089863
+    CEM step 3: loss=1.049101
+    CEM step 4: loss=0.971931
+    CEM step 5: loss=1.015552
+  Plan: 1.019207 → 1.015552 (0.4% Reduktion, 76.0s)
+    Sub-Action 0: target_ee=[0.559, -0.031, 0.139]
+    CEM step 1: loss=1.159556
+    CEM step 2: loss=1.110682
+    CEM step 3: loss=1.079781
+    CEM step 4: loss=1.040120
+    CEM step 5: loss=0.983408
+  Plan: 1.159556 → 0.983408 (15.2% Reduktion, 75.9s)
+    Sub-Action 0: target_ee=[0.503, 0.057, 0.196]
+    CEM step 1: loss=1.117674
+    CEM step 2: loss=1.078228
+    CEM step 3: loss=1.030108
+    CEM step 4: loss=1.025031
+    CEM step 5: loss=1.074180
+  Plan: 1.117674 → 1.074180 (3.9% Reduktion, 74.8s)
+    Sub-Action 0: target_ee=[0.343, -0.109, 0.232]
+    CEM step 1: loss=1.092154
+    CEM step 2: loss=1.038799
+    CEM step 3: loss=1.027100
+    CEM step 4: loss=1.030367
+    CEM step 5: loss=0.987580
+  Plan: 1.092154 → 0.987580 (9.6% Reduktion, 76.0s)
+    Sub-Action 0: target_ee=[0.426, 0.225, 0.189]
+    CEM step 1: loss=1.057794
+    CEM step 2: loss=1.107464
+    CEM step 3: loss=1.054850
+    CEM step 4: loss=0.992313
+    CEM step 5: loss=0.962518
+  Plan: 1.057794 → 0.962518 (9.0% Reduktion, 76.0s)
+    Sub-Action 0: target_ee=[0.454, 0.230, 0.208]
+    CEM step 1: loss=0.988193
+    CEM step 2: loss=1.017416
+    CEM step 3: loss=0.981331
+    CEM step 4: loss=0.996149
+    CEM step 5: loss=0.999870
+  Plan: 0.988193 → 0.999870 (-1.2% Reduktion, 76.2s)
+    Sub-Action 0: target_ee=[0.403, -0.028, 0.211]
+    CEM step 1: loss=1.048693
+    CEM step 2: loss=1.023993
+    CEM step 3: loss=1.020502
+    CEM step 4: loss=1.035203
+    CEM step 5: loss=1.026053
+  Plan: 1.048693 → 1.026053 (2.2% Reduktion, 75.6s)
+    Sub-Action 0: target_ee=[0.422, 0.180, 0.268]
+    CEM step 1: loss=1.034051
+    CEM step 2: loss=1.020431
+    CEM step 3: loss=0.990519
+    CEM step 4: loss=1.005095
+    CEM step 5: loss=0.983779
+  Plan: 1.034051 → 0.983779 (4.9% Reduktion, 76.0s)
+    Sub-Action 0: target_ee=[0.562, -0.221, 0.272]
+    CEM step 1: loss=1.043109
+    CEM step 2: loss=1.060511
+    CEM step 3: loss=0.989375
+    CEM step 4: loss=0.986762
+    CEM step 5: loss=0.978098
+  Plan: 1.043109 → 0.978098 (6.2% Reduktion, 75.4s)
+    Sub-Action 0: target_ee=[0.503, -0.023, 0.244]
+    CEM step 1: loss=1.060660
+    CEM step 2: loss=1.045310
+    CEM step 3: loss=1.019175
+    CEM step 4: loss=1.006751
+    CEM step 5: loss=1.048915
+  Plan: 1.060660 → 1.048915 (1.1% Reduktion, 76.3s)
+    Sub-Action 0: target_ee=[0.504, -0.009, 0.073]
+    CEM step 1: loss=1.049161
+    CEM step 2: loss=0.995129
+    CEM step 3: loss=1.019523
+    CEM step 4: loss=0.976843
+    CEM step 5: loss=0.982500
+  Plan: 1.049161 → 0.982500 (6.4% Reduktion, 75.8s)
+    Sub-Action 0: target_ee=[0.502, 0.113, 0.183]
+    CEM step 1: loss=1.090960
+    CEM step 2: loss=1.046757
+    CEM step 3: loss=1.029461
+    CEM step 4: loss=1.018876
+    CEM step 5: loss=0.989173
+  Plan: 1.090960 → 0.989173 (9.3% Reduktion, 76.3s)
+    Sub-Action 0: target_ee=[0.409, 0.019, 0.092]
+    CEM step 1: loss=1.098073
+    CEM step 2: loss=1.047501
+    CEM step 3: loss=0.997198
+    CEM step 4: loss=0.997081
+    CEM step 5: loss=0.999871
+  Plan: 1.098073 → 0.999871 (8.9% Reduktion, 76.0s)
+    Sub-Action 0: target_ee=[0.303, 0.152, 0.140]
+    CEM step 1: loss=1.037422
+    CEM step 2: loss=1.037682
+    CEM step 3: loss=1.017948
+    CEM step 4: loss=1.009719
+    CEM step 5: loss=1.007395
+  Plan: 1.037422 → 1.007395 (2.9% Reduktion, 76.3s)
+    Sub-Action 0: target_ee=[0.342, 0.105, 0.166]
+    CEM step 1: loss=1.111141
+    CEM step 2: loss=1.049165
+    CEM step 3: loss=0.995347
+    CEM step 4: loss=1.013941
+    CEM step 5: loss=0.993543
+  Plan: 1.111141 → 0.993543 (10.6% Reduktion, 75.8s)
+    Sub-Action 0: target_ee=[0.403, -0.148, 0.101]
+    CEM step 1: loss=1.065431
+    CEM step 2: loss=1.008723
+    CEM step 3: loss=0.995168
+    CEM step 4: loss=1.016951
+    CEM step 5: loss=0.987126
+  Plan: 1.065431 → 0.987126 (7.3% Reduktion, 76.0s)
+    Sub-Action 0: target_ee=[0.422, 0.024, 0.162]
+    CEM step 1: loss=1.089581
+    CEM step 2: loss=1.031182
+    CEM step 3: loss=1.012634
+    CEM step 4: loss=0.942811
+    CEM step 5: loss=0.994250
+  Plan: 1.089581 → 0.994250 (8.7% Reduktion, 75.8s)
+    Sub-Action 0: target_ee=[0.281, 0.032, 0.116]
+    CEM step 1: loss=1.057451
+    CEM step 2: loss=1.024126
+    CEM step 3: loss=1.108117
+    CEM step 4: loss=0.996175
+    CEM step 5: loss=1.031439
+  Plan: 1.057451 → 1.031439 (2.5% Reduktion, 75.9s)
+    Sub-Action 0: target_ee=[0.276, 0.014, 0.064]
+    CEM step 1: loss=1.022966
+    CEM step 2: loss=1.051564
+    CEM step 3: loss=1.055942
+    CEM step 4: loss=1.030317
+    CEM step 5: loss=1.007129
+  Plan: 1.022966 → 1.007129 (1.5% Reduktion, 76.0s)
+    Sub-Action 0: target_ee=[0.398, 0.176, 0.130]
+    CEM step 1: loss=1.059034
+    CEM step 2: loss=1.072038
+    CEM step 3: loss=1.057069
+    CEM step 4: loss=0.981540
+    CEM step 5: loss=1.040761
+  Plan: 1.059034 → 1.040761 (1.7% Reduktion, 76.3s)
+    Sub-Action 0: target_ee=[0.237, 0.141, 0.051]
+    CEM step 1: loss=1.053889
+    CEM step 2: loss=1.022232
+    CEM step 3: loss=1.034810
+    CEM step 4: loss=1.023844
+    CEM step 5: loss=1.075557
+  Plan: 1.053889 → 1.075557 (-2.1% Reduktion, 76.3s)
+    Sub-Action 0: target_ee=[0.290, 0.072, 0.060]
+    CEM step 1: loss=1.007565
+    CEM step 2: loss=1.041784
+    CEM step 3: loss=1.027023
+    CEM step 4: loss=0.963047
+    CEM step 5: loss=0.995827
+  Plan: 1.007565 → 0.995827 (1.2% Reduktion, 75.9s)
+    Sub-Action 0: target_ee=[0.334, -0.086, 0.054]
+    CEM step 1: loss=1.059902
+    CEM step 2: loss=1.038897
+    CEM step 3: loss=0.984985
+    CEM step 4: loss=0.970442
+    CEM step 5: loss=0.960670
+  Plan: 1.059902 → 0.960670 (9.4% Reduktion, 75.8s)
+    Sub-Action 0: target_ee=[0.264, 0.014, 0.081]
+    CEM step 1: loss=1.008378
+    CEM step 2: loss=1.030377
+    CEM step 3: loss=1.001487
+    CEM step 4: loss=0.985111
+    CEM step 5: loss=0.991920
+  Plan: 1.008378 → 0.991920 (1.6% Reduktion, 75.8s)
+    Sub-Action 0: target_ee=[0.491, -0.008, 0.084]
+    CEM step 1: loss=1.069074
+    CEM step 2: loss=1.039413
+    CEM step 3: loss=0.996000
+    CEM step 4: loss=0.990955
+    CEM step 5: loss=0.944606
+  Plan: 1.069074 → 0.944606 (11.6% Reduktion, 75.8s)
+    Sub-Action 0: target_ee=[0.259, 0.007, 0.076]
+    CEM step 1: loss=0.978506
+    CEM step 2: loss=1.022836
+    CEM step 3: loss=1.065495
+    CEM step 4: loss=1.009166
+    CEM step 5: loss=1.021216
+  Plan: 0.978506 → 1.021216 (-4.4% Reduktion, 75.7s)
+    Sub-Action 0: target_ee=[0.293, -0.092, 0.085]
+    CEM step 1: loss=1.092394
+    CEM step 2: loss=1.060504
+    CEM step 3: loss=1.031973
+    CEM step 4: loss=1.043541
+    CEM step 5: loss=1.008611
+  Plan: 1.092394 → 1.008611 (7.7% Reduktion, 76.1s)
+    Sub-Action 0: target_ee=[0.322, 0.062, 0.121]
+    CEM step 1: loss=1.027021
+    CEM step 2: loss=1.077922
+    CEM step 3: loss=1.015716
+    CEM step 4: loss=0.984819
+    CEM step 5: loss=0.989696
+  Plan: 1.027021 → 0.989696 (3.6% Reduktion, 75.9s)
+    Sub-Action 0: target_ee=[0.299, 0.189, 0.127]
+    CEM step 1: loss=1.041848
+    CEM step 2: loss=1.060641
+    CEM step 3: loss=1.021751
+    CEM step 4: loss=1.029991
+    CEM step 5: loss=0.972662
+  Plan: 1.041848 → 0.972662 (6.6% Reduktion, 75.7s)
+    Sub-Action 0: target_ee=[0.407, 0.135, 0.180]
+    CEM step 1: loss=1.066570
+    CEM step 2: loss=1.016393
+    CEM step 3: loss=1.047603
+    CEM step 4: loss=1.016335
+    CEM step 5: loss=0.976294
+  Plan: 1.066570 → 0.976294 (8.5% Reduktion, 76.0s)
+    Sub-Action 0: target_ee=[0.285, 0.178, 0.213]
+    CEM step 1: loss=1.136536
+    CEM step 2: loss=0.990137
+    CEM step 3: loss=0.950306
+    CEM step 4: loss=0.992406
+    CEM step 5: loss=0.960884
+  Plan: 1.136536 → 0.960884 (15.5% Reduktion, 76.1s)
+    Sub-Action 0: target_ee=[0.384, 0.168, 0.253]
+    CEM step 1: loss=1.024609
+    CEM step 2: loss=1.030384
+    CEM step 3: loss=1.005052
+    CEM step 4: loss=1.023458
+    CEM step 5: loss=1.007543
+  Plan: 1.024609 → 1.007543 (1.7% Reduktion, 76.2s)
+    Sub-Action 0: target_ee=[0.308, 0.066, 0.224]
+    CEM step 1: loss=1.069492
+    CEM step 2: loss=1.037523
+    CEM step 3: loss=1.045690
+    CEM step 4: loss=1.076169
+    CEM step 5: loss=0.990131
+  Plan: 1.069492 → 0.990131 (7.4% Reduktion, 76.0s)
+    Sub-Action 0: target_ee=[0.292, 0.292, 0.179]
+    CEM step 1: loss=1.104646
+    CEM step 2: loss=1.036030
+    CEM step 3: loss=1.020324
+    CEM step 4: loss=1.041419
+    CEM step 5: loss=1.009818
+  Plan: 1.104646 → 1.009818 (8.6% Reduktion, 76.2s)
+    Sub-Action 0: target_ee=[0.233, 0.114, 0.256]
+    CEM step 1: loss=0.997042
+    CEM step 2: loss=0.994521
+    CEM step 3: loss=0.991002
+    CEM step 4: loss=1.028949
+    CEM step 5: loss=1.015257
+  Plan: 0.997042 → 1.015257 (-1.8% Reduktion, 76.0s)
+    Sub-Action 0: target_ee=[0.582, -0.104, 0.191]
+    CEM step 1: loss=1.104130
+    CEM step 2: loss=1.063482
+    CEM step 3: loss=1.102906
+    CEM step 4: loss=1.094832
+    CEM step 5: loss=1.047224
+  Plan: 1.104130 → 1.047224 (5.2% Reduktion, 75.6s)
+    Sub-Action 0: target_ee=[0.473, 0.164, 0.244]
+    CEM step 1: loss=1.024037
+    CEM step 2: loss=0.974574
+    CEM step 3: loss=0.968927
+    CEM step 4: loss=0.992542
+    CEM step 5: loss=0.913341
+  Plan: 1.024037 → 0.913341 (10.8% Reduktion, 76.4s)
+    Sub-Action 0: target_ee=[0.492, 0.041, 0.256]
+    CEM step 1: loss=1.063605
+    CEM step 2: loss=1.041523
+    CEM step 3: loss=1.020332
+    CEM step 4: loss=1.004610
+    CEM step 5: loss=0.946869
+  Plan: 1.063605 → 0.946869 (11.0% Reduktion, 76.4s)
+    Sub-Action 0: target_ee=[0.341, 0.192, 0.264]
+    CEM step 1: loss=0.977261
+    CEM step 2: loss=1.028432
+    CEM step 3: loss=1.020250
+    CEM step 4: loss=0.995763
+    CEM step 5: loss=1.003750
+  Plan: 0.977261 → 1.003750 (-2.7% Reduktion, 76.1s)
+    Sub-Action 0: target_ee=[0.475, 0.096, 0.172]
+    CEM step 1: loss=1.114731
+    CEM step 2: loss=1.092341
+    CEM step 3: loss=1.073429
+    CEM step 4: loss=1.047994
+    CEM step 5: loss=1.056291
+  Plan: 1.114731 → 1.056291 (5.2% Reduktion, 76.1s)
+    Sub-Action 0: target_ee=[0.316, 0.209, 0.153]
+    CEM step 1: loss=1.011825
+    CEM step 2: loss=1.092735
+    CEM step 3: loss=0.983379
+    CEM step 4: loss=1.061165
+    CEM step 5: loss=1.026484
+  Plan: 1.011825 → 1.026484 (-1.4% Reduktion, 75.8s)
+    Sub-Action 0: target_ee=[0.402, -0.120, 0.233]
+    CEM step 1: loss=0.994482
+    CEM step 2: loss=1.051699
+    CEM step 3: loss=1.063440
+    CEM step 4: loss=0.983665
+    CEM step 5: loss=1.020742
+  Plan: 0.994482 → 1.020742 (-2.6% Reduktion, 75.8s)
+    Sub-Action 0: target_ee=[0.379, 0.184, 0.182]
+    CEM step 1: loss=1.051733
+    CEM step 2: loss=1.048951
+    CEM step 3: loss=1.067751
+    CEM step 4: loss=1.061048
+    CEM step 5: loss=1.038315
+  Plan: 1.051733 → 1.038315 (1.3% Reduktion, 76.3s)
+    Sub-Action 0: target_ee=[0.332, -0.017, 0.226]
+    CEM step 1: loss=1.122735
+    CEM step 2: loss=1.074228
+    CEM step 3: loss=1.075197
+    CEM step 4: loss=1.049097
+    CEM step 5: loss=1.028770
+  Plan: 1.122735 → 1.028770 (8.4% Reduktion, 75.8s)
+    Sub-Action 0: target_ee=[0.299, 0.008, 0.162]
+    CEM step 1: loss=1.077449
+    CEM step 2: loss=1.025655
+    CEM step 3: loss=1.017905
+    CEM step 4: loss=0.980548
+    CEM step 5: loss=0.995295
+  Plan: 1.077449 → 0.995295 (7.6% Reduktion, 76.0s)
+    Sub-Action 0: target_ee=[0.345, 0.042, 0.119]
+    CEM step 1: loss=1.103339
+    CEM step 2: loss=1.061869
+    CEM step 3: loss=1.015364
+    CEM step 4: loss=1.011705
+    CEM step 5: loss=0.993566
+  Plan: 1.103339 → 0.993566 (9.9% Reduktion, 75.6s)
+    Sub-Action 0: target_ee=[0.342, -0.139, 0.107]
+    CEM step 1: loss=1.083778
+    CEM step 2: loss=1.085398
+    CEM step 3: loss=1.084801
+    CEM step 4: loss=1.048155
+    CEM step 5: loss=1.034158
+  Plan: 1.083778 → 1.034158 (4.6% Reduktion, 76.1s)
+    Sub-Action 0: target_ee=[0.459, 0.011, 0.193]
+    CEM step 1: loss=1.079275
+    CEM step 2: loss=1.021850
+    CEM step 3: loss=1.050226
+    CEM step 4: loss=1.009912
+    CEM step 5: loss=1.044592
+  Plan: 1.079275 → 1.044592 (3.2% Reduktion, 76.5s)
+    Sub-Action 0: target_ee=[0.491, 0.313, 0.213]
+  Episode-Log: {'episode_id': 4, 'n_steps': 50, 'duration_s': 4024.41, 'mode': 'online', 'final_cube_positions': [[0.5267395377159119, 0.06222625821828842, 0.02499953843653202]], 'final_ee_pos': [0.3689708709716797, 0.06331036984920502, 0.26385045051574707]}

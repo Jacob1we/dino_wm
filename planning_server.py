@@ -426,6 +426,21 @@ server_config = {
 
 wandb_run = WandBPlanningRun(server_config)
 
+# Gripper-Indices für CEM-Quantisierung berechnen
+# 8D Actions: [x_s, y_s, z_s, g_s, x_e, y_e, z_e, g_e] → Gripper bei Index 3, 7
+# Mit frameskip=2: full 16D → Gripper bei [3, 7, 11, 15]
+if base_action_dim == 8:
+    base_gripper_idx = [3, 7]
+    gripper_indices = [
+        gi + k * base_action_dim
+        for k in range(frameskip)
+        for gi in base_gripper_idx
+    ]
+    print(f"  Gripper-Indices (full {full_action_dim}D): {gripper_indices}")
+else:
+    gripper_indices = None
+    print(f"  Keine Gripper-Dimensionen (base_action_dim={base_action_dim})")
+
 planner = hydra.utils.instantiate(
     planner_cfg,
     horizon=horizon,
@@ -435,6 +450,7 @@ planner = hydra.utils.instantiate(
     preprocessor=preprocessor,
     evaluator=None,  # Keine Evaluation im Server (macht der Client)
     wandb_run=wandb_run,
+    gripper_indices=gripper_indices,
 )
 
 search_dim = horizon * full_action_dim
@@ -442,6 +458,7 @@ print(f"\n✓ Setup komplett")
 print(f"  Modus: {args.mode.upper()}")
 print(f"  CEM: samples={planner_cfg.num_samples}, steps={planner_cfg.opt_steps}, "
       f"topk={planner_cfg.topk}, horizon={horizon}")
+print(f"  Action Bounds: unbounded (normalized), var_scale={planner_cfg.var_scale}")
 print(f"  Suchraum: {search_dim}D (H={horizon} × D={full_action_dim})")
 
 # =============================================================================

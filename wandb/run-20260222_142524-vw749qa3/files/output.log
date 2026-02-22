@@ -1,0 +1,100 @@
+  W&B Run: https://wandb.ai/jacob-weyer-rwth-aachen-university/dino_wm_planning/runs/vw749qa3
+  Gripper-Indices (full 16D): [3, 7, 11, 15]
+  Action Bounds (Workspace → Normalized):
+    x_s: [0.05, 0.80] → norm [-3.63, 2.50]
+    y_s: [-0.40, 0.45] → norm [-2.50, 2.87]
+    z_s: [0.02, 0.50] → norm [-2.23, 5.41]
+    g_s: [0.00, 1.00] → norm [-1.00, 1.00]
+    x_e: [0.05, 0.80] → norm [-3.63, 2.50]
+    y_e: [-0.40, 0.45] → norm [-2.51, 2.87]
+    z_e: [0.02, 0.50] → norm [-2.22, 5.39]
+    g_e: [0.00, 1.00] → norm [-1.00, 1.00]
+  CEM Action Bounds: lower=[-3.6349618434906006, -2.503106117248535, -2.2332451343536377, -0.999972939491272], upper=[2.4993371963500977, 2.8667099475860596, 5.412508487701416, 0.999972939491272] (erste 4 Dims)
+✓ Setup komplett
+  Modus: ONLINE
+  CEM: samples=300, steps=5, topk=30, horizon=5
+  Action Bounds: AKTIV (Workspace-geclampt), var_scale=1
+  Gripper-Quantisierung: AKTIV
+  Suchraum: 80D (H=5 × D=16)
+Server laeuft auf localhost:5555
+Warte auf Client...
+[+] Client: ('127.0.0.1', 51976)
+  W&B Config aktualisiert mit Client-Config (12 Keys)
+  Client-Config empfangen: ['port', 'n_episodes', 'max_steps', 'headless', 'goal_image', 'settle_steps', 'ee_threshold', 'timeout', 'mode', 'log_dir', 'robot_opacity_for_capture', 'scene_config']
+  Reset
+  Goal gesetzt: (224, 224, 3) uint8, ee_pos=[0.6487921  0.24733353 0.07386326]
+    CEM step 1: loss=0.861197
+    CEM step 2: loss=0.736033
+    CEM step 3: loss=0.703941
+    CEM step 4: loss=0.718704
+    CEM step 5: loss=0.672397
+  Plan: 0.861197 → 0.672397 (21.9% Reduktion, 75.8s)
+    Sub-Action 0: target_ee=[0.456, 0.027, 0.163]
+    CEM step 1: loss=0.632277
+    CEM step 2: loss=0.576817
+    CEM step 3: loss=0.569081
+    CEM step 4: loss=0.547503
+    CEM step 5: loss=0.553386
+  Plan: 0.632277 → 0.553386 (12.5% Reduktion, 76.0s)
+    Sub-Action 0: target_ee=[0.511, 0.054, 0.174]
+    CEM step 1: loss=0.647708
+    CEM step 2: loss=0.665240
+    CEM step 3: loss=0.619108
+    CEM step 4: loss=0.613238
+    CEM step 5: loss=0.596320
+  Plan: 0.647708 → 0.596320 (7.9% Reduktion, 76.4s)
+    Sub-Action 0: target_ee=[0.556, 0.015, 0.127]
+    CEM step 1: loss=0.647713
+[-] Client getrennt
+Traceback (most recent call last):
+  File "/home/tsp_jw/Desktop/dino_wm/planning_server.py", line 619, in <module>
+    actions_init = None
+  File "/home/tsp_jw/Desktop/dino_wm/planning/cem.py", line 191, in plan
+    action = self._quantize_gripper(action)
+  File "/home/tsp_jw/Desktop/dino_wm/planning_server.py", line 191, in rollout
+    end = min(start + self.chunk_size, B)
+  File "/home/tsp_jw/Desktop/dino_wm/models/visual_world_model.py", line 299, in rollout
+    z_pred = self.predict(z[:, -self.num_hist :])
+  File "/home/tsp_jw/Desktop/dino_wm/models/visual_world_model.py", line 145, in predict
+    z = self.predictor(z)
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1532, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1541, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/tsp_jw/Desktop/dino_wm/models/vit.py", line 119, in forward
+    x = self.transformer(x)
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1532, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1541, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/tsp_jw/Desktop/dino_wm/models/vit.py", line 96, in forward
+    x = ff(x) + x
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1528, in _wrapped_call_impl
+    def _wrapped_call_impl(self, *args, **kwargs):
+KeyboardInterrupt
+Traceback (most recent call last):
+  File "/home/tsp_jw/Desktop/dino_wm/planning_server.py", line 619, in <module>
+    actions_init = None
+  File "/home/tsp_jw/Desktop/dino_wm/planning/cem.py", line 191, in plan
+    action = self._quantize_gripper(action)
+  File "/home/tsp_jw/Desktop/dino_wm/planning_server.py", line 191, in rollout
+    end = min(start + self.chunk_size, B)
+  File "/home/tsp_jw/Desktop/dino_wm/models/visual_world_model.py", line 299, in rollout
+    z_pred = self.predict(z[:, -self.num_hist :])
+  File "/home/tsp_jw/Desktop/dino_wm/models/visual_world_model.py", line 145, in predict
+    z = self.predictor(z)
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1532, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1541, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/tsp_jw/Desktop/dino_wm/models/vit.py", line 119, in forward
+    x = self.transformer(x)
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1532, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1541, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/tsp_jw/Desktop/dino_wm/models/vit.py", line 96, in forward
+    x = ff(x) + x
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1528, in _wrapped_call_impl
+    def _wrapped_call_impl(self, *args, **kwargs):
+KeyboardInterrupt

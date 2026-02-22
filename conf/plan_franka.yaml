@@ -30,4 +30,44 @@ objective:
   mode: last
 
 
+# =====================================================================
+# Änderungen Jacob W. — Franka-spezifische CEM Priors
+# =====================================================================
+# Diese Parameter steuern die CEM-Exploration im normalisierten Raum.
+# Sie nutzen ausschließlich statische Datensatz-/Workspace-Informationen
+# (KEIN Zugriff auf Simulator-Runtime-Daten bei Inferenz!).
+#
+# Alle Werte stammen aus dem Franka-Workspace und den Datensatz-Statistiken.
+# Fuer andere Roboter/Environments muessen sie angepasst werden.
+
+# --- Workspace Bounds (physischer Arbeitsbereich in Weltkoordinaten) ---
+# CEM-Samples werden auf diesen Bereich geclampt (nach Normalisierung).
+# Verhindert, dass der Planner Actions ausserhalb des physisch moeglichen
+# Bereichs generiert (z.B. negative x-Koordinaten bei Franka).
+workspace_bounds:
+  enabled: true
+  # 8D pro Sub-Action: [x_start, y_start, z_start, g_start, x_end, y_end, z_end, g_end]
+  lower_8d: [0.05, -0.40, 0.02, 0.0, 0.05, -0.40, 0.02, 0.0]
+  upper_8d: [0.80,  0.45, 0.50, 1.0, 0.80,  0.45, 0.50, 1.0]
+  # Grenzen aus Franka-Workspace:
+  #   x: [0.10, 0.76] — vor dem Roboter (immer positiv!)
+  #   y: [-0.35, 0.40] — links/rechts
+  #   z: [0.04, 0.45]  — Hoehe (Tisch bis Lift)
+  #   g: [0.0,  1.0]   — Gripper (binaer)
+  # Mit ±10% Marge fuer CEM-Exploration.
+
+# --- Gripper-Quantisierung ---
+# Gripper ist binaer (offen=0, geschlossen=1). CEM sampelt aber kontinuierlich.
+# Quantisierung snappt auf den naechsten gueltigen Wert → reduziert Suchraum.
+gripper:
+  quantize: true
+  # Indizes der Gripper-Dimensionen in der 8D Basis-Action
+  # [x_s, y_s, z_s, g_s, x_e, y_e, z_e, g_e] → Gripper bei Index 3 und 7
+  base_indices: [3, 7]
+  # Open-Prior: Initialisiert CEM mu fuer Gripper-Dims auf norm(0) (=OPEN)
+  # statt 0.0 (=Midpoint). Verhindert, dass 50% der Samples sofort zu
+  # "closed" quantisiert werden (weil Goal-Bild geschlossenen Gripper zeigt).
+  open_prior: true
+
+
 # 2026-02-09/08-12-44

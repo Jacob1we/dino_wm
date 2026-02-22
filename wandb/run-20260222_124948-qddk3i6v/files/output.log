@@ -1,0 +1,267 @@
+  W&B Run: https://wandb.ai/jacob-weyer-rwth-aachen-university/dino_wm_planning/runs/qddk3i6v
+  Gripper-Indices (full 16D): [3, 7, 11, 15]
+  Action Bounds (Workspace → Normalized):
+    x_s: [0.05, 0.80] → norm [-3.63, 2.50]
+    y_s: [-0.40, 0.45] → norm [-2.50, 2.87]
+    z_s: [0.02, 0.50] → norm [-2.23, 5.41]
+    g_s: [0.00, 1.00] → norm [-1.00, 1.00]
+    x_e: [0.05, 0.80] → norm [-3.63, 2.50]
+    y_e: [-0.40, 0.45] → norm [-2.51, 2.87]
+    z_e: [0.02, 0.50] → norm [-2.22, 5.39]
+    g_e: [0.00, 1.00] → norm [-1.00, 1.00]
+  CEM Action Bounds: lower=[-3.6349618434906006, -2.503106117248535, -2.2332451343536377, -0.999972939491272], upper=[2.4993371963500977, 2.8667099475860596, 5.412508487701416, 0.999972939491272] (erste 4 Dims)
+✓ Setup komplett
+  Modus: ONLINE
+  CEM: samples=300, steps=5, topk=30, horizon=5
+  Action Bounds: AKTIV (Workspace-geclampt), var_scale=1
+  Gripper-Quantisierung: AKTIV
+  Suchraum: 80D (H=5 × D=16)
+Server laeuft auf localhost:5555
+Warte auf Client...
+[+] Client: ('127.0.0.1', 57552)
+  W&B Config aktualisiert mit Client-Config (12 Keys)
+  Client-Config empfangen: ['port', 'n_episodes', 'max_steps', 'headless', 'goal_image', 'settle_steps', 'ee_threshold', 'timeout', 'mode', 'log_dir', 'robot_opacity_for_capture', 'scene_config']
+  Reset
+  Goal gesetzt: (224, 224, 3) uint8, ee_pos=[ 0.6190018  -0.16935763  0.07292856]
+    CEM step 1: loss=0.540688
+    CEM step 2: loss=0.481395
+    CEM step 3: loss=0.406829
+    CEM step 4: loss=0.386333
+    CEM step 5: loss=0.341282
+  Plan: 0.540688 → 0.341282 (36.9% Reduktion, 75.6s)
+    Sub-Action 0: target_ee=[0.528, -0.006, 0.159]
+    CEM step 1: loss=0.230605
+    CEM step 2: loss=0.204995
+    CEM step 3: loss=0.196158
+    CEM step 4: loss=0.175361
+    CEM step 5: loss=0.160029
+  Plan: 0.230605 → 0.160029 (30.6% Reduktion, 75.7s)
+    Sub-Action 0: target_ee=[0.391, -0.090, 0.167]
+    CEM step 1: loss=0.208167
+    CEM step 2: loss=0.210655
+    CEM step 3: loss=0.189731
+    CEM step 4: loss=0.181823
+    CEM step 5: loss=0.168066
+  Plan: 0.208167 → 0.168066 (19.3% Reduktion, 76.0s)
+    Sub-Action 0: target_ee=[0.663, -0.170, 0.189]
+    CEM step 1: loss=0.260743
+    CEM step 2: loss=0.263210
+    CEM step 3: loss=0.234912
+    CEM step 4: loss=0.220406
+    CEM step 5: loss=0.193975
+  Plan: 0.260743 → 0.193975 (25.6% Reduktion, 75.6s)
+    Sub-Action 0: target_ee=[0.521, -0.078, 0.155]
+    CEM step 1: loss=0.199802
+    CEM step 2: loss=0.190907
+    CEM step 3: loss=0.190920
+    CEM step 4: loss=0.191118
+    CEM step 5: loss=0.174852
+  Plan: 0.199802 → 0.174852 (12.5% Reduktion, 75.7s)
+    Sub-Action 0: target_ee=[0.409, -0.026, 0.086]
+    CEM step 1: loss=0.217805
+    CEM step 2: loss=0.210133
+    CEM step 3: loss=0.214265
+    CEM step 4: loss=0.184071
+    CEM step 5: loss=0.171445
+  Plan: 0.217805 → 0.171445 (21.3% Reduktion, 74.8s)
+    Sub-Action 0: target_ee=[0.425, -0.141, 0.061]
+    CEM step 1: loss=0.276704
+    CEM step 2: loss=0.261333
+    CEM step 3: loss=0.248040
+    CEM step 4: loss=0.243927
+    CEM step 5: loss=0.236301
+  Plan: 0.276704 → 0.236301 (14.6% Reduktion, 75.6s)
+    Sub-Action 0: target_ee=[0.405, -0.229, 0.147]
+    CEM step 1: loss=0.337271
+    CEM step 2: loss=0.332305
+    CEM step 3: loss=0.317735
+    CEM step 4: loss=0.327828
+    CEM step 5: loss=0.334719
+  Plan: 0.337271 → 0.334719 (0.8% Reduktion, 75.6s)
+    Sub-Action 0: target_ee=[0.543, -0.041, 0.133]
+    CEM step 1: loss=0.221399
+    CEM step 2: loss=0.196160
+    CEM step 3: loss=0.184694
+    CEM step 4: loss=0.176030
+    CEM step 5: loss=0.176044
+  Plan: 0.221399 → 0.176044 (20.5% Reduktion, 75.5s)
+    Sub-Action 0: target_ee=[0.457, 0.035, 0.125]
+    CEM step 1: loss=0.283188
+    CEM step 2: loss=0.257569
+    CEM step 3: loss=0.261382
+    CEM step 4: loss=0.257533
+    CEM step 5: loss=0.234022
+  Plan: 0.283188 → 0.234022 (17.4% Reduktion, 75.7s)
+    Sub-Action 0: target_ee=[0.350, -0.227, 0.153]
+    CEM step 1: loss=0.209509
+    CEM step 2: loss=0.174127
+    CEM step 3: loss=0.186823
+    CEM step 4: loss=0.155567
+    CEM step 5: loss=0.153415
+  Plan: 0.209509 → 0.153415 (26.8% Reduktion, 75.7s)
+    Sub-Action 0: target_ee=[0.354, -0.164, 0.070]
+    CEM step 1: loss=0.287388
+    CEM step 2: loss=0.266867
+    CEM step 3: loss=0.257637
+    CEM step 4: loss=0.236993
+    CEM step 5: loss=0.218911
+  Plan: 0.287388 → 0.218911 (23.8% Reduktion, 75.5s)
+    Sub-Action 0: target_ee=[0.573, -0.248, 0.170]
+    CEM step 1: loss=0.303300
+    CEM step 2: loss=0.280651
+    CEM step 3: loss=0.252681
+    CEM step 4: loss=0.220063
+    CEM step 5: loss=0.215137
+  Plan: 0.303300 → 0.215137 (29.1% Reduktion, 75.3s)
+    Sub-Action 0: target_ee=[0.447, -0.043, 0.087]
+    CEM step 1: loss=0.343943
+    CEM step 2: loss=0.311511
+    CEM step 3: loss=0.303156
+    CEM step 4: loss=0.294150
+    CEM step 5: loss=0.275549
+  Plan: 0.343943 → 0.275549 (19.9% Reduktion, 74.8s)
+    Sub-Action 0: target_ee=[0.200, -0.213, 0.099]
+    CEM step 1: loss=0.182698
+    CEM step 2: loss=0.183473
+    CEM step 3: loss=0.173724
+    CEM step 4: loss=0.164078
+    CEM step 5: loss=0.167040
+  Plan: 0.182698 → 0.167040 (8.6% Reduktion, 75.1s)
+    Sub-Action 0: target_ee=[0.500, -0.143, 0.050]
+    CEM step 1: loss=0.205416
+    CEM step 2: loss=0.216696
+    CEM step 3: loss=0.195543
+    CEM step 4: loss=0.211194
+    CEM step 5: loss=0.195339
+  Plan: 0.205416 → 0.195339 (4.9% Reduktion, 75.4s)
+    Sub-Action 0: target_ee=[0.502, -0.057, 0.080]
+    CEM step 1: loss=0.198860
+    CEM step 2: loss=0.178771
+    CEM step 3: loss=0.173107
+    CEM step 4: loss=0.160293
+    CEM step 5: loss=0.164034
+  Plan: 0.198860 → 0.164034 (17.5% Reduktion, 75.4s)
+    Sub-Action 0: target_ee=[0.656, -0.130, 0.115]
+    CEM step 1: loss=0.183458
+    CEM step 2: loss=0.192216
+    CEM step 3: loss=0.153601
+    CEM step 4: loss=0.145411
+    CEM step 5: loss=0.158335
+  Plan: 0.183458 → 0.158335 (13.7% Reduktion, 75.9s)
+    Sub-Action 0: target_ee=[0.664, -0.151, 0.090]
+    CEM step 1: loss=0.285029
+    CEM step 2: loss=0.258075
+    CEM step 3: loss=0.258315
+    CEM step 4: loss=0.255029
+    CEM step 5: loss=0.243709
+  Plan: 0.285029 → 0.243709 (14.5% Reduktion, 74.8s)
+    Sub-Action 0: target_ee=[0.679, 0.028, 0.109]
+    CEM step 1: loss=0.208297
+    CEM step 2: loss=0.228631
+    CEM step 3: loss=0.219565
+    CEM step 4: loss=0.201980
+    CEM step 5: loss=0.211839
+  Plan: 0.208297 → 0.211839 (-1.7% Reduktion, 75.6s)
+    Sub-Action 0: target_ee=[0.381, -0.188, 0.114]
+    CEM step 1: loss=0.250419
+    CEM step 2: loss=0.252791
+    CEM step 3: loss=0.238095
+    CEM step 4: loss=0.233845
+    CEM step 5: loss=0.190695
+  Plan: 0.250419 → 0.190695 (23.8% Reduktion, 75.5s)
+    Sub-Action 0: target_ee=[0.522, -0.233, 0.129]
+    CEM step 1: loss=0.288953
+    CEM step 2: loss=0.243627
+    CEM step 3: loss=0.259556
+    CEM step 4: loss=0.253819
+    CEM step 5: loss=0.233393
+  Plan: 0.288953 → 0.233393 (19.2% Reduktion, 75.7s)
+    Sub-Action 0: target_ee=[0.562, -0.158, 0.120]
+    CEM step 1: loss=0.272444
+    CEM step 2: loss=0.262180
+    CEM step 3: loss=0.241765
+[-] Client getrennt
+Traceback (most recent call last):
+  File "/home/tsp_jw/Desktop/dino_wm/planning_server.py", line 619, in <module>
+    actions, _ = planner.plan(
+  File "/home/tsp_jw/Desktop/dino_wm/planning/cem.py", line 172, in plan
+    i_z_obses, i_zs = self.wm.rollout(
+  File "/home/tsp_jw/Desktop/dino_wm/planning_server.py", line 191, in rollout
+    z_obses, zs = self._model.rollout(chunk_obs, chunk_act)
+  File "/home/tsp_jw/Desktop/dino_wm/models/visual_world_model.py", line 295, in rollout
+    z = self.encode(obs_0, act_0)
+  File "/home/tsp_jw/Desktop/dino_wm/models/visual_world_model.py", line 96, in encode
+    z_dct = self.encode_obs(obs)
+  File "/home/tsp_jw/Desktop/dino_wm/models/visual_world_model.py", line 129, in encode_obs
+    visual_embs = self.encoder.forward(visual)
+  File "/home/tsp_jw/Desktop/dino_wm/models/dino.py", line 23, in forward
+    emb = self.base_model.forward_features(x)[self.feature_key]
+  File "/home/tsp_jw/.cache/torch/hub/facebookresearch_dinov2_main/dinov2/models/vision_transformer.py", line 264, in forward_features
+    x = blk(x)
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1532, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1541, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/tsp_jw/.cache/torch/hub/facebookresearch_dinov2_main/dinov2/layers/block.py", line 310, in forward
+    return super().forward(x_or_x_list)
+  File "/home/tsp_jw/.cache/torch/hub/facebookresearch_dinov2_main/dinov2/layers/block.py", line 112, in forward
+    x = x + attn_residual_func(x)
+  File "/home/tsp_jw/.cache/torch/hub/facebookresearch_dinov2_main/dinov2/layers/block.py", line 91, in attn_residual_func
+    return self.ls1(self.attn(self.norm1(x)))
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1532, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1541, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/tsp_jw/.cache/torch/hub/facebookresearch_dinov2_main/dinov2/layers/attention.py", line 87, in forward
+    return super().forward(x)
+  File "/home/tsp_jw/.cache/torch/hub/facebookresearch_dinov2_main/dinov2/layers/attention.py", line 78, in forward
+    x = self.proj_drop(self.proj(x))
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1532, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1541, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/site-packages/torch/nn/modules/linear.py", line 116, in forward
+    return F.linear(input, self.weight, self.bias)
+KeyboardInterrupt
+Traceback (most recent call last):
+  File "/home/tsp_jw/Desktop/dino_wm/planning_server.py", line 619, in <module>
+    actions, _ = planner.plan(
+  File "/home/tsp_jw/Desktop/dino_wm/planning/cem.py", line 172, in plan
+    i_z_obses, i_zs = self.wm.rollout(
+  File "/home/tsp_jw/Desktop/dino_wm/planning_server.py", line 191, in rollout
+    z_obses, zs = self._model.rollout(chunk_obs, chunk_act)
+  File "/home/tsp_jw/Desktop/dino_wm/models/visual_world_model.py", line 295, in rollout
+    z = self.encode(obs_0, act_0)
+  File "/home/tsp_jw/Desktop/dino_wm/models/visual_world_model.py", line 96, in encode
+    z_dct = self.encode_obs(obs)
+  File "/home/tsp_jw/Desktop/dino_wm/models/visual_world_model.py", line 129, in encode_obs
+    visual_embs = self.encoder.forward(visual)
+  File "/home/tsp_jw/Desktop/dino_wm/models/dino.py", line 23, in forward
+    emb = self.base_model.forward_features(x)[self.feature_key]
+  File "/home/tsp_jw/.cache/torch/hub/facebookresearch_dinov2_main/dinov2/models/vision_transformer.py", line 264, in forward_features
+    x = blk(x)
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1532, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1541, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/tsp_jw/.cache/torch/hub/facebookresearch_dinov2_main/dinov2/layers/block.py", line 310, in forward
+    return super().forward(x_or_x_list)
+  File "/home/tsp_jw/.cache/torch/hub/facebookresearch_dinov2_main/dinov2/layers/block.py", line 112, in forward
+    x = x + attn_residual_func(x)
+  File "/home/tsp_jw/.cache/torch/hub/facebookresearch_dinov2_main/dinov2/layers/block.py", line 91, in attn_residual_func
+    return self.ls1(self.attn(self.norm1(x)))
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1532, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1541, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/tsp_jw/.cache/torch/hub/facebookresearch_dinov2_main/dinov2/layers/attention.py", line 87, in forward
+    return super().forward(x)
+  File "/home/tsp_jw/.cache/torch/hub/facebookresearch_dinov2_main/dinov2/layers/attention.py", line 78, in forward
+    x = self.proj_drop(self.proj(x))
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1532, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1541, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/site-packages/torch/nn/modules/linear.py", line 116, in forward
+    return F.linear(input, self.weight, self.bias)
+KeyboardInterrupt

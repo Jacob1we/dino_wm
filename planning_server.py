@@ -62,6 +62,9 @@ parser.add_argument("--chunk_size", type=int, default=None,
 parser.add_argument("--n_sub_actions", type=int, default=1,
                     help="Anzahl Sub-Actions pro Plan-Step (default: 1). "
                          "Max = frameskip. 0 = alle (=frameskip).")
+parser.add_argument("--planning_config", type=str, default="plan_franka",
+                    help="Name der Planning-Config (ohne .yaml). "
+                         "Default: plan_franka")
 args = parser.parse_args()
 
 # # Default Parameter aus dem Paper:
@@ -426,67 +429,72 @@ server_config = {
 
 wandb_run = WandBPlanningRun(server_config)
 
-# Gripper-Indices für CEM-Quantisierung berechnen
-# 8D Actions: [x_s, y_s, z_s, g_s, x_e, y_e, z_e, g_e] → Gripper bei Index 3, 7
-# Mit frameskip=2: full 16D → Gripper bei [3, 7, 11, 15]
-if base_action_dim == 8:
-    base_gripper_idx = [3, 7]
+# =============================================================================
+# PLANNING CONFIG laden (Änderungen Jacob W.)
+# =============================================================================
+# Franka-spezifische CEM-Priors (Workspace Bounds, Gripper-Quantisierung,
+# Open-Prior) werden aus der Planning-Config gelesen, NICHT hardcoded.
+# → Alle Priors an einem Ort, einfach änderbar ohne Code-Änderung.
+
+_planning_cfg_path = f"{dino_wm_dir}/conf/{args.planning_config}.yaml"
+if os.path.exists(_planning_cfg_path):
+    planning_cfg = OmegaConf.load(_planning_cfg_path)
+    print(f"  Planning-Config: {_planning_cfg_path}")
+else:
+    planning_cfg = OmegaConf.create({})
+    print(f"  WARNUNG: {_planning_cfg_path} nicht gefunden, verwende Defaults")
+
+# --- Gripper-Quantisierung (aus Config) ---
+_grip_cfg = OmegaConf.to_container(planning_cfg.get("gripper", {}), resolve=True)
+if _grip_cfg.get("quantize", False) and _grip_cfg.get("base_indices"):
+    base_gripper_idx = _grip_cfg["base_indices"]
     gripper_indices = [
         gi + k * base_action_dim
         for k in range(frameskip)
         for gi in base_gripper_idx
     ]
+    gripper_open_prior = _grip_cfg.get("open_prior", True)
     print(f"  Gripper-Indices (full {full_action_dim}D): {gripper_indices}")
+    print(f"  Gripper Open-Prior: {'AKTIV' if gripper_open_prior else 'INAKTIV'}")
 else:
     gripper_indices = None
-    print(f"  Keine Gripper-Dimensionen (base_action_dim={base_action_dim})")
+    gripper_open_prior = False
+    print(f"  Gripper-Quantisierung: INAKTIV")
 
-# =============================================================================
-# ACTION BOUNDS berechnen (Workspace-Limits → normalisierter Raum)
-# =============================================================================
-# Problem: CEM ohne Bounds kann Actions außerhalb des physischen Arbeitsbereichs
-# generieren (z.B. negative x-Koordinaten). Dies führt zu unsinnigen Roboter-
-# bewegungen weil das World Model für diese Bereiche nicht trainiert wurde.
-#
-# Lösung: Workspace-Limits in normalisierten Raum transformieren und als
-# hard bounds an CEM übergeben. CEM clampt alle Samples auf diesen Bereich.
-#
-# Die Bounds werden BEWUSST etwas weiter als die Datensatz-Grenzen gewählt
-# (±10% Marge), damit CEM noch explorieren kann, aber nicht in physikalisch
-# unmögliche Bereiche driftet.
+# --- Workspace Bounds (aus Config) ---
+_ws_cfg = OmegaConf.to_container(planning_cfg.get("workspace_bounds", {}), resolve=True)
+if _ws_cfg.get("enabled", False) and _ws_cfg.get("lower_8d") and _ws_cfg.get("upper_8d"):
+    _ws_lower_8d = torch.tensor(_ws_cfg["lower_8d"], dtype=torch.float32)
+    _ws_upper_8d = torch.tensor(_ws_cfg["upper_8d"], dtype=torch.float32)
 
-# Franka Workspace-Grenzen (aus config.yaml / Datensatz-Statistiken)
-# x: [0.10, 0.76] — vor dem Roboter (immer positiv!)
-# y: [-0.35, 0.40] — links/rechts
-# z: [0.04, 0.45]  — Höhe (Tisch bis Lift)
-# g: [0.0,  1.0]   — Gripper (binär)
-_ws_lower_8d = torch.tensor([0.05, -0.40, 0.02, 0.0, 0.05, -0.40, 0.02, 0.0])
-_ws_upper_8d = torch.tensor([0.80, 0.45, 0.50, 1.0, 0.80, 0.45, 0.50, 1.0])
+    # Auf full_action_dim erweitern (frameskip-Wiederholung)
+    ws_lower = _ws_lower_8d.repeat(frameskip)[:full_action_dim]
+    ws_upper = _ws_upper_8d.repeat(frameskip)[:full_action_dim]
 
-# Auf full_action_dim erweitern (frameskip-Wiederholung)
-ws_lower = _ws_lower_8d.repeat(frameskip)[:full_action_dim]
-ws_upper = _ws_upper_8d.repeat(frameskip)[:full_action_dim]
+    # In normalisierten Raum transformieren: norm = (world - mean) / std
+    norm_lower = (ws_lower - preprocessor.action_mean) / preprocessor.action_std
+    norm_upper = (ws_upper - preprocessor.action_mean) / preprocessor.action_std
 
-# In normalisierten Raum transformieren: norm = (world - mean) / std
-norm_lower = (ws_lower - preprocessor.action_mean) / preprocessor.action_std
-norm_upper = (ws_upper - preprocessor.action_mean) / preprocessor.action_std
+    # Sicherstellen: lower < upper (falls durch Normalisierung invertiert)
+    action_bounds = {
+        "lower": torch.min(norm_lower, norm_upper),
+        "upper": torch.max(norm_lower, norm_upper),
+    }
 
-# Sicherstellen: lower < upper (falls durch Normalisierung invertiert)
-action_bounds = {
-    "lower": torch.min(norm_lower, norm_upper),
-    "upper": torch.max(norm_lower, norm_upper),
-}
+    print(f"\n  Action Bounds (Workspace → Normalized):")
+    _dim_names = ['x_s', 'y_s', 'z_s', 'g_s', 'x_e', 'y_e', 'z_e', 'g_e'] * frameskip
+    for i in range(min(8, full_action_dim)):
+        print(f"    {_dim_names[i]:>3s}: [{ws_lower[i]:.2f}, {ws_upper[i]:.2f}] "
+              f"→ norm [{action_bounds['lower'][i]:.2f}, {action_bounds['upper'][i]:.2f}]")
 
-print(f"\n  Action Bounds (Workspace → Normalized):")
-_dim_names = ['x_s', 'y_s', 'z_s', 'g_s', 'x_e', 'y_e', 'z_e', 'g_e'] * frameskip
-for i in range(min(8, full_action_dim)):
-    print(f"    {_dim_names[i]:>3s}: [{ws_lower[i]:.2f}, {ws_upper[i]:.2f}] "
-          f"→ norm [{action_bounds['lower'][i]:.2f}, {action_bounds['upper'][i]:.2f}]")
-
-# Diese Bounds werden auch für Safety-Clipping der denormalisierten Actions
-# im Server verwendet (belt-and-suspenders Ansatz)
-WS_LOWER_NP = _ws_lower_8d.numpy()
-WS_UPPER_NP = _ws_upper_8d.numpy()
+    # Belt-and-suspenders: auch für Safety-Clipping im Server
+    WS_LOWER_NP = _ws_lower_8d.numpy()
+    WS_UPPER_NP = _ws_upper_8d.numpy()
+else:
+    action_bounds = None
+    WS_LOWER_NP = None
+    WS_UPPER_NP = None
+    print(f"  Workspace Bounds: INAKTIV")
 
 planner = hydra.utils.instantiate(
     planner_cfg,
@@ -499,6 +507,7 @@ planner = hydra.utils.instantiate(
     wandb_run=wandb_run,
     gripper_indices=gripper_indices,
     action_bounds=action_bounds,
+    gripper_open_prior=gripper_open_prior,
 )
 
 search_dim = horizon * full_action_dim
@@ -506,7 +515,7 @@ print(f"\n✓ Setup komplett")
 print(f"  Modus: {args.mode.upper()}")
 print(f"  CEM: samples={planner_cfg.num_samples}, steps={planner_cfg.opt_steps}, "
       f"topk={planner_cfg.topk}, horizon={horizon}")
-print(f"  Action Bounds: AKTIV (Workspace-geclampt), var_scale={planner_cfg.var_scale}")
+print(f"  Action Bounds: {'AKTIV' if action_bounds else 'INAKTIV'}, var_scale={planner_cfg.var_scale}")
 print(f"  Gripper-Quantisierung: {'AKTIV' if gripper_indices else 'INAKTIV'}")
 print(f"  Suchraum: {search_dim}D (H={horizon} × D={full_action_dim})")
 
@@ -632,8 +641,9 @@ while True:
                     sub_actions = all_sub[:n_ret]
                     
                     # Safety-Clipping: Workspace-Bounds erzwingen (belt-and-suspenders)
-                    for sa in sub_actions:
-                        sa[:base_action_dim] = np.clip(sa[:base_action_dim], WS_LOWER_NP, WS_UPPER_NP)
+                    if WS_LOWER_NP is not None:
+                        for sa in sub_actions:
+                            sa[:base_action_dim] = np.clip(sa[:base_action_dim], WS_LOWER_NP, WS_UPPER_NP)
                     
                     wandb_run.log_plan_summary(t_plan, len(sub_actions), mode="plan")
                     # Diagnostik: denormalisierte Zielposition
@@ -667,8 +677,9 @@ while True:
                                         f=frameskip).numpy()
                     
                     # Safety-Clipping: Workspace-Bounds erzwingen (belt-and-suspenders)
-                    for sa in all_sub:
-                        sa[:base_action_dim] = np.clip(sa[:base_action_dim], WS_LOWER_NP, WS_UPPER_NP)
+                    if WS_LOWER_NP is not None:
+                        for sa in all_sub:
+                            sa[:base_action_dim] = np.clip(sa[:base_action_dim], WS_LOWER_NP, WS_UPPER_NP)
                     
                     # n_sub_actions pro Horizon-Step anwenden:
                     # all_sub hat (horizon * frameskip) Zeilen, in horizon-Bloecke aufteilen

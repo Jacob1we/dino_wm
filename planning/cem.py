@@ -24,6 +24,7 @@ class CEMPlanner(BasePlanner):
         log_filename="logs.json",
         action_bounds=None,
         gripper_indices=None,
+        gripper_open_prior=True,
         **kwargs,
     ):
         super().__init__(
@@ -58,6 +59,7 @@ class CEMPlanner(BasePlanner):
         # Bei 8D Actions: Gripper-Dimensionen (Index 3, 7) sollen nur {0, 1} sein
         # In normalisiertem Raum: 0 → (0 - mean) / std, 1 → (1 - mean) / std
         self.gripper_indices = gripper_indices
+        self.gripper_open_prior = gripper_open_prior
 
     def _clamp_actions(self, action):
         """Clampt Actions auf gültige Bounds (in normalisiertem Raum).
@@ -103,6 +105,14 @@ class CEMPlanner(BasePlanner):
         """
         actions: (B, T, action_dim) torch.Tensor, T <= self.horizon
         mu, sigma could depend on current obs, but obs_0 is only used for providing n_evals for now
+        
+        GRIPPER-BIAS FIX: Gripper-Dimensionen werden auf norm(0) (= OPEN)
+        initialisiert statt auf 0.0. Grund: 0.0 liegt exakt auf dem Midpoint
+        zwischen norm(0)=-1.0 und norm(1)=+1.0 → 50% der CEM-Samples werden
+        zu "closed" quantisiert → Goal-Bild (Gripper geschlossen) selektiert
+        diese sofort → Gripper schließt bereits im allerersten Horizon-Step.
+        Mit mu=norm(0) startet der CEM mit Open-Gripper-Prior und schließt
+        erst wenn die visuelle Evidenz es an einem bestimmten Step verlangt.
         """
         n_evals = obs_0["visual"].shape[0]
         sigma = self.var_scale * torch.ones([n_evals, self.horizon, self.action_dim])
@@ -116,6 +126,18 @@ class CEMPlanner(BasePlanner):
 
         if remaining_t > 0:
             new_mu = torch.zeros(n_evals, remaining_t, self.action_dim)
+            
+            # Gripper Open-Prior (per Config steuerbar):
+            # Initialisiert Gripper-Dims auf norm(0) = OPEN statt 0.0 = Midpoint.
+            # Verhindert, dass 50% der Samples sofort zu "closed" quantisiert werden.
+            if self.gripper_open_prior and self.gripper_indices is not None:
+                action_mean = self.preprocessor.action_mean
+                action_std = self.preprocessor.action_std
+                for gi in self.gripper_indices:
+                    if gi < self.action_dim:
+                        norm_open = (0.0 - action_mean[gi].item()) / action_std[gi].item()
+                        new_mu[:, :, gi] = norm_open
+            
             mu = torch.cat([mu, new_mu.to(device)], dim=1)
         return mu, sigma
 

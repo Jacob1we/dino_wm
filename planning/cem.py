@@ -22,6 +22,8 @@ class CEMPlanner(BasePlanner):
         wandb_run,
         logging_prefix="plan_0",
         log_filename="logs.json",
+        action_bounds=None,
+        gripper_indices=None,
         **kwargs,
     ):
         super().__init__(
@@ -40,6 +42,62 @@ class CEMPlanner(BasePlanner):
         self.opt_steps = opt_steps
         self.eval_every = eval_every
         self.logging_prefix = logging_prefix
+
+        # Action Bounds (in normalisiertem Raum)
+        # action_bounds: dict mit "lower" und "upper" als (action_dim,) Tensoren
+        # → CEM-Samples werden auf diesen Bereich geclampt
+        if action_bounds is not None:
+            self.action_lower = action_bounds["lower"].float()
+            self.action_upper = action_bounds["upper"].float()
+            print(f"  CEM Action Bounds: lower={self.action_lower[:4].tolist()}, upper={self.action_upper[:4].tolist()} (erste 4 Dims)")
+        else:
+            self.action_lower = None
+            self.action_upper = None
+
+        # Gripper-Indices für binäre Quantisierung
+        # Bei 8D Actions: Gripper-Dimensionen (Index 3, 7) sollen nur {0, 1} sein
+        # In normalisiertem Raum: 0 → (0 - mean) / std, 1 → (1 - mean) / std
+        self.gripper_indices = gripper_indices
+
+    def _clamp_actions(self, action):
+        """Clampt Actions auf gültige Bounds (in normalisiertem Raum).
+        
+        Verhindert, dass CEM-Samples außerhalb des physischen Arbeitsbereichs
+        landen (z.B. negative x-Koordinaten bei Franka).
+        """
+        if self.action_lower is not None:
+            lower = self.action_lower.to(action.device)
+            upper = self.action_upper.to(action.device)
+            action = action.clamp(min=lower, max=upper)
+        return action
+
+    def _quantize_gripper(self, action):
+        """Quantisiert Gripper-Dimensionen auf {norm(0), norm(1)} (nächster Wert).
+        
+        Gripper ist binär (offen=0, geschlossen=1). CEM sampelt aber kontinuierlich.
+        → Snapping auf den nächsten gültigen normalisierten Wert reduziert den
+        Suchraum und verhindert physikalisch unsinnige Gripper-Zwischenwerte.
+        """
+        if self.gripper_indices is None:
+            return action
+        
+        # Normalisierte Werte für Gripper=0 und Gripper=1 berechnen
+        # Gripper-Dims haben mean=0.5, std=0.5 → norm(0)=-1.0, norm(1)=+1.0
+        action_mean = self.preprocessor.action_mean
+        action_std = self.preprocessor.action_std
+        
+        for gi in self.gripper_indices:
+            if gi < action.shape[-1]:
+                norm_0 = (0.0 - action_mean[gi].item()) / action_std[gi].item()
+                norm_1 = (1.0 - action_mean[gi].item()) / action_std[gi].item()
+                mid = (norm_0 + norm_1) / 2.0
+                # Snap: < mid → norm(0), >= mid → norm(1)
+                action[..., gi] = torch.where(
+                    action[..., gi] < mid,
+                    torch.tensor(norm_0, device=action.device, dtype=action.dtype),
+                    torch.tensor(norm_1, device=action.device, dtype=action.dtype),
+                )
+        return action
 
     def init_mu_sigma(self, obs_0, actions=None):
         """
@@ -104,6 +162,12 @@ class CEMPlanner(BasePlanner):
                     + mu[traj]
                 )
                 action[0] = mu[traj]  # optional: make the first one mu itself
+                
+                # Action Bounds: auf gültigen Arbeitsbereich clippen
+                action = self._clamp_actions(action)
+                # Gripper-Quantisierung: binäre Werte {0, 1} erzwingen
+                action = self._quantize_gripper(action)
+                
                 with torch.no_grad():
                     i_z_obses, i_zs = self.wm.rollout(
                         obs_0=cur_trans_obs_0,
@@ -116,6 +180,9 @@ class CEMPlanner(BasePlanner):
                 losses.append(loss[topk_idx[0]].item())
                 mu[traj] = topk_action.mean(dim=0)
                 sigma[traj] = topk_action.std(dim=0)
+                
+                # Auch mu auf Bounds clampen (verhindert Drift über Iterationen)
+                mu[traj] = self._clamp_actions(mu[traj].unsqueeze(0)).squeeze(0)
 
             self.wandb_run.log(
                 {f"{self.logging_prefix}/loss": np.mean(losses), "step": i + 1}

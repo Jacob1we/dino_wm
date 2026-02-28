@@ -3194,3 +3194,488 @@ Dokumentation aktualisiert:
 | act_group passt zu obs_window | ✓ | ❌ (verschoben) | ✓ |
 | Datenverlust | — | — | Keiner ✓ |
 
+---
+
+## 11. Multi-Kamera-Analyse: Tiefen-Ambiguität bei Single-Camera Planning (26.02.2026)
+
+### 11.1 Problemstellung
+
+Beim Planning des Franka Cube Stacking Tasks wurde beobachtet, dass der CEM-Planner **Actions plant, bei denen der EEF den Cube aus Kamera-Perspektive korrekt trifft, aber in der Tiefe (senkrecht zur Bildebene) systematisch daneben liegt**. Das Problem ist eine fundamentale Eigenschaft der Single-Camera-DINO-WM-Architektur.
+
+**Beobachtung:** Bei einer einzelnen Kamera (ca. 45° Azimut) sieht das Modell den EEF und den Cube in einer 2D-Projektion. Entlang der optischen Achse (Tiefe) gibt es **keine visuelle Information**, um die korrekte 3D-Position zu disambiguieren. Der Planner optimiert die projizierten 2D-Positionen im DINO-Embedding-Space, nicht die tatsächlichen 3D-Positionen.
+
+### 11.2 Architektur-Analyse: Warum Single-Camera?
+
+#### DINO-WM Encoder
+
+Das Modell erwartet Eingaben der Form `(B, T, 3, H, W)`:
+
+```python
+# models/dino_wm.py — encode_obs()
+def encode_obs(self, obs):
+    # obs: (B, T, 3, H, W) — kein Kamera-Dimension!
+    B, T, C, H, W = obs.shape
+    obs_flat = obs.reshape(B * T, C, H, W)
+    z = self.encoder(obs_flat)           # DINOv2 ViT-S/14
+    # z: (B*T, 256, 384) — 256 Patches × 384 Dim
+    return z.reshape(B, T, 256, 384)
+```
+
+Es gibt **keine Kamera-Dimension** in der Tensor-Shape. Das Modell ist architektonisch auf genau **eine Kamera-Ansicht** limitiert.
+
+#### FrankaCubeStackDataset
+
+```python
+# datasets/franka_cube_stack_dset.py
+obses = torch.load(obses_path)  # (T, H, W, 3) — nur cam_0
+```
+
+Der Datensatz lädt nur `cam_0` — obwohl der Datensatz mit 4 Kameras generiert wurde, wird nur eine einzige Kameraansicht für Training und Inference verwendet.
+
+#### Planning Server
+
+```python
+# planning_server.py — img_to_obs()
+def img_to_obs(self, img):
+    # img: (H, W, 3) — einzelnes Bild, keine Multi-Cam-Unterstützung
+    img = torch.from_numpy(img).permute(2, 0, 1).float() / 255.0
+    return img.unsqueeze(0)  # (1, 3, H, W)
+```
+
+#### Objective-Funktion
+
+Die Objective-Funktion im CEM-Planner arbeitet kamera-agnostisch auf DINO-Embeddings:
+
+```python
+# planning/objective.py
+loss = alpha * proprio_loss + (1 - alpha) * visual_loss
+```
+
+- `visual_loss`: Cosine-Distanz im DINO-Patch-Space (Kamera-Projektion!)
+- `proprio_loss`: L2-Distanz im Proprio-Space (3D-Raum)
+- `alpha` kontrolliert die Gewichtung → höheres Alpha = mehr 3D-Information
+
+### 11.3 Wie das Deformable-Environment (Referenz-Datensatz) Multi-Camera handhabt
+
+#### Kamera-Setup: 4 Kameras, 1 verwendet
+
+Das Deformable-Environment generiert 4 Kameras in einer Multiview-Konfiguration:
+
+```python
+# env/deformable_env/src/sim/sim_env/cameras.py
+cam_deg = [0, 90, 180, 270]
+cam_deg = [d + 45 for d in cam_deg]  # → [45, 135, 225, 315]°
+
+for i, each_deg in enumerate(cam_deg):
+    each_cam_pos, each_cam_angle = spherical_to_cartesian_with_angle(
+        radius, each_deg, elevate_angle)
+    ...
+```
+
+Die 4 Kameras sind:
+| Kamera | Azimut | Elevation | Position |
+|--------|--------|-----------|----------|
+| cam_0  | 45°    | 45°       | Vorne-rechts, erhöht |
+| cam_1  | 135°   | 45°       | Hinten-rechts, erhöht |
+| cam_2  | 225°   | 45°       | Hinten-links, erhöht |
+| cam_3  | 315°   | 45°       | Vorne-links, erhöht |
+
+#### Daten-Generierung: Alle 4 Kameras gerendert
+
+```python
+# env/deformable_env/src/sim/sim_env/flex_env.py — store_data()
+def store_data(self, store_cam_param=False, init_fps=False):
+    for j in range(len(self.camPos_list)):       # iteriert über ALLE 4 Kameras
+        self.camera.cam_pos = self.camPos_list[j]
+        self.camera.cam_angle = self.camAngle_list[j]
+        if store_cam_param:
+            self.cam_intrinsic_params[j], self.cam_extrinsic_matrix[j] = (
+                self.camera.get_cam_params()
+            )
+    img = self.render()      # rendert aktuell gesetzte Kamera
+    img_list.append(img)     # alle 4 Kamera-Bilder in img_list
+    ...
+    img_list_np = np.array(img_list)  # (4, H, W, C)
+    self.imgs_list.append(img_list_np)
+```
+
+Alle 4 Kamerabilder werden gerendert und in `imgs_list` gespeichert (Shape: `(T, 4, H, W, C)`).
+
+#### Observation: Nur EINE Kamera selektiert
+
+```python
+# env/deformable_env/FlexEnvWrapper.py — step_multiple()
+def step_multiple(self, actions):
+    ...
+    for act in actions:
+        ...
+        obs_img = imgs_list[-1][self.camera_view][..., :3][..., ::-1]
+        #                      ^^^^^^^^^^^^^^^^
+        #                      SELEKTIERT EINE Kamera!
+```
+
+`self.camera_view` wird aus der Datensatz-Konfiguration geladen. In der Praxis: `camera_view = 0` → nur die 45°-Kamera wird als Observation verwendet. Die anderen 3 Kameras werden **generiert und gespeichert, aber nie fürs Modell-Training genutzt**.
+
+#### Tiefen-Bilder: Generiert, aber nicht verwendet
+
+Die H5-Dateien im Deformable-Datensatz enthalten Depth-Maps:
+```python
+# env/deformable_env/FlexEnvWrapper.py — prepare()
+rgb, depth = self.get_one_view_img()
+# depth wird NICHT in die Observation aufgenommen
+```
+
+Die Tiefenbilder werden beim Rendering erzeugt, aber **niemals** vom Modell oder der Planning-Pipeline konsumiert.
+
+### 11.4 Warum das beim Deformable-Task funktioniert, aber beim Franka Cube Stacking nicht
+
+#### Deformable-Tasks: Essentiell 2D
+
+Die Deformable-Tasks (Rope, Granular Media) sind **essentiell 2D-Probleme**:
+- Objekte liegen **flach auf dem Tisch** → minimale Tiefen-Variation
+- Der Roboter-Endeffektor (Pusher) arbeitet ebenfalls auf der **Tischebene**
+- Eine einzelne Top-Down-ähnliche Kamera (45° Elevation) erfasst die relevante 2D-Geometrie vollständig
+- Tiefen-Ambiguität ist irrelevant, weil alle Aktionen auf einer Ebene stattfinden
+
+#### Franka Cube Stacking: Inhärent 3D
+
+Das Cube-Stacking-Problem ist **inhärent 3D**:
+- Der EEF muss den Cube aus der **richtigen 3D-Position** greifen
+- Die Picking-Action erfordert präzise Tiefenpositionierung (z ≈ Cube-Höhe)
+- Eine einzelne Kamera kann nicht disambiguieren, ob der EEF VOR oder HINTER dem Cube steht
+- Stacking erfordert 3D-Positionierung über dem Ziel-Cube
+
+**→ Das Deformable-Environment "löst" die Multi-Kamera-Frage nicht. Es umgeht sie, weil die Tasks keine 3D-Tiefinformation benötigen.**
+
+### 11.5 Lösungsansätze
+
+#### Option A: 2×2 Grid-Image (Architektur-kompatibel)
+
+4 Kamerabilder (je 112×112) zu einem 224×224 Grid zusammensetzen:
+
+```
+┌─────────┬─────────┐
+│ cam_0   │ cam_1   │
+│ (112²)  │ (112²)  │
+├─────────┼─────────┤
+│ cam_2   │ cam_3   │
+│ (112²)  │ (112²)  │
+└─────────┴─────────┘
+→ 224×224 Gesamtbild → normaler DINO-Input
+```
+
+**Vorteil:** Keine Architekturänderung, DINO-Encoder verarbeitet das Grid wie ein normales Bild.
+**Nachteil:** Jede Kamera hat nur 112×112 → weniger Details pro Ansicht (64 statt 256 Patches).
+
+#### Option B: Schräge Kameraposition
+
+Die Kamera so positionieren, dass die Tiefenachse nicht senkrecht zur Bildebene steht:
+
+- Aktuell: Kamera bei ~45° Azimut → Tiefen-Ambiguität entlang der optischen Achse
+- Besser: Kamera direkt von oben (Top-Down) → X/Y disambiguiert, Z über Objektgröße schätzbar
+- Alternative: Kamera bei ~30° Elevation → mehr Tiefeninformation durch Perspektive
+
+**Vorteil:** Keine Code-Änderung, nur Kamera-Position in Isaac Sim anpassen.
+**Nachteil:** Löst das Problem nur teilweise — eine Achse bleibt immer ambig.
+
+#### Option C: Echte Multi-Camera-Architektur (6 Änderungen nötig)
+
+Für vollständige Multi-Kamera-Unterstützung müssen folgende Komponenten geändert werden:
+
+| # | Komponente | Änderung |
+|---|-----------|----------|
+| 1 | `FrankaCubeStackDataset` | Alle 4 Kameras laden → `(T, 4, H, W, 3)` |
+| 2 | `encode_obs()` | Kamera-Dimension akzeptieren → `(B, T, K, 3, H, W)` |
+| 3 | DINO-Encoder | Patches pro Kamera concatenaten → 4×256 = 1024 Patches |
+| 4 | Predictor (Transformer) | 1024 statt 256 Patches → $O(N^2)$ Attention: 16× Memory |
+| 5 | Objective-Funktion | Multi-View DINO-Embeddings vergleichen |
+| 6 | Planning Server | K Bilder empfangen und verarbeiten |
+
+**Vorteil:** Vollständige 3D-Information.
+**Nachteil:** 16× Attention-Memory ($O(N^2)$ bei 4× Patches), erheblicher Implementierungsaufwand, neues Training nötig.
+
+#### Option D: Alpha-Gewichtung erhöhen (Sofort umsetzbar)
+
+Der `alpha`-Parameter in der Objective-Funktion kontrolliert die Gewichtung:
+
+```python
+loss = alpha * proprio_loss + (1 - alpha) * visual_loss
+```
+
+- Höheres `alpha` → mehr Gewicht auf Proprio-Loss → 3D-Positionsgenauigkeit
+- Niedrigeres `alpha` → mehr Gewicht auf Visual-Loss → 2D-Projektion dominiert
+
+Durch Erhöhung von `alpha` (z.B. 0.7 statt Standard 0.5) wird die 3D-Proprio-Information stärker gewichtet, was die Tiefen-Ambiguität teilweise kompensiert.
+
+**Vorteil:** Keine Architekturänderung, sofort konfigurierbar.
+**Nachteil:** Schwächt den visuellen Planner — das Modell nutzt dann primär Proprio, nicht Vision.
+
+### 11.6 Empfehlung
+
+| Priorität | Option | Aufwand | Effekt |
+|-----------|--------|---------|--------|
+| 1 | **D: Alpha erhöhen** | Minimal (Config) | Mittel — kompensiert Tiefe über Proprio |
+| 2 | **B: Kamera-Position optimieren** | Gering (Isaac Sim Config) | Mittel — reduziert Ambiguität |
+| 3 | **A: Grid-Image** | Mittel (Dataset + Training) | Hoch — Multi-View ohne Architekturänderung |
+| 4 | **C: Multi-Camera-Architektur** | Hoch (6 Komponenten) | Maximal — aber erheblicher Aufwand |
+
+**Sofortige Maßnahme:** Alpha-Parameter experimentell variieren (0.5 → 0.7 → 0.9) und Kamera-Position in Isaac Sim evaluieren. Langfristig: Grid-Image-Ansatz (Option A) als beste Balance zwischen Aufwand und Nutzen.
+
+---
+
+## 12. Multi-Kamera-Bildfusion: 2 Kameras → 1 RGB-Bild (28.02.2026)
+
+### 12.1 Ziel und Motivation
+
+Die Tiefenambiguität (Abschnitt 11) soll gelöst werden, indem zwei Kamerabilder zu **einem einzigen RGB-Bild (224×224×3)** fusioniert werden. Dadurch bleibt die gesamte Modell-Architektur (DINOv2 Encoder, ViT Predictor, VQ-VAE Decoder, CEM Planner) **unverändert** — nur die Bildvorverarbeitung in Datensammlung und Inferenz wird angepasst.
+
+**Kern-Idee:** Das DINO World Model verarbeitet genau ein `(3, 224, 224)` Bild pro Zeitschritt. Statt die Architektur auf Multi-View zu erweitern (Abschnitt 11.5, Option C — hoher Aufwand, 16× Attention-Memory), werden zwei komplementäre Kameransichten **vor** dem DINOv2-Encoder in ein einzelnes RGB-Bild überführt. DINOv2 Self-Attention kann dann automatisch Cross-View-Korrelationen in den Patch-Features lernen.
+
+**Kamera-Setup:** Zwei Kameras mit ca. 90° Winkelversatz, derzeit konfiguriert in `config.yaml`:
+
+| Kamera | Name | Position | Azimut | Elevation |
+|--------|------|----------|--------|-----------|
+| cam_0 | `front_right` | `[1.6, -2.0, 1.27]` | ~32° | ~66° |
+| cam_1 | `front_left` | `[1.6, 2.0, 1.27]` | ~148° | ~66° |
+
+Diese zwei Kameras liefern komplementäre Ansichten: Was in cam_0 Tiefe (ambig) ist, ist in cam_1 eine laterale Verschiebung (messbar) und umgekehrt.
+
+### 12.2 Betroffene Dateien (alle 3 Ansätze)
+
+Alle Fusionsansätze erfordern Änderungen an exakt denselben Stellen:
+
+| # | Datei | Repository | Änderung |
+|---|-------|------------|----------|
+| 1 | `min_data_logger.py` (Zeile 581, 672-683) | FCS | `obses.pth` mit fusioniertem Bild statt nur cam_0 |
+| 2 | `franka_cube_stack_dset.py` | DINO WM | Keine — lädt `obses.pth` transparent (Shape bleibt `(T, 224, 224, 3)`) |
+| 3 | `planning_client.py` (capture_obs, Zeile 423) | FCS | Beide Kameras capturen → fusionieren → an Server senden |
+| 4 | `planning_server.py` (img_to_obs, Zeile 525) | DINO WM | Keine — empfängt bereits fusioniertes `(224, 224, 3)` Bild |
+| 5 | `config.yaml` | FCS | `camera_fusion` Config-Block mit Modus und Parametern |
+| 6 | `conf/env/fcs.yaml` | DINO WM | `data_path` auf neuen Datensatz zeigen |
+
+### 12.3 Ansatz 1: Side-by-Side Concat (Horizontal)
+
+```
+┌────────────┬────────────┐
+│  cam_0     │  cam_1     │     Zwei Kameras werden horizontal
+│  (224×112) │  (224×112) │     nebeneinander gesetzt.
+└────────────┴────────────┘
+→ 224×224×3 — normaler DINOv2-Input
+```
+
+**Implementierung:**
+```python
+def fuse_side_by_side(cam0: np.ndarray, cam1: np.ndarray) -> np.ndarray:
+    """Fusioniert 2 Kamerabilder horizontal nebeneinander.
+    
+    Args:
+        cam0: (H, W, 3) uint8 RGB — Hauptkamera (front_right)
+        cam1: (H, W, 3) uint8 RGB — Seitenkamera (front_left)
+    
+    Returns:
+        (H, W, 3) uint8 RGB — Fusioniertes Bild (224×224)
+    """
+    import cv2
+    H, W = cam0.shape[:2]  # 224, 224
+    half_w = W // 2         # 112
+    cam0_resized = cv2.resize(cam0, (half_w, H), interpolation=cv2.INTER_AREA)  # (224, 112, 3)
+    cam1_resized = cv2.resize(cam1, (half_w, H), interpolation=cv2.INTER_AREA)  # (224, 112, 3)
+    return np.concatenate([cam0_resized, cam1_resized], axis=1)  # (224, 224, 3)
+```
+
+**DINOv2-Patch-Analyse:**
+- DINOv2 ViT-S/14: Patch-Size = 14×14, Input 224×224 → 16×16 = 256 Patches
+- Bei Side-by-Side: 16 Zeilen × 8 Spalten pro Kamera = **128 Patches/View**
+- Self-Attention sieht alle 256 Patches → lernt Cross-View-Korrelationen
+- ABER: Jedes Patch einer Kamera hat nur 14×7 Pixel statt 14×14 (Aspect-Ratio-Verzerrung innerhalb des Patches am halbierten Rand passiert nicht, da das Bild vor der Patchifizierung bereits 224×224 ist)
+
+**Vorteile:**
+- Minimal-invasiv: jedes View-Bild ist ein "normales" Bild (natürliche Farben)
+- DINOv2-Pretrained-Features funktionieren zuverlässig auf natürlichen Bildern
+- Klare räumliche Trennung: linke Hälfte = cam_0, rechte Hälfte = cam_1
+- Kein Informationsverlust durch Überlagerung
+
+**Nachteile:**
+- Horizontale Kompression: 224 → 112 Pixel pro View (Auflösungsverlust)
+- Aspect-Ratio-Verzerrung (2:1 → 1:1): Objekte erscheinen gestaucht
+- Kleine Objekte (5cm Würfel) werden noch schwerer erkennbar
+
+**Best geeignet für:** Sichere Baseline, wenn DINOv2-Feature-Qualität Priorität hat.
+
+### 12.4 Ansatz 4: Alpha-Blend (Semi-Transparente Überlagerung)
+
+```
+fused = α × cam_0 + (1-α) × cam_1
+→ 224×224×3 (beide Views überlagert, volle Auflösung)
+```
+
+**Implementierung:**
+```python
+def fuse_alpha_blend(cam0: np.ndarray, cam1: np.ndarray, alpha: float = 0.5) -> np.ndarray:
+    """Fusioniert 2 Kamerabilder durch Alpha-Blending.
+    
+    Args:
+        cam0: (H, W, 3) uint8 RGB — Hauptkamera
+        cam1: (H, W, 3) uint8 RGB — Seitenkamera
+        alpha: Gewichtung für cam_0 (0.0-1.0). 0.5 = gleichgewichtet.
+    
+    Returns:
+        (H, W, 3) uint8 RGB — Fusioniertes Bild (224×224)
+    """
+    blended = (alpha * cam0.astype(np.float32) + 
+               (1.0 - alpha) * cam1.astype(np.float32))
+    return np.clip(blended, 0, 255).astype(np.uint8)
+```
+
+**DINOv2-Patch-Analyse:**
+- Volle 256 Patches bei voller 14×14 Auflösung
+- Jeder Patch enthält superponierte Information beider Ansichten
+- Self-Attention sieht kohärente räumliche Strukturen (keine harte Kante)
+
+**Vorteile:**
+- Volle Auflösung (224×224) für BEIDE Views gleichzeitig
+- Keine geometrische Verzerrung oder Aspect-Ratio-Änderung
+- Jeder Patch sieht beide Perspektiven → maximale Info-Dichte
+- Bei simpler Szene (wenige Objekte, klarer Hintergrund) gut erkennbar
+
+**Nachteile:**
+- "Geisterbilder": Überlagerung macht Objektkanten unscharf
+- DINOv2-Features könnten an Diskriminierbarkeit verlieren (Patch-Features mitteln sich)
+- Alpha-Parameter muss experimentell gewählt werden (0.5 vs. 0.6/0.4)
+- Hintergrund wird "schmutzig" wenn sich die Bodenplatten-Texturen überlagern
+
+**Best geeignet für:** Szenen mit wenigen, markanten Objekten und klar unterscheidbarem Hintergrund. Die FCS-Szene (1 farbiger Würfel auf grauer Bodenplatte, Roboter unsichtbar) ist ein guter Kandidat.
+
+**Konfigurierbare Parameter:**
+- `alpha`: Gewichtung (Standard 0.5, experimentell variieren)
+- Option: Asymmetrisches Blending (cam_0 dominiert mit α=0.6, cam_1 ergänzt Tiefe)
+
+### 12.5 Ansatz 5: Channel-Stacking (Grayscale-Seitenansicht als B-Kanal) ⭐
+
+```
+┌────────────────────┐
+│ R = cam_0 Red      │     Hauptkamera (front_right) liefert R+G,
+│ G = cam_0 Green    │     Seitenkamera (front_left) wird zu
+│ B = gray(cam_1)    │     Grayscale und ersetzt den B-Kanal.
+└────────────────────┘
+→ 224×224×3 — volle Auflösung pro View
+```
+
+**Implementierung:**
+```python
+def fuse_channel_stack(cam0: np.ndarray, cam1: np.ndarray) -> np.ndarray:
+    """Fusioniert 2 Kamerabilder durch Channel-Stacking.
+    
+    cam_0 (R, G) + gray(cam_1) (B) → (H, W, 3)
+    
+    Args:
+        cam0: (H, W, 3) uint8 RGB — Hauptkamera (front_right)
+        cam1: (H, W, 3) uint8 RGB — Seitenkamera (front_left)
+    
+    Returns:
+        (H, W, 3) uint8 — Fusioniertes Bild [R_cam0, G_cam0, Gray_cam1]
+    """
+    import cv2
+    gray1 = cv2.cvtColor(cam1, cv2.COLOR_RGB2GRAY)  # (H, W) uint8
+    fused = np.stack([cam0[:, :, 0],    # R von cam_0
+                      cam0[:, :, 1],    # G von cam_0
+                      gray1], axis=2)   # Grayscale von cam_1
+    return fused  # (224, 224, 3) uint8
+```
+
+**DINOv2-Patch-Analyse:**
+- Volle 256 Patches bei voller 14×14 Auflösung
+- DINOv2 ViT-S/14 verarbeitet alle 3 Kanäle durch einen linearen Patch-Embedding:
+  `proj = nn.Conv2d(3, 384, kernel_size=14, stride=14)` — jeder Kanal wird unabhängig gewichtet
+- Der B-Kanal (Seitenansicht) liefert komplementäre räumliche Information
+- Die Pretrained-Weights für den B-Kanal erwarten Blau, bekommen aber Graustufen-Tiefe → Finetuning/Training passt die Gewichte an
+
+**Vorteile:**
+- **Maximale Auflösung**: 224×224 für BEIDE Ansichten (kein Auflösungsverlust)
+- **Keine Artefakte**: Kein Ghosting/Blending, keine harten Kanten zwischen Views
+- **Saubere Trennung**: R+G = Hauptkamera, B = Seitenansicht → Modell kann Views trennen
+- **FCS-Szene ideal**: Würfel ist blau/rot auf grauer Fläche → minimaler Farbinformationsverlust durch Grayscale
+- **DINOv2-kompatibel**: 3-Kanal-Input bleibt erhalten, Patch-Embedding kann Kanäle separieren
+
+**Nachteile:**
+- Unnatürliche Farben: Bilder erscheinen violett/grünlich (DINOv2 pretrained auf natürliche RGB)
+- Farbinformation der Seitenansicht geht verloren (Gray statt RGB)
+- DINOv2-Pretrained-Weights für B-Kanal könnten weniger effektiv sein
+- Blau-Anteil des Hauptkamerabilds geht verloren (cam_0 Blue-Channel wird nicht verwendet)
+
+**Warum für FCS geeignet:**
+1. **Farbarmut der Szene**: Der Würfel hat eine Farbe, die Bodenplatte ist grau → Grayscale verliert minimal an diskriminativer Information
+2. **Roboter unsichtbar**: Robot-Opacity = 0.0 → keine komplexen Robotergeometrien zu erkennen
+3. **Training passt an**: DINOv2 ist frozen, aber der ViT-Predictor und VQ-VAE-Decoder lernen die neue Kanal-Semantik
+4. **Volle räumliche Auflösung**: Entscheidend für den kleinen 5cm-Würfel
+
+**Dies ist der empfohlene Ansatz und wurde als erster implementiert.**
+
+### 12.6 Vergleich und Experimentplan
+
+| Eigenschaft | Side-by-Side | Alpha-Blend | Channel-Stack |
+|-------------|-------------|-------------|---------------|
+| Auflösung pro View | 224×112 (halbiert) | 224×224 (voll) | 224×224 (voll) |
+| DINOv2 Patches/View | 128 | 256 (gemischt) | 256 (separiert) |
+| Farbinformation | Voll (RGB×2) | Voll (RGB×2, gemittelt) | Teilweise (RG + Gray) |
+| Artefakte | Aspect-Ratio-Verzerrung | Ghosting/Blur | Unnatürliche Farben |
+| DINOv2-Feature-Risiko | Niedrig | Mittel | Mittel |
+| Architektur-Änderung | Keine | Keine | Keine |
+| Konfigurierbar | — | `alpha` (0.0-1.0) | — |
+| Implementierungskomplexität | Sehr gering | Sehr gering | Sehr gering |
+
+**Experiment-Reihenfolge:**
+1. **Channel-Stack** (Ansatz 5) — empfohlen, maximale Auflösung ⭐
+2. **Side-by-Side** (Ansatz 1) — sichere Baseline mit natürlichen Bildern
+3. **Alpha-Blend** (Ansatz 4) — Flexibel über Alpha-Parameter
+
+Für jedes Experiment:
+1. Neuen Datensatz mit 2 Kameras + Fusion sammeln (~1000 Episoden)
+2. Training: `python train.py env=fcs` (100 Epochen)
+3. Sanity-Check: `python wm_sanity_check.py --model_name <...>`
+4. Planning-Evaluation: `planning_eval.py --stage both --seeds 42,43,44,45,46`
+
+### 12.7 Implementierung: `fuse_cameras()` Utility
+
+Alle 3 Fusionsmodi werden durch eine einzige Funktion bereitgestellt, die über `config.yaml` konfiguriert wird:
+
+```python
+# Gemeinsame Fusionsfunktion für Datensammlung + Planning-Client
+def fuse_cameras(cam0: np.ndarray, cam1: np.ndarray, 
+                 mode: str = "channel_stack", **kwargs) -> np.ndarray:
+    """Fusioniert 2 Kamerabilder zu einem einzelnen RGB-Bild.
+    
+    Args:
+        cam0: (H, W, 3) uint8 — Kamera 0 (front_right)
+        cam1: (H, W, 3) uint8 — Kamera 1 (front_left)
+        mode: "channel_stack" | "side_by_side" | "alpha_blend"
+        **kwargs: Modus-spezifische Parameter (z.B. alpha=0.5)
+    
+    Returns:
+        (H, W, 3) uint8 — Fusioniertes Bild
+    """
+```
+
+**Config (`config.yaml`):**
+```yaml
+camera:
+  fusion:
+    enabled: true                    # Multi-Kamera-Fusion aktivieren
+    mode: "channel_stack"            # "channel_stack" | "side_by_side" | "alpha_blend"
+    primary_camera: 0                # Index der Hauptkamera (R+G bei channel_stack)
+    secondary_camera: 1              # Index der Seitenkamera (Gray bei channel_stack)
+    alpha: 0.5                       # Nur für alpha_blend: Gewichtung cam_0
+```
+
+### 12.8 Datensatz-Benennung
+
+Neue Datensätze mit Kamera-Fusion folgen der Namenskonvention:
+
+```
+<Datum>_<Zeit>_NEps<N>_RobOpac<O>_NPrim<P>_NCams2_Fuse<Modus>_NCube<W>_EEFfix_TrackGrip
+```
+
+Beispiel: `20260228_1500_NEps1000_RobOpac0_NPrim20_NCams2_FuseChStack_NCube1_EEFfix_TrackGrip`
+
+- `NCams2`: 2 Kameras wurden gerendert
+- `FuseChStack` / `FuseSbS` / `FuseAlpha`: Fusionsmodus

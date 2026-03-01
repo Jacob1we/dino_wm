@@ -1,0 +1,29 @@
+{
+    "os": "Linux-6.8.0-101-generic-x86_64-with-glibc2.35",
+    "python": "3.10.14",
+    "heartbeatAt": "2026-03-01T12:52:37.502702",
+    "startedAt": "2026-03-01T12:52:36.844837",
+    "docker": null,
+    "gpu": "NVIDIA RTX A5000",
+    "gpu_count": 1,
+    "cpu_count": 32,
+    "cuda": null,
+    "args": [
+        "--model",
+        "260301/10-03",
+        "--opt_steps",
+        "30"
+    ],
+    "state": "running",
+    "program": "/home/tsp_jw/Desktop/dino_wm/planning_server.py",
+    "codePath": "planning_server.py",
+    "git": {
+        "remote": "https://github.com/Jacob1we/dino_wm.git",
+        "commit": "cc1dcaca76d81ed9182ae1c1d05ba14f53950d43"
+    },
+    "email": "ja2wey@gmail.com",
+    "root": "/home/tsp_jw/Desktop/dino_wm",
+    "host": "Precision-7920-Tower",
+    "username": "tsp_jw",
+    "executable": "/home/tsp_jw/miniconda3/envs/dino_wm/bin/python"
+}

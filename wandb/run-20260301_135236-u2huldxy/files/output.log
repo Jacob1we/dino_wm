@@ -1,0 +1,51 @@
+  W&B Run: https://wandb.ai/jacob-weyer-rwth-aachen-university/dino_wm_planning/runs/u2huldxy
+  Planning-Config: /home/tsp_jw/Desktop/dino_wm/conf/plan_franka.yaml
+  Gripper-Indices (full 16D): [3, 7, 11, 15]
+  Gripper Open-Prior: AKTIV
+  Action Bounds (Workspace → Normalized):
+    x_s: [0.05, 0.80] → norm [-3.57, 2.61]
+    y_s: [-0.40, 0.45] → norm [-2.64, 2.75]
+    z_s: [0.02, 0.50] → norm [-2.18, 4.68]
+    g_s: [0.00, 1.00] → norm [-1.00, 1.00]
+    x_e: [0.05, 0.80] → norm [-3.57, 2.60]
+    y_e: [-0.40, 0.45] → norm [-2.64, 2.75]
+    z_e: [0.02, 0.50] → norm [-2.17, 4.67]
+    g_e: [0.00, 1.00] → norm [-1.00, 1.00]
+  CEM Action Bounds: lower=[-3.569929599761963, -2.639700174331665, -2.1845734119415283, -0.999972939491272], upper=[2.605971336364746, 2.749276638031006, 4.680386543273926, 0.999972939491272] (erste 4 Dims)
+✓ Setup komplett
+  Modus: ONLINE
+  CEM: samples=300, steps=30, topk=30, horizon=5
+  Action Bounds: AKTIV, var_scale=1
+  Gripper-Quantisierung: AKTIV
+  Suchraum: 80D (H=5 × D=16)
+Server laeuft auf localhost:5555
+Warte auf Client...
+[+] Client: ('127.0.0.1', 45584)
+  W&B Config aktualisiert mit Client-Config (12 Keys)
+  Client-Config empfangen: ['port', 'n_episodes', 'max_steps', 'headless', 'goal_image', 'settle_steps', 'ee_threshold', 'timeout', 'mode', 'log_dir', 'robot_opacity_for_capture', 'scene_config']
+  Reset
+  Goal gesetzt: (224, 224, 3) uint8, ee_pos=[ 0.34181404 -0.04221284  0.07817296]
+    CEM step 1: loss=0.865987
+    CEM step 2: loss=0.834184
+    CEM step 3: loss=0.777709
+    CEM step 4: loss=0.729360
+    CEM step 5: loss=0.679987
+    CEM step 6: loss=0.647871
+    CEM step 7: loss=0.601129
+    CEM step 8: loss=0.597223
+    CEM step 9: loss=0.588828
+    CEM step 10: loss=0.578600
+    CEM step 11: loss=0.564292
+    CEM step 12: loss=0.556824
+    CEM step 13: loss=0.545480
+    CEM step 14: loss=0.533665
+    CEM step 15: loss=0.533633
+    CEM step 16: loss=0.524823
+    CEM step 17: loss=0.523528
+    CEM step 18: loss=0.519525
+    CEM step 19: loss=0.517770
+    CEM step 20: loss=0.514487
+    CEM step 21: loss=0.513207
+    CEM step 22: loss=0.512192
+    CEM step 23: loss=0.511163
+    CEM step 24: loss=0.505664

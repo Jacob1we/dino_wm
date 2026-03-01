@@ -120,14 +120,42 @@ def run_sanity_check(args):
     n_episodes = min(args.n_episodes, len(dset))
     rollout_len = args.rollout_len  # Anzahl Vorhersage-Schritte (nach num_hist)
     
+    # Bestimme maximale verfügbare Sequenzlänge im Dataset
+    all_seq_lengths = [dset.get_seq_length(i) for i in range(len(dset))]
+    max_seq_len = max(all_seq_lengths) if all_seq_lengths else 0
+    print(f"  Sequenzlängen im Dataset: min={min(all_seq_lengths)}, "
+          f"max={max_seq_len}, median={sorted(all_seq_lengths)[len(all_seq_lengths)//2]}")
+    
     # Minimale Episodenlänge: (num_hist + rollout_len) * frameskip + 1 Original-Frames
     min_frames_needed = (num_hist + rollout_len) * frameskip + 1
+    
+    # Auto-Reduce rollout_len wenn Episoden zu kurz sind
+    if min_frames_needed > max_seq_len:
+        max_possible_rollout = (max_seq_len - 1) // frameskip - num_hist
+        if max_possible_rollout <= 0:
+            print(f"  FEHLER: Episoden zu kurz für Sanity-Check!")
+            print(f"    Maximale Sequenzlänge: {max_seq_len}")
+            print(f"    Benötigt mindestens: (num_hist={num_hist} + 1) * frameskip={frameskip} + 1 "
+                  f"= {(num_hist + 1) * frameskip + 1} Frames")
+            print(f"    → Reduziere num_hist oder frameskip in der Trainings-Config")
+            return
+        print(f"  WARNUNG: rollout_len={rollout_len} zu groß für Sequenzlänge {max_seq_len}")
+        print(f"    Benötigt {min_frames_needed} Frames, maximal verfügbar: {max_seq_len}")
+        rollout_len = max_possible_rollout
+        min_frames_needed = (num_hist + rollout_len) * frameskip + 1
+        print(f"    → Automatisch reduziert auf rollout_len={rollout_len} "
+              f"(benötigt {min_frames_needed} Frames)")
     
     # Finde geeignete Episoden
     valid_episode_idxs = []
     for i in range(len(dset)):
         if dset.get_seq_length(i) >= min_frames_needed:
             valid_episode_idxs.append(i)
+    
+    if len(valid_episode_idxs) == 0:
+        print(f"  FEHLER: Keine Episoden mit mindestens {min_frames_needed} Frames gefunden!")
+        print(f"    Sequenzlängen-Verteilung: {sorted(set(all_seq_lengths))}")
+        return
     
     if len(valid_episode_idxs) < n_episodes:
         print(f"  WARNUNG: Nur {len(valid_episode_idxs)} Episoden lang genug "
@@ -137,6 +165,7 @@ def run_sanity_check(args):
     # Wähle gleichmäßig verteilte Episoden
     step = max(1, len(valid_episode_idxs) // n_episodes)
     selected_idxs = valid_episode_idxs[:n_episodes * step:step][:n_episodes]
+    print(f"  Geeignete Episoden: {len(valid_episode_idxs)}, ausgewählt: {len(selected_idxs)}")
     print(f"  Ausgewählte Episoden: {selected_idxs}")
 
     # ── 3. Output-Verzeichnis ──

@@ -23,7 +23,7 @@ dataset:
   # data_path: If FRANKA_DATA_PATH env var is set, use it; otherwise fallback to local path
   # Alt: primLogger_NEps500_ActInt10_RobOpac0_NCams4_NCube1 (500ep, ActInt10)
   # data_path: ${oc.env:FRANKA_DATA_PATH,/home/tsp_jw/Desktop/fcs_datasets/NEps500_RobOpac10_NPrim10_NCams4_NCube1/}
-  data_path: "/media/tsp_jw/data/DINO_WM/fcs_datasets/20260221_2011_NEps1000_RobOpac0_NPrim20_NCams1_NCube1_EEFfix_TrackGrip"
+  data_path: "/media/tsp_jw/data/DINO_WM/fcs_datasets/20260228_1703_NEps1000_RobOpac0_NPrim20_NCams2_NCube1_EEFfix_TrackGrip_ChannelStack_GrGrDiff"
 
   split_ratio: 0.9
 

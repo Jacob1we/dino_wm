@@ -1,0 +1,154 @@
+  W&B Run: https://wandb.ai/jacob-weyer-rwth-aachen-university/dino_wm_planning/runs/nhu36fh2
+  Planning-Config: /home/tsp_jw/Desktop/dino_wm/conf/plan_franka.yaml
+  Gripper-Indices (full 16D): [3, 7, 11, 15]
+  Gripper Open-Prior: AKTIV
+  Action Bounds (Workspace → Normalized):
+    x_s: [0.05, 0.80] → norm [-3.57, 2.61]
+    y_s: [-0.40, 0.45] → norm [-2.64, 2.75]
+    z_s: [0.02, 0.50] → norm [-2.18, 4.68]
+    g_s: [0.00, 1.00] → norm [-1.00, 1.00]
+    x_e: [0.05, 0.80] → norm [-3.57, 2.60]
+    y_e: [-0.40, 0.45] → norm [-2.64, 2.75]
+    z_e: [0.02, 0.50] → norm [-2.17, 4.67]
+    g_e: [0.00, 1.00] → norm [-1.00, 1.00]
+  CEM Action Bounds: lower=[-3.569929599761963, -2.639700174331665, -2.1845734119415283, -0.999972939491272], upper=[2.605971336364746, 2.749276638031006, 4.680386543273926, 0.999972939491272] (erste 4 Dims)
+✓ Setup komplett
+  Modus: ONLINE
+  CEM: samples=300, steps=10, topk=30, horizon=5
+  Action Bounds: AKTIV, var_scale=1
+  Gripper-Quantisierung: AKTIV
+  Suchraum: 80D (H=5 × D=16)
+Server laeuft auf localhost:5555
+Warte auf Client...
+[+] Client: ('127.0.0.1', 32776)
+  W&B Config aktualisiert mit Client-Config (12 Keys)
+  Client-Config empfangen: ['port', 'n_episodes', 'max_steps', 'headless', 'goal_image', 'settle_steps', 'ee_threshold', 'timeout', 'mode', 'log_dir', 'robot_opacity_for_capture', 'scene_config']
+  Reset
+  Goal gesetzt: (224, 224, 3) uint8, ee_pos=[ 0.34181404 -0.04221284  0.07817296]
+    CEM step 1: loss=0.873994
+    CEM step 2: loss=0.825861
+    CEM step 3: loss=0.808832
+    CEM step 4: loss=0.671153
+    CEM step 5: loss=0.646820
+    CEM step 6: loss=0.596705
+    CEM step 7: loss=0.598862
+    CEM step 8: loss=0.572383
+    CEM step 9: loss=0.577033
+    CEM step 10: loss=0.573634
+  Plan: 0.873994 → 0.573634 (34.4% Reduktion, 159.9s)
+    Sub-Action 0: target_ee=[0.415, -0.084, 0.168]
+    CEM step 1: loss=0.706215
+    CEM step 2: loss=0.674352
+    CEM step 3: loss=0.653279
+    CEM step 4: loss=0.622855
+    CEM step 5: loss=0.623095
+    CEM step 6: loss=0.596279
+    CEM step 7: loss=0.596007
+    CEM step 8: loss=0.584428
+    CEM step 9: loss=0.581917
+    CEM step 10: loss=0.583056
+  Plan: 0.706215 → 0.583056 (17.4% Reduktion, 160.5s)
+    Sub-Action 0: target_ee=[0.550, 0.111, 0.115]
+    CEM step 1: loss=0.657815
+    CEM step 2: loss=0.664417
+    CEM step 3: loss=0.659590
+    CEM step 4: loss=0.630145
+    CEM step 5: loss=0.624950
+    CEM step 6: loss=0.619325
+    CEM step 7: loss=0.607872
+    CEM step 8: loss=0.596020
+    CEM step 9: loss=0.586465
+    CEM step 10: loss=0.574992
+  Plan: 0.657815 → 0.574992 (12.6% Reduktion, 159.9s)
+    Sub-Action 0: target_ee=[0.618, -0.000, 0.112]
+    CEM step 1: loss=0.688022
+    CEM step 2: loss=0.702301
+    CEM step 3: loss=0.702671
+    CEM step 4: loss=0.665514
+    CEM step 5: loss=0.664118
+    CEM step 6: loss=0.620543
+    CEM step 7: loss=0.620012
+    CEM step 8: loss=0.630370
+    CEM step 9: loss=0.619249
+    CEM step 10: loss=0.610229
+  Plan: 0.688022 → 0.610229 (11.3% Reduktion, 160.4s)
+    Sub-Action 0: target_ee=[0.451, -0.004, 0.199]
+    CEM step 1: loss=0.640188
+    CEM step 2: loss=0.623787
+    CEM step 3: loss=0.627028
+    CEM step 4: loss=0.608209
+    CEM step 5: loss=0.603546
+    CEM step 6: loss=0.591213
+    CEM step 7: loss=0.584282
+    CEM step 8: loss=0.586765
+    CEM step 9: loss=0.582558
+    CEM step 10: loss=0.578030
+  Plan: 0.640188 → 0.578030 (9.7% Reduktion, 159.9s)
+    Sub-Action 0: target_ee=[0.484, 0.142, 0.174]
+    CEM step 1: loss=0.642530
+    CEM step 2: loss=0.649013
+    CEM step 3: loss=0.645781
+    CEM step 4: loss=0.630716
+    CEM step 5: loss=0.632881
+    CEM step 6: loss=0.616932
+[-] Client getrennt
+Traceback (most recent call last):
+  File "/home/tsp_jw/Desktop/dino_wm/planning_server.py", line 628, in <module>
+    actions, _ = planner.plan(
+  File "/home/tsp_jw/Desktop/dino_wm/planning/cem.py", line 194, in plan
+    i_z_obses, i_zs = self.wm.rollout(
+  File "/home/tsp_jw/Desktop/dino_wm/planning_server.py", line 194, in rollout
+    z_obses, zs = self._model.rollout(chunk_obs, chunk_act)
+  File "/home/tsp_jw/Desktop/dino_wm/models/visual_world_model.py", line 299, in rollout
+    z_pred = self.predict(z[:, -self.num_hist :])
+  File "/home/tsp_jw/Desktop/dino_wm/models/visual_world_model.py", line 145, in predict
+    z = self.predictor(z)
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1532, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1541, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/tsp_jw/Desktop/dino_wm/models/vit.py", line 119, in forward
+    x = self.transformer(x)
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1532, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1541, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/tsp_jw/Desktop/dino_wm/models/vit.py", line 95, in forward
+    x = attn(x) + x
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1532, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1541, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/tsp_jw/Desktop/dino_wm/models/vit.py", line 71, in forward
+    dots = torch.matmul(q, k.transpose(-1, -2)) * self.scale
+KeyboardInterrupt
+Traceback (most recent call last):
+  File "/home/tsp_jw/Desktop/dino_wm/planning_server.py", line 628, in <module>
+    actions, _ = planner.plan(
+  File "/home/tsp_jw/Desktop/dino_wm/planning/cem.py", line 194, in plan
+    i_z_obses, i_zs = self.wm.rollout(
+  File "/home/tsp_jw/Desktop/dino_wm/planning_server.py", line 194, in rollout
+    z_obses, zs = self._model.rollout(chunk_obs, chunk_act)
+  File "/home/tsp_jw/Desktop/dino_wm/models/visual_world_model.py", line 299, in rollout
+    z_pred = self.predict(z[:, -self.num_hist :])
+  File "/home/tsp_jw/Desktop/dino_wm/models/visual_world_model.py", line 145, in predict
+    z = self.predictor(z)
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1532, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1541, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/tsp_jw/Desktop/dino_wm/models/vit.py", line 119, in forward
+    x = self.transformer(x)
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1532, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1541, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/tsp_jw/Desktop/dino_wm/models/vit.py", line 95, in forward
+    x = attn(x) + x
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1532, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1541, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/tsp_jw/Desktop/dino_wm/models/vit.py", line 71, in forward
+    dots = torch.matmul(q, k.transpose(-1, -2)) * self.scale
+KeyboardInterrupt

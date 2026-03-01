@@ -1,0 +1,154 @@
+2026-02-28 19:42:27,441 INFO    MainThread:836562 [wandb_setup.py:_flush():76] Configure stats pid to 836562
+2026-02-28 19:42:27,441 INFO    MainThread:836562 [wandb_setup.py:_flush():76] Loading settings from /home/tsp_jw/.config/wandb/settings
+2026-02-28 19:42:27,442 INFO    MainThread:836562 [wandb_setup.py:_flush():76] Loading settings from /home/tsp_jw/Desktop/dino_wm/wandb/settings
+2026-02-28 19:42:27,442 INFO    MainThread:836562 [wandb_setup.py:_flush():76] Loading settings from environment variables: {'_require_service': 'True'}
+2026-02-28 19:42:27,442 INFO    MainThread:836562 [wandb_setup.py:_flush():76] Inferring run settings from compute environment: {'program_relpath': 'planning_server.py', 'program': '/home/tsp_jw/Desktop/dino_wm/planning_server.py'}
+2026-02-28 19:42:27,442 INFO    MainThread:836562 [wandb_init.py:_log_setup():461] Logging user logs to /home/tsp_jw/Desktop/dino_wm/wandb/run-20260228_194227-zu01cfb6/logs/debug.log
+2026-02-28 19:42:27,442 INFO    MainThread:836562 [wandb_init.py:_log_setup():462] Logging internal logs to /home/tsp_jw/Desktop/dino_wm/wandb/run-20260228_194227-zu01cfb6/logs/debug-internal.log
+2026-02-28 19:42:27,442 INFO    MainThread:836562 [wandb_init.py:init():495] calling init triggers
+2026-02-28 19:42:27,442 INFO    MainThread:836562 [wandb_init.py:init():498] wandb.init called with sweep_config: {}
+config: {'model_name': '260228/17-03', 'model_path': '/home/tsp_jw/Desktop/dino_wm/outputs/260228/17-03/', 'model_epoch': 'latest', 'mode': 'online', 'goal_H': 5, 'num_samples': 300, 'opt_steps': 5, 'topk': 30, 'action_dim': 16, 'base_action_dim': 8, 'frameskip': 2, 'search_dim': 80, 'training_config': {'ckpt_base_path': './', 'training': {'seed': 0, 'epochs': 100, 'batch_size': 4, 'save_every_x_epoch': 1, 'reconstruct_every_x_batch': 500, 'num_reconstruct_samples': 6, 'encoder_lr': 1e-06, 'decoder_lr': 0.0001, 'predictor_lr': 0.0002, 'action_encoder_lr': 0.0005}, 'img_size': 224, 'frameskip': 2, 'concat_dim': 1, 'normalize_action': True, 'action_emb_dim': 10, 'num_action_repeat': 1, 'proprio_emb_dim': 10, 'num_proprio_repeat': 1, 'num_hist': 6, 'num_pred': 1, 'has_predictor': True, 'has_decoder': True, 'model': {'_target_': 'models.visual_world_model.VWorldModel', 'image_size': 224, 'num_hist': 6, 'num_pred': 1, 'train_encoder': False, 'train_predictor': True, 'train_decoder': True}, 'debug': False, 'plan_settings': {'plan_cfg_path': None, 'planner': ['gd', 'cem'], 'goal_source': ['dset', 'random_state'], 'goal_H': [5], 'alpha': [0.1, 1]}, 'env': {'name': 'franka_cube_stack', 'args': [], 'kwargs': {}, 'action_dim': 8, 'state_dim': 14, 'proprio_dim': 3, 'dataset': {'_target_': 'datasets.franka_cube_stack_dset.load_franka_cube_stack_slice_train_val', 'n_rollout': None, 'normalize_action': True, 'data_path': '/media/tsp_jw/data/DINO_WM/fcs_datasets/20260228_1411_NEps1000_RobOpac0_NPrim20_NCams2_NCube1_EEFfix_TrackGrip', 'split_ratio': 0.9, 'transform': {'_target_': 'datasets.img_transforms.default_transform', 'img_size': [224, 224]}}, 'decoder_path': None, 'num_workers': 2}, 'encoder': {'_target_': 'models.dino.DinoV2Encoder', 'name': 'dinov2_vits14', 'feature_key': 'x_norm_patchtokens'}, 'action_encoder': {'_target_': 'models.proprio.ProprioceptiveEmbedding', 'num_frames': 1, 'tubelet_size': 1, 'use_3d_pos': False}, 'proprio_encoder': {'_target_': 'models.proprio.ProprioceptiveEmbedding', 'num_frames': 2, 'tubelet_size': 1, 'use_3d_pos': False}, 'decoder': {'_target_': 'models.vqvae.VQVAE', 'channel': 384, 'n_embed': 2048, 'n_res_block': 4, 'n_res_channel': 128, 'quantize': False}, 'predictor': {'_target_': 'models.vit.ViTPredictor', 'depth': 6, 'heads': 16, 'mlp_dim': 2048, 'dropout': 0.1, 'emb_dropout': 0, 'pool': 'mean'}, 'saved_folder': '/home/tsp_jw/Desktop/dino_wm/outputs/260228/17-03', 'effective_batch_size': 4, 'gpu_batch_size': 4, 'wandb_run_id': 'u0p2u0vj'}, 'port': 5555, 'chunk_size': None, 'n_sub_actions': 1}
+2026-02-28 19:42:27,442 INFO    MainThread:836562 [wandb_init.py:init():548] starting backend
+2026-02-28 19:42:27,442 INFO    MainThread:836562 [wandb_init.py:init():552] setting up manager
+2026-02-28 19:42:27,444 INFO    MainThread:836562 [backend.py:_multiprocessing_setup():97] multiprocessing start_methods=fork,spawn,forkserver, using: spawn
+2026-02-28 19:42:27,445 INFO    MainThread:836562 [wandb_init.py:init():558] backend started and connected
+2026-02-28 19:42:27,449 INFO    MainThread:836562 [wandb_init.py:init():636] updated telemetry
+2026-02-28 19:42:27,452 INFO    MainThread:836562 [wandb_init.py:init():667] communicating run to backend with 30 second timeout
+2026-02-28 19:42:27,949 INFO    MainThread:836562 [wandb_run.py:_on_init():1982] communicating current version
+2026-02-28 19:42:28,112 INFO    MainThread:836562 [wandb_run.py:_on_init():1986] got version response upgrade_message: "wandb version 0.25.0 is available!  To upgrade, please run:\n $ pip install wandb --upgrade"
+
+2026-02-28 19:42:28,112 INFO    MainThread:836562 [wandb_init.py:init():700] starting run threads in backend
+2026-02-28 19:42:33,123 INFO    MainThread:836562 [wandb_run.py:_console_start():1962] atexit reg
+2026-02-28 19:42:33,123 INFO    MainThread:836562 [wandb_run.py:_redirect():1820] redirect: SettingsConsole.WRAP_RAW
+2026-02-28 19:42:33,123 INFO    MainThread:836562 [wandb_run.py:_redirect():1885] Wrapping output streams.
+2026-02-28 19:42:33,123 INFO    MainThread:836562 [wandb_run.py:_redirect():1907] Redirects installed.
+2026-02-28 19:42:33,124 INFO    MainThread:836562 [wandb_init.py:init():732] run started, returning control to user process
+2026-02-28 19:50:42,175 INFO    MainThread:836562 [wandb_run.py:_config_callback():1152] config_cb None None {'client': {'port': 5555, 'n_episodes': 5, 'max_steps': 50, 'headless': False, 'goal_image': '/media/tsp_jw/data/DINO_WM/fcs_datasets/20260228_1411_NEps1000_RobOpac0_NPrim20_NCams2_NCube1_EEFfix_TrackGrip:2:-1', 'settle_steps': 20, 'ee_threshold': 0.005, 'timeout': 1000, 'mode': 'online', 'log_dir': None, 'robot_opacity_for_capture': 0.0, 'scene_config': {'seed': 111, 'cube_size': 0.05, 'n_cubes': 1, 'min_dist_factor': 1.5, 'max_placement_tries': 200, 'yaw_range': [0.0, 0.0], 'scene_width': 0.6, 'scene_length': 0.75, 'plane_lift': 0.001, 'scene': {'width': 0.6, 'length': 0.75, 'plane_lift': 0.001}, 'robot_base_clearance': 0.3, 'robot_max_reach': 0.75, 'robot_min_reach': 0.3, 'cam_resolution': [224, 224], 'cam_frequency': 20, 'robot_opacity_for_capture': 0.0, 'cameras': [{'name': 'front_right', 'position': [1.6, -2.0, 1.27], 'euler': [66.0, 0.0, 32.05]}, {'name': 'front_left', 'position': [1.6, 2.0, 1.27], 'euler': [66.0, 0.0, 147.95]}], 'visual_randomization': {'enabled': False, 'fixed_cube_color': [0.9, 0.1, 0.1], 'fixed_plane_rgba': [0.82, 0.82, 0.82, 1.0], 'fixed_light': {'position': [0.4, 0.0, 2.0], 'intensity': 8000.0, 'radius': 0.5}}, 'vis_rand_enabled': False, 'fixed_cube_color': [0.9, 0.1, 0.1], 'fixed_plane_rgba': [0.82, 0.82, 0.82, 1.0], 'fixed_light': {'position': [0.4, 0.0, 2.0], 'intensity': 8000.0, 'radius': 0.5}, 'dataset_path': '/media/tsp_jw/data/DINO_WM/fcs_datasets', 'dataset_name': 'NEps1000_RobOpac0_NPrim20_NCams2_FuseChStack_NCube1_EEFfix_TrackGrip', 'controller': {'trajectory_resolution': 1.0, 'air_speed_multiplier': 1.0, 'height_adaptive_speed': False, 'critical_height_threshold': 0.1, 'critical_speed_factor': 0.5, 'air_dt': 1.0, 'critical_dt': 0.01, 'wait_dt': 0.5, 'grip_dt': 0.15, 'release_dt': 0.15, 'guarantee_final_position': True, 'guarantee_phases': [1, 6], 'eef_orientation_mode': 'fixed', 'fixed_eef_orientation': [0.0, 0.0, 1.0, 0.0], 'wrist_hard_lock': False}}}}
+2026-02-28 20:12:39,572 INFO    MainThread:836562 [wandb_run.py:_config_callback():1152] config_cb None None {'client': {'port': 5555, 'n_episodes': 5, 'max_steps': 50, 'headless': False, 'goal_image': '/media/tsp_jw/data/DINO_WM/fcs_datasets/20260228_1411_NEps1000_RobOpac0_NPrim20_NCams2_NCube1_EEFfix_TrackGrip:2:-1', 'settle_steps': 20, 'ee_threshold': 0.005, 'timeout': 1000, 'mode': 'online', 'log_dir': None, 'robot_opacity_for_capture': 0.0, 'scene_config': {'seed': 111, 'cube_size': 0.05, 'n_cubes': 1, 'min_dist_factor': 1.5, 'max_placement_tries': 200, 'yaw_range': [0.0, 0.0], 'scene_width': 0.6, 'scene_length': 0.75, 'plane_lift': 0.001, 'scene': {'width': 0.6, 'length': 0.75, 'plane_lift': 0.001}, 'robot_base_clearance': 0.3, 'robot_max_reach': 0.75, 'robot_min_reach': 0.3, 'cam_resolution': [224, 224], 'cam_frequency': 20, 'robot_opacity_for_capture': 0.0, 'cameras': [{'name': 'front_right', 'position': [1.6, -2.0, 1.27], 'euler': [66.0, 0.0, 32.05]}, {'name': 'front_left', 'position': [1.6, 2.0, 1.27], 'euler': [66.0, 0.0, 147.95]}], 'visual_randomization': {'enabled': False, 'fixed_cube_color': [0.9, 0.1, 0.1], 'fixed_plane_rgba': [0.82, 0.82, 0.82, 1.0], 'fixed_light': {'position': [0.4, 0.0, 2.0], 'intensity': 8000.0, 'radius': 0.5}}, 'vis_rand_enabled': False, 'fixed_cube_color': [0.9, 0.1, 0.1], 'fixed_plane_rgba': [0.82, 0.82, 0.82, 1.0], 'fixed_light': {'position': [0.4, 0.0, 2.0], 'intensity': 8000.0, 'radius': 0.5}, 'dataset_path': '/media/tsp_jw/data/DINO_WM/fcs_datasets', 'dataset_name': 'NEps1000_RobOpac0_NPrim20_NCams2_FuseChStack_NCube1_EEFfix_TrackGrip', 'controller': {'trajectory_resolution': 1.0, 'air_speed_multiplier': 1.0, 'height_adaptive_speed': False, 'critical_height_threshold': 0.1, 'critical_speed_factor': 0.5, 'air_dt': 1.0, 'critical_dt': 0.01, 'wait_dt': 0.5, 'grip_dt': 0.15, 'release_dt': 0.15, 'guarantee_final_position': True, 'guarantee_phases': [1, 6], 'eef_orientation_mode': 'fixed', 'fixed_eef_orientation': [0.0, 0.0, 1.0, 0.0], 'wrist_hard_lock': False}}}}
+2026-02-28 20:21:17,413 INFO    MainThread:836562 [wandb_run.py:_config_callback():1152] config_cb None None {'client': {'port': 5555, 'n_episodes': 5, 'max_steps': 50, 'headless': False, 'goal_image': '/media/tsp_jw/data/DINO_WM/fcs_datasets/20260228_1411_NEps1000_RobOpac0_NPrim20_NCams2_NCube1_EEFfix_TrackGrip:2:-1', 'settle_steps': 20, 'ee_threshold': 0.005, 'timeout': 1000, 'mode': 'online', 'log_dir': None, 'robot_opacity_for_capture': 0.0, 'scene_config': {'seed': 111, 'cube_size': 0.05, 'n_cubes': 1, 'min_dist_factor': 1.5, 'max_placement_tries': 200, 'yaw_range': [0.0, 0.0], 'scene_width': 0.6, 'scene_length': 0.75, 'plane_lift': 0.001, 'scene': {'width': 0.6, 'length': 0.75, 'plane_lift': 0.001}, 'robot_base_clearance': 0.3, 'robot_max_reach': 0.75, 'robot_min_reach': 0.3, 'cam_resolution': [224, 224], 'cam_frequency': 20, 'robot_opacity_for_capture': 0.0, 'cameras': [{'name': 'front_right', 'position': [1.6, -2.0, 1.27], 'euler': [66.0, 0.0, 32.05]}, {'name': 'front_left', 'position': [1.6, 2.0, 1.27], 'euler': [66.0, 0.0, 147.95]}], 'fusion': {'enabled': True, 'mode': 'channel_stack', 'channel_mode': 'gray_gray_diff', 'primary_camera': 0, 'secondary_camera': 1, 'alpha': 0.5}, 'visual_randomization': {'enabled': False, 'fixed_cube_color': [0.9, 0.1, 0.1], 'fixed_plane_rgba': [0.82, 0.82, 0.82, 1.0], 'fixed_light': {'position': [0.4, 0.0, 2.0], 'intensity': 8000.0, 'radius': 0.5}}, 'vis_rand_enabled': False, 'fixed_cube_color': [0.9, 0.1, 0.1], 'fixed_plane_rgba': [0.82, 0.82, 0.82, 1.0], 'fixed_light': {'position': [0.4, 0.0, 2.0], 'intensity': 8000.0, 'radius': 0.5}, 'dataset_path': '/media/tsp_jw/data/DINO_WM/fcs_datasets', 'dataset_name': 'NEps1000_RobOpac0_NPrim20_NCams2_FuseChStack_NCube1_EEFfix_TrackGrip', 'controller': {'trajectory_resolution': 1.0, 'air_speed_multiplier': 1.0, 'height_adaptive_speed': False, 'critical_height_threshold': 0.1, 'critical_speed_factor': 0.5, 'air_dt': 1.0, 'critical_dt': 0.01, 'wait_dt': 0.5, 'grip_dt': 0.15, 'release_dt': 0.15, 'guarantee_final_position': True, 'guarantee_phases': [1, 6], 'eef_orientation_mode': 'fixed', 'fixed_eef_orientation': [0.0, 0.0, 1.0, 0.0], 'wrist_hard_lock': False}}}}
+2026-02-28 20:23:49,880 INFO    MainThread:836562 [wandb_run.py:_config_callback():1152] config_cb None None {'client': {'port': 5555, 'n_episodes': 5, 'max_steps': 50, 'headless': False, 'goal_image': '/media/tsp_jw/data/DINO_WM/fcs_datasets/20260228_1411_NEps1000_RobOpac0_NPrim20_NCams2_NCube1_EEFfix_TrackGrip:2:-1', 'settle_steps': 20, 'ee_threshold': 0.005, 'timeout': 1000, 'mode': 'online', 'log_dir': None, 'robot_opacity_for_capture': 0.0, 'scene_config': {'seed': 111, 'cube_size': 0.05, 'n_cubes': 1, 'min_dist_factor': 1.5, 'max_placement_tries': 200, 'yaw_range': [0.0, 0.0], 'scene_width': 0.6, 'scene_length': 0.75, 'plane_lift': 0.001, 'scene': {'width': 0.6, 'length': 0.75, 'plane_lift': 0.001}, 'robot_base_clearance': 0.3, 'robot_max_reach': 0.75, 'robot_min_reach': 0.3, 'cam_resolution': [224, 224], 'cam_frequency': 20, 'robot_opacity_for_capture': 0.0, 'cameras': [{'name': 'front_right', 'position': [1.6, -2.0, 1.27], 'euler': [66.0, 0.0, 32.05]}, {'name': 'front_left', 'position': [1.6, 2.0, 1.27], 'euler': [66.0, 0.0, 147.95]}], 'fusion': {'enabled': True, 'mode': 'channel_stack', 'channel_mode': 'gray_gray_diff', 'primary_camera': 0, 'secondary_camera': 1, 'alpha': 0.5}, 'visual_randomization': {'enabled': False, 'fixed_cube_color': [0.9, 0.1, 0.1], 'fixed_plane_rgba': [0.82, 0.82, 0.82, 1.0], 'fixed_light': {'position': [0.4, 0.0, 2.0], 'intensity': 8000.0, 'radius': 0.5}}, 'vis_rand_enabled': False, 'fixed_cube_color': [0.9, 0.1, 0.1], 'fixed_plane_rgba': [0.82, 0.82, 0.82, 1.0], 'fixed_light': {'position': [0.4, 0.0, 2.0], 'intensity': 8000.0, 'radius': 0.5}, 'dataset_path': '/media/tsp_jw/data/DINO_WM/fcs_datasets', 'dataset_name': 'NEps1000_RobOpac0_NPrim20_NCams2_FuseChStack_NCube1_EEFfix_TrackGrip', 'controller': {'trajectory_resolution': 1.0, 'air_speed_multiplier': 1.0, 'height_adaptive_speed': False, 'critical_height_threshold': 0.1, 'critical_speed_factor': 0.5, 'air_dt': 1.0, 'critical_dt': 0.01, 'wait_dt': 0.5, 'grip_dt': 0.15, 'release_dt': 0.15, 'guarantee_final_position': True, 'guarantee_phases': [1, 6], 'eef_orientation_mode': 'fixed', 'fixed_eef_orientation': [0.0, 0.0, 1.0, 0.0], 'wrist_hard_lock': False}}}}
+2026-02-28 20:25:18,836 INFO    MainThread:836562 [wandb_run.py:_config_callback():1152] config_cb None None {'client': {'port': 5555, 'n_episodes': 5, 'max_steps': 50, 'headless': False, 'goal_image': '/media/tsp_jw/data/DINO_WM/fcs_datasets/20260228_1411_NEps1000_RobOpac0_NPrim20_NCams2_NCube1_EEFfix_TrackGrip:2:-1', 'settle_steps': 20, 'ee_threshold': 0.005, 'timeout': 1000, 'mode': 'online', 'log_dir': None, 'robot_opacity_for_capture': 0.0, 'scene_config': {'seed': 111, 'cube_size': 0.05, 'n_cubes': 1, 'min_dist_factor': 1.5, 'max_placement_tries': 200, 'yaw_range': [0.0, 0.0], 'scene_width': 0.6, 'scene_length': 0.75, 'plane_lift': 0.001, 'scene': {'width': 0.6, 'length': 0.75, 'plane_lift': 0.001}, 'robot_base_clearance': 0.3, 'robot_max_reach': 0.75, 'robot_min_reach': 0.3, 'cam_resolution': [224, 224], 'cam_frequency': 20, 'robot_opacity_for_capture': 0.0, 'cameras': [{'name': 'front_right', 'position': [1.6, -2.0, 1.27], 'euler': [66.0, 0.0, 32.05]}, {'name': 'front_left', 'position': [1.6, 2.0, 1.27], 'euler': [66.0, 0.0, 147.95]}], 'fusion': {'enabled': True, 'mode': 'channel_stack', 'channel_mode': 'gray_gray_diff', 'primary_camera': 0, 'secondary_camera': 1, 'alpha': 0.5}, 'visual_randomization': {'enabled': False, 'fixed_cube_color': [0.9, 0.1, 0.1], 'fixed_plane_rgba': [0.82, 0.82, 0.82, 1.0], 'fixed_light': {'position': [0.4, 0.0, 2.0], 'intensity': 8000.0, 'radius': 0.5}}, 'vis_rand_enabled': False, 'fixed_cube_color': [0.9, 0.1, 0.1], 'fixed_plane_rgba': [0.82, 0.82, 0.82, 1.0], 'fixed_light': {'position': [0.4, 0.0, 2.0], 'intensity': 8000.0, 'radius': 0.5}, 'dataset_path': '/media/tsp_jw/data/DINO_WM/fcs_datasets', 'dataset_name': 'NEps1000_RobOpac0_NPrim20_NCams2_FuseChStack_NCube1_EEFfix_TrackGrip', 'controller': {'trajectory_resolution': 1.0, 'air_speed_multiplier': 1.0, 'height_adaptive_speed': False, 'critical_height_threshold': 0.1, 'critical_speed_factor': 0.5, 'air_dt': 1.0, 'critical_dt': 0.01, 'wait_dt': 0.5, 'grip_dt': 0.15, 'release_dt': 0.15, 'guarantee_final_position': True, 'guarantee_phases': [1, 6], 'eef_orientation_mode': 'fixed', 'fixed_eef_orientation': [0.0, 0.0, 1.0, 0.0], 'wrist_hard_lock': False}}}}
+2026-03-01 01:41:50,285 INFO    MainThread:836562 [wandb_run.py:_finish():1728] finishing run jacob-weyer-rwth-aachen-university/dino_wm_planning/zu01cfb6
+2026-03-01 01:41:50,285 INFO    MainThread:836562 [wandb_run.py:_atexit_cleanup():1931] got exitcode: 0
+2026-03-01 01:41:50,285 INFO    MainThread:836562 [wandb_run.py:_restore():1914] restore
+2026-03-01 01:41:50,285 INFO    MainThread:836562 [wandb_run.py:_restore():1920] restore done
+2026-03-01 01:41:50,296 INFO    MainThread:836562 [wandb_run.py:_on_finish():2221] got exit ret: file_counts {
+  wandb_count: 1
+}
+pusher_stats {
+  uploaded_bytes: 870
+  total_bytes: 870
+}
+
+2026-03-01 01:41:50,625 INFO    MainThread:836562 [wandb_run.py:_on_finish():2221] got exit ret: file_counts {
+  wandb_count: 1
+}
+pusher_stats {
+  uploaded_bytes: 870
+  total_bytes: 870
+}
+
+2026-03-01 01:41:51,426 INFO    MainThread:836562 [wandb_run.py:_on_finish():2221] got exit ret: file_counts {
+  wandb_count: 1
+}
+pusher_stats {
+  uploaded_bytes: 870
+  total_bytes: 870
+}
+
+2026-03-01 01:41:52,076 INFO    MainThread:836562 [wandb_run.py:_on_finish():2221] got exit ret: file_counts {
+  wandb_count: 5
+}
+pusher_stats {
+  uploaded_bytes: 870
+  total_bytes: 86857
+}
+
+2026-03-01 01:41:52,179 INFO    MainThread:836562 [wandb_run.py:_on_finish():2221] got exit ret: file_counts {
+  wandb_count: 6
+}
+pusher_stats {
+  uploaded_bytes: 870
+  total_bytes: 93243
+}
+
+2026-03-01 01:41:52,284 INFO    MainThread:836562 [wandb_run.py:_on_finish():2221] got exit ret: file_counts {
+  wandb_count: 6
+}
+pusher_stats {
+  uploaded_bytes: 870
+  total_bytes: 93243
+}
+
+2026-03-01 01:41:52,386 INFO    MainThread:836562 [wandb_run.py:_on_finish():2221] got exit ret: file_counts {
+  wandb_count: 6
+}
+pusher_stats {
+  uploaded_bytes: 93243
+  total_bytes: 93243
+}
+
+2026-03-01 01:41:52,489 INFO    MainThread:836562 [wandb_run.py:_on_finish():2221] got exit ret: file_counts {
+  wandb_count: 6
+}
+pusher_stats {
+  uploaded_bytes: 93243
+  total_bytes: 93243
+}
+
+2026-03-01 01:41:52,593 INFO    MainThread:836562 [wandb_run.py:_on_finish():2221] got exit ret: file_counts {
+  wandb_count: 6
+}
+pusher_stats {
+  uploaded_bytes: 93243
+  total_bytes: 93243
+}
+
+2026-03-01 01:41:52,696 INFO    MainThread:836562 [wandb_run.py:_on_finish():2221] got exit ret: file_counts {
+  wandb_count: 6
+}
+pusher_stats {
+  uploaded_bytes: 93243
+  total_bytes: 93243
+}
+
+2026-03-01 01:41:52,798 INFO    MainThread:836562 [wandb_run.py:_on_finish():2221] got exit ret: file_counts {
+  wandb_count: 6
+}
+pusher_stats {
+  uploaded_bytes: 93243
+  total_bytes: 93243
+}
+
+2026-03-01 01:41:52,901 INFO    MainThread:836562 [wandb_run.py:_on_finish():2221] got exit ret: file_counts {
+  wandb_count: 6
+}
+pusher_stats {
+  uploaded_bytes: 93243
+  total_bytes: 93243
+}
+
+2026-03-01 01:41:53,756 INFO    MainThread:836562 [wandb_run.py:_on_finish():2221] got exit ret: file_counts {
+  wandb_count: 6
+}
+pusher_stats {
+  uploaded_bytes: 93243
+  total_bytes: 93243
+}
+
+2026-03-01 01:41:54,159 INFO    MainThread:836562 [wandb_run.py:_on_finish():2221] got exit ret: done: true
+exit_result {
+}
+file_counts {
+  wandb_count: 6
+}
+pusher_stats {
+  uploaded_bytes: 93243
+  total_bytes: 93243
+}
+local_info {
+}
+
+2026-03-01 01:41:55,274 INFO    MainThread:836562 [wandb_run.py:_footer_history_summary_info():3305] rendering history
+2026-03-01 01:41:55,278 INFO    MainThread:836562 [wandb_run.py:_footer_history_summary_info():3337] rendering summary
+2026-03-01 01:41:55,283 INFO    MainThread:836562 [wandb_run.py:_footer_sync_info():3261] logging synced files

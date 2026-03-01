@@ -17,6 +17,9 @@
 9. [Training starten](#9-training-starten)
 10. [Glossar](#10-glossar)
 11. [🚨 KRITISCH: Action-Observation Temporale Alignment-Analyse (20.02.2026)](#-kritisch-action-observation-temporale-alignment-analyse-20022026)
+12. [Multi-Kamera-Analyse: Tiefen-Ambiguität bei Single-Camera Planning](#11-multi-kamera-analyse-tiefen-ambiguität-bei-single-camera-planning-26022026)
+13. [Multi-Kamera-Bildfusion: 2 Kameras → 1 RGB-Bild](#12-multi-kamera-bildfusion-2-kameras--1-rgb-bild-28022026)
+14. [⚠️ ZENTRALE HERAUSFORDERUNG: Tiefenambiguität & Analyse Depth-Training](#13--zentrale-herausforderung-tiefenambiguität-als-fundamentales-problem-der-3d-manipulation-01032026)
 
 ---
 
@@ -3198,6 +3201,8 @@ Dokumentation aktualisiert:
 
 ## 11. Multi-Kamera-Analyse: Tiefen-Ambiguität bei Single-Camera Planning (26.02.2026)
 
+> **⚠️ ZENTRALE HERAUSFORDERUNG:** Die Tiefenambiguität ist das fundamentale, bisher ungelöste Problem bei der 3D-Anwendung des DINO World Models. Die Referenz-Implementierung (Zhou et al., 2025) umgeht dieses Problem, weil die demonstrierten Tasks (Rope, PushT) essentiell 2D sind. Beim Franka Cube Stacking — einem inhärent 3D-Task — wird die fehlende Tiefeninformation zum limitierenden Faktor. Siehe Abschnitt 13 für die vollständige Analyse inkl. Bewertung von Depth-Training.
+
 ### 11.1 Problemstellung
 
 Beim Planning des Franka Cube Stacking Tasks wurde beobachtet, dass der CEM-Planner **Actions plant, bei denen der EEF den Cube aus Kamera-Perspektive korrekt trifft, aber in der Tiefe (senkrecht zur Bildebene) systematisch daneben liegt**. Das Problem ist eine fundamentale Eigenschaft der Single-Camera-DINO-WM-Architektur.
@@ -3679,3 +3684,230 @@ Beispiel: `20260228_1500_NEps1000_RobOpac0_NPrim20_NCams2_FuseChStack_NCube1_EEF
 
 - `NCams2`: 2 Kameras wurden gerendert
 - `FuseChStack` / `FuseSbS` / `FuseAlpha`: Fusionsmodus
+
+---
+
+## 13. ⚠️ ZENTRALE HERAUSFORDERUNG: Tiefenambiguität als fundamentales Problem der 3D-Manipulation (01.03.2026)
+
+> **Die Tiefenambiguität ist DAS zentrale, noch ungelöste Problem bei der Anwendung des DINO World Models auf 3D-Manipulationsaufgaben.** Alle bisherigen Ansätze (Kamera-Fusion, Alpha-Gewichtung, CEM-Bounds) sind Mitigationen — keine vollständige Lösung.
+
+### 13.1 Zusammenfassung des Problems
+
+Das DINO World Model (DINOv2 ViT-S/14) arbeitet auf **2D-Bildern**. Es extrahiert Patch-Features aus einer projizierten Ansicht der 3D-Szene. Aus einer einzelnen Kamera-Ansicht ist die **Tiefe entlang der optischen Achse** grundsätzlich nicht auflösbar:
+
+```
+Kamera-Perspektive (front_right, ~32° Azimut):
+
+        Kamera
+          │ optische Achse
+          │
+          ▼
+    ┌─────────────────┐
+    │     EEF?        │     ← EEF könnte ÜBERALL entlang
+    │      ↕          │        dieser Achse stehen und
+    │    [Cube]       │        in der Projektion trotzdem
+    │      ↕          │        "über" dem Cube erscheinen
+    │     EEF?        │
+    └─────────────────┘
+    Bildebene (2D-Projektion)
+```
+
+**Konsequenz für CEM-Planning:** Der Planner optimiert die DINO-Embedding-Distanz zum Goal-Bild. Er findet Actions, bei denen der EEF im **2D-projizierten Bild** korrekt über dem Cube steht — aber in der **3D-Realität** um Zentimeter daneben liegt. Besonders kritisch bei:
+
+- **Greifen** (z muss auf ±1cm genau sein)
+- **Stapeln** (3D-Positionierung über dem Ziel-Cube)
+- **Alle Phasen** mit Bewegung entlang der optischen Achse
+
+### 13.2 Schlüssel-Erkenntnis: Referenz-Implementierung (Deformable Env) umgeht das Problem
+
+> **4 Kameras + 4 Tiefenbilder werden gerendert and gespeichert — aber NUR 1 Kamera-Perspektive wird für Training und Inference verwendet. KEINE Fusion. KEIN Multi-View-Training. KEINE Tiefenbilder.**
+
+Die Analyse des Deformable-Environment (Rope/Granular Media, siehe Abschnitt 11.3) zeigt:
+
+| Aspekt | Deformable Env | Franka Cube Stacking |
+|--------|---------------|---------------------|
+| **Kameras gerendert** | 4 (45°, 135°, 225°, 315°) | 2 (front_right, front_left) |
+| **Kameras im Training genutzt** | **1** (`camera_view: 1`) | 1 oder 2 (mit Fusion) |
+| **Tiefenbilder generiert** | Ja (in H5 gespeichert) | Ja (Isaac Sim `get_depth()`) |
+| **Tiefenbilder im Training genutzt** | **NEIN** | **NEIN** |
+| **Fusion** | **KEINE** | Channel-Stacking (Abschnitt 12) |
+| **Warum es trotzdem funktioniert** | Tasks sind **essentiell 2D** (flach auf Tisch) | Tasks sind **inhärent 3D** → Tiefe kritisch |
+
+**Code-Nachweis** (Deformable Env):
+```python
+# FlexEnvWrapper.py — step_multiple(): EINE Kamera selektiert
+obs_img = imgs_list[-1][self.camera_view][..., :3][..., ::-1]
+#                       ^^^^^^^^^^^^^^^^ NUR self.camera_view (= 1)
+
+# FlexEnvWrapper.py — prepare(): Tiefe wird VERWORFEN
+rgb, depth = self.get_one_view_img()
+# depth wird NICHT in obs aufgenommen, NICHT an Dataset weitergegeben
+
+# rope.yaml: camera_view: 1  ← fest auf eine Kamera
+```
+
+**Fazit:** Die Referenz-Implementierung (Zhou et al., 2025) hat das Multi-Camera-Problem **nicht gelöst** — sie hat es **nicht gehabt**, weil die demonstrierten Tasks keine Tiefeninformation benötigen. Beim Übergang auf 3D-Manipulation (Franka Cube Stacking) tritt die Tiefenambiguität erstmals als limitierender Faktor auf.
+
+### 13.3 Analyse: Training auf Tiefenbildern — Ist das sinnvoll?
+
+Da Isaac Sim perfekte (rauschfreie) Tiefenbilder liefert und die Tiefenambiguität das Kernproblem ist, liegt die Frage nahe: **Warum nicht einfach auf Tiefenbildern trainieren?**
+
+#### 13.3.1 DINOv2 und Tiefenbilder: Fundamentale Inkompatibilität
+
+DINOv2 ViT-S/14 ist das **Rückgrat** des World Models. Es ist unter Self-Supervised Learning auf **ImageNet** trainiert — ausschließlich auf **natürlichen RGB-Bildern**:
+
+```python
+# models/dino.py — DINOv2 Encoder (FROZEN)
+class DinoEncoder(nn.Module):
+    def __init__(self, freeze=True):
+        self.model = torch.hub.load('facebookresearch/dinov2', 'dinov2_vits14')
+        if freeze:
+            for param in self.model.parameters():
+                param.requires_grad = False  # ← Weights EINGEFROREN
+```
+
+**Konsequenzen für reines Depth-Training:**
+
+| Aspekt | RGB-Bilder (normal) | Reine Tiefenbilder |
+|--------|---------------------|-------------------|
+| **DINOv2-Feature-Qualität** | Exzellent (pretrained) | **Sehr schlecht** (OOD) |
+| **Patch-Embedding** | Optimiert für RGB-Texturen | Sieht nur Gradienten/Kanten |
+| **Semantisches Verständnis** | Objekt-/Szenen-Erkennung | Keine semantische Segmentierung |
+| **Input-Statistik** | `mean=[0.485, 0.456, 0.406]` ImageNet | Depth hat völlig andere Verteilung |
+| **Self-Attention-Muster** | Gelernt für natürliche Bilder | Nicht übertragbar auf Depth |
+
+**Warum?** Die Patch-Embedding-Schicht von DINOv2 ist ein `nn.Conv2d(3, 384, kernel_size=14, stride=14)`. Die **gelernten Convolutional Filter** erwarten RGB-Texturen, Kanten und Farbgradienten — Muster, die in natürlichen Bildern vorkommen. Tiefenbilder haben eine fundamental andere Statistik:
+
+- **Depth**: Glatte Flächen mit abrupten Kanten an Objektgrenzen, wenig Textur
+- **RGB**: Reichhaltige Texturen, Farben, Schatten, Reflexionen
+
+→ Die extrahierten Patch-Features wären für Tiefenbilder **nicht-informativ** (Out-of-Distribution).
+
+#### 13.3.2 Option: DINOv2 unfreezing für Depth
+
+Man könnte die DINOv2-Weights **unfreezen** und auf Tiefenbilder fine-tunen:
+
+```python
+# Hypothetisch: DINOv2 unfreezen
+class DinoEncoder(nn.Module):
+    def __init__(self, freeze=False):  # freeze=False
+        self.model = torch.hub.load('facebookresearch/dinov2', 'dinov2_vits14')
+        # Alle Weights werden trainiert → kann Depth lernen
+```
+
+**Probleme:**
+1. **Verlust der semantischen Features**: Die ImageNet-pretrained Weights enthalten reichhaltiges Wissen über Objekte, Szenen, räumliche Beziehungen. Durch Fine-Tuning auf Depth gehen diese Features verloren.
+2. **Overfitting-Risiko**: Der FCS-Datensatz hat ~1000 Episoden × 20 Frames = 20.000 Bilder. DINOv2 ViT-S/14 hat 22M Parameter — massives Overfitting-Risiko bei kleinem Datensatz.
+3. **Training-Kosten**: DINOv2 ist der größte Teil des Modells. Unfreezing vervielfacht GPU-Memory und Training-Dauer.
+4. **Kein Transfer auf Real-World**: Synthetische Depth-Bilder (Isaac Sim) sind perfekt — echte Depth-Sensoren (Intel RealSense, etc.) haben Rauschen, Löcher, Reflexionen.
+
+**Bewertung:** Nicht empfohlen. Der Informationsverlust überwiegt den Gewinn.
+
+#### 13.3.3 Option: Depth-pretrained Encoder (Depth Anything, MiDaS)
+
+Statt DINOv2 einen auf Tiefenbilder pretrained Encoder verwenden:
+
+| Modell | Pretrained auf | Architecture | Patch-Features |
+|--------|---------------|-------------|----------------|
+| **DINOv2** | ImageNet RGB | ViT-S/14 | 256 × 384 |
+| **Depth Anything v2** | Depth-annotierte Bilder | ViT-S/14 | 256 × 384 |
+| **MiDaS v3.1** | Depth + RGB (multi-task) | ViT | variabel |
+
+**Problem:** Diese Modelle sind für **Depth-Estimation** (RGB → Depth) trainiert, nicht für **Depth-Understanding** (Depth → Features). Ihre internen Repräsentationen sind auf das Mapping von RGB-Texturen zu Tiefen optimiert — sie extrahieren keine semantischen Scene-Features aus Depth-Inputs.
+
+Außerdem: Die gesamte DINO-WM-Pipeline (Predictor, Decoder, Objectives, CEM) ist auf die **384-dim Patch-Feature-Struktur** von DINOv2 abgestimmt. Ein Encoder-Wechsel würde massive Anpassungen erfordern.
+
+**Bewertung:** Theoretisch möglich, aber hoher Aufwand und unsicherer Nutzen.
+
+#### 13.3.4 Option: Hybrid-Kanäle (RGB + Depth in 3 Kanälen) ⭐
+
+Der vielversprechendste Ansatz kombiniert RGB- und Depth-Information in den 3 Kanälen:
+
+```
+┌────────────────────────┐
+│ R = Depth (cam_0)      │     Tiefenbild liefert explizite
+│ G = Gray(cam_0 RGB)    │     3D-Geometrie, Grayscale liefert
+│ B = Gray(cam_1 RGB)    │     Textur + Stereo-Information
+└────────────────────────┘
+→ (224, 224, 3) — DINOv2-kompatibles Format
+```
+
+**Vorteile:**
+- **Explizite Tiefeninformation** im R-Kanal → keine Ambiguität entlang der optischen Achse
+- **Stereo-Information** durch cam_1 Grayscale im B-Kanal
+- **Textur erhalten** im G-Kanal (Grayscale der Hauptkamera)
+- **DINOv2-kompatibel** — 3 Kanäle, 224×224, Patch-Embedding funktioniert
+- Tiefenbild hat starke Kanten an Objektgrenzen → DINOv2 Patch-Features können daran lernen
+
+**Nachteile:**
+- R-Kanal (Depth) hat **fundamental andere Statistik** als ImageNet RGB → DINOv2 Patch-Embedding weniger effektiv für diesen Kanal
+- Depth-Normalisierung nötig (Isaac Sim liefert raw depth in Metern → skalieren auf [0, 255])
+- Dataset und Training komplett neu (Fusion-Modus: `depth_gray_stereo`)
+- Unbekannt, ob DINOv2 Self-Attention gemischte RGB/Depth-Patches sinnvoll korreliert
+
+**Implementierung** — neuer Channel-Mode in `_fuse_channel_stack()`:
+```python
+def _fuse_channel_stack(cam0_rgb, cam0_depth, cam1_rgb, mode="depth_gray_stereo"):
+    if mode == "depth_gray_stereo":
+        depth_norm = np.clip(cam0_depth / depth_max * 255, 0, 255).astype(np.uint8)
+        gray0 = cv2.cvtColor(cam0_rgb, cv2.COLOR_RGB2GRAY)
+        gray1 = cv2.cvtColor(cam1_rgb, cv2.COLOR_RGB2GRAY)
+        return np.stack([depth_norm, gray0, gray1], axis=2)  # (H, W, 3)
+```
+
+**Bewertung:** Vielversprechend als experimenteller Ansatz, aber erfordert Pipeline-Anpassung (Depth-Kanal in Datensammlung + Normalisierung). Sollte als Experiment nach Abschluss der reinen RGB-Multi-Camera-Evaluation durchgeführt werden.
+
+#### 13.3.5 Option: Reines Depth-Training (3× Depth-Kanal)
+
+```
+┌────────────────────────┐
+│ R = Depth (normiert)   │     Dasselbe Depth-Bild in allen
+│ G = Depth (normiert)   │     3 Kanälen repliziert
+│ B = Depth (normiert)   │
+└────────────────────────┘
+```
+
+**Bewertung: NICHT EMPFOHLEN.**
+
+- DINOv2 Patch-Features sind für RGB optimiert → Depth ist Out-of-Distribution
+- Kein Farbgradient → Patch-Embedding-Filter (Conv2d) produzieren uniformes Signal
+- Selbst bei Unfreezing: 20.000 Depth-Bilder reichen nicht für 22M Parameter
+- Verlust aller Textur- und Farbinformation (Cube-Farbe, Tischplatte, etc.)
+- Proprio-Encoder liefert bereits explizite 3D-Position → redundant zur Depth
+
+### 13.4 Gesamtbewertung: Welcher Ansatz löst die Tiefenambiguität?
+
+| # | Ansatz | Depth-Auflösung | DINOv2-Kompatibilität | Aufwand | Empfehlung |
+|---|--------|-----------------|----------------------|---------|------------|
+| 1 | **Reines Depth-Training** | Voll | ❌ Schlecht (OOD) | Mittel | ❌ Nicht empfohlen |
+| 2 | **DINOv2 unfreezen für Depth** | Voll | ⚠️ Verliert RGB-Features | Hoch | ❌ Nicht empfohlen |
+| 3 | **Depth-pretrained Encoder** | Voll | ❌ Inkompatibel | Sehr hoch | ❌ Nicht empfohlen |
+| 4 | **Hybrid: Depth + Gray + Stereo** | Hoch | ⚠️ Teilweise (1/3 OOD) | Mittel | 🔶 Experimentell |
+| 5 | **Multi-Cam RGB Fusion** (Abschnitt 12) | Mittel | ✅ Gut | Gering | ✅ **Primärer Ansatz** |
+| 6 | **Alpha-Gewichtung (Proprio)** | Indirekt | ✅ Keine Änderung | Minimal | ✅ **Sofort-Maßnahme** |
+| 7 | **Kamera-Positionierung** | Teilweise | ✅ Keine Änderung | Minimal | ✅ **Komplementär** |
+
+### 13.5 Empfehlung: Priorisierte Strategie
+
+```
+SCHRITT 1 (sofort):     Multi-Cam RGB Fusion (gray_gray_diff / anaglyph3d)
+                         → Bereits implementiert (Abschnitt 12)
+                         → Training + Evaluation laufen
+
+SCHRITT 2 (parallel):   Alpha-Gewichtung experimentell variieren
+                         → plan_franka.yaml: alpha 0.5 → 0.7 → 0.9
+                         → Keine Neugenerierung des Datensatzes nötig
+
+SCHRITT 3 (optional):   Kamera-Positionen optimieren
+                         → Mehr orthogonale Platzierung (90° statt ~60° Winkel)
+                         → Neuer Datensatz + Training nötig
+
+SCHRITT 4 (Experiment): Hybrid Depth+Gray+Stereo (Abschnitt 13.3.4)
+                         → NUR wenn RGB-Fusion nicht ausreicht
+                         → Depth-Kanal in Pipeline integrieren
+                         → Neuer Datensatz + Training nötig
+
+NICHT EMPFOHLEN:         Reines Depth-Training, DINOv2 unfreezen, Encoder-Wechsel
+```
+
+**Begründung:** Die Stärke des DINO World Models liegt in den **vortrainierten visuellen Features** des DINOv2-Encoders. Jeder Ansatz, der diese Features degradiert (Depth-Input, Unfreezing, Encoder-Wechsel), opfert den Kern-Vorteil der Architektur. Multi-Camera RGB Fusion (Abschnitt 12) nutzt die DINOv2-Stärke und liefert zusätzliche Tiefeninformation über Stereo-Disparität — das ist der natürliche Weg, 3D-Information mit einem 2D-Bildmodell zu gewinnen.

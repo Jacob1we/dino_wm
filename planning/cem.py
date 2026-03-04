@@ -22,6 +22,7 @@ class CEMPlanner(BasePlanner):
         wandb_run,
         logging_prefix="plan_0",
         log_filename="logs.json",
+        # --- Franka-spezifische Erweiterungen ---
         action_bounds=None,
         gripper_indices=None,
         gripper_open_prior=True,
@@ -46,59 +47,41 @@ class CEMPlanner(BasePlanner):
         self.eval_every = eval_every
         self.logging_prefix = logging_prefix
 
-        # --- Per-Dimension Sigma-Skalierung ---
+        # Per-Dimension Sigma-Skalierung (kompensiert unterschiedliche action_std)
         # sigma_scale: (action_dim,) Tensor — Multiplikator auf var_scale pro Dim.
-        # Ermöglicht z.B. mehr z-Exploration bei gleicher xy-Exploration
-        # im normalisierten Raum. Kompensiert unterschiedliche action_std
-        # ohne den CEM-Raum komplett umzubauen.
-        # Default: None → alle Dims gleich (= bisheriges Verhalten)
+        # Beispiel: z_std << xy_std → sigma_scale_z > 1 → gleiche physische Exploration.
         if sigma_scale is not None:
             self.sigma_scale = sigma_scale.float()
-            print(f"  CEM Sigma-Scale: {self.sigma_scale[:min(8, action_dim)].tolist()} (erste {min(8, action_dim)} Dims)")
+            print(f"  CEM Sigma-Scale: {self.sigma_scale[:min(8, action_dim)].tolist()}")
         else:
             self.sigma_scale = None
 
         # Action Bounds (im normalisierten Raum)
-        # action_bounds: dict mit "lower" und "upper" als (action_dim,) Tensoren
-        # → CEM-Samples werden auf diesen Bereich geclampt
         if action_bounds is not None:
             self.action_lower = action_bounds["lower"].float()
             self.action_upper = action_bounds["upper"].float()
-            print(f"  CEM Action Bounds: lower={self.action_lower[:4].tolist()}, upper={self.action_upper[:4].tolist()} (erste 4 Dims)")
+            print(f"  CEM Action-Bounds: AKTIV ({action_dim}D)")
         else:
             self.action_lower = None
             self.action_upper = None
 
-        # Gripper-Indices für binäre Quantisierung
-        # Bei 8D Actions: Gripper-Dimensionen (Index 3, 7) sollen nur {0, 1} sein
-        # In normalisiertem Raum: 0 → (0 - mean) / std, 1 → (1 - mean) / std
+        # Gripper-Konfiguration
         self.gripper_indices = gripper_indices
         self.gripper_open_prior = gripper_open_prior
-
-        # Gripper-Mask: Gripper-Dims werden komplett eingefroren (sigma=0).
         self.gripper_mask = gripper_mask
         if self.gripper_mask and self.gripper_indices:
             print(f"  CEM Gripper-Mask: AKTIV — Dims {self.gripper_indices} eingefroren (sigma=0)")
-            if gripper_indices:
-                print(f"    Gripper-Quantisierung implizit deaktiviert (Mask hat Vorrang)")
 
     def _clamp_actions(self, action):
         """Clampt Actions auf gültige Bounds (normalisierter Raum)."""
         if self.action_lower is not None:
             lower = self.action_lower.to(action.device)
             upper = self.action_upper.to(action.device)
-            action = action.clamp(min=lower, max=upper)
+            action = torch.clamp(action, min=lower, max=upper)
         return action
 
     def _quantize_gripper(self, action):
-        """Quantisiert Gripper-Dimensionen auf {norm(0), norm(1)} (nächster Wert).
-        
-        Gripper ist binär (offen=0, geschlossen=1). CEM sampelt aber kontinuierlich.
-        → Snapping auf den nächsten gültigen normalisierten Wert reduziert den
-        Suchraum und verhindert physikalisch unsinnige Gripper-Zwischenwerte.
-        
-        Wird bei gripper_mask=True NICHT aufgerufen (sigma=0 → kein Sampling).
-        """
+        """Quantisiert Gripper-Dimensionen auf {norm(0), norm(1)}."""
         if self.gripper_indices is None:
             return action
         if self.gripper_mask:
@@ -121,16 +104,9 @@ class CEMPlanner(BasePlanner):
 
     def init_mu_sigma(self, obs_0, actions=None):
         """Initialisiert CEM mu und sigma im normalisierten Raum.
-        
+
         mu = 0 (= action_mean in Weltkoordinaten).
         sigma = var_scale * sigma_scale (per-Dimension skalierbar).
-        
-        sigma_scale erlaubt gezielte Kompensation: z.B. wenn action_std_z < action_std_xy,
-        dann sigma_scale_z > 1.0 → mehr physische z-Exploration.
-        
-        args:
-            obs_0: dict mit "visual" und "proprio"
-            actions: (B, T, action_dim) — Warm-Start Actions (normalisiert)
         """
         n_evals = obs_0["visual"].shape[0]
 
@@ -178,9 +154,8 @@ class CEMPlanner(BasePlanner):
         return mu, sigma
 
     def plan(self, obs_0, obs_g, actions=None):
-        """
-        CEM-Optimierung im normalisierten Raum.
-        
+        """CEM-Optimierung im normalisierten Raum.
+
         Args:
             obs_0: Aktuelle Beobachtung (dict: visual, proprio)
             obs_g: Ziel-Beobachtung

@@ -72,3 +72,91 @@
 2026-03-04 10:51:13,715 DEBUG   SenderThread:155855 [sender.py:send_request():316] send_request: stop_status
 2026-03-04 10:51:28,979 DEBUG   HandlerThread:155855 [handler.py:handle_request():141] handle_request: stop_status
 2026-03-04 10:51:28,979 DEBUG   SenderThread:155855 [sender.py:send_request():316] send_request: stop_status
+2026-03-04 10:51:31,889 DEBUG   SenderThread:155855 [sender.py:send():302] send: stats
+2026-03-04 10:51:44,271 DEBUG   HandlerThread:155855 [handler.py:handle_request():141] handle_request: stop_status
+2026-03-04 10:51:44,272 DEBUG   SenderThread:155855 [sender.py:send_request():316] send_request: stop_status
+2026-03-04 10:51:59,560 DEBUG   HandlerThread:155855 [handler.py:handle_request():141] handle_request: stop_status
+2026-03-04 10:51:59,560 DEBUG   SenderThread:155855 [sender.py:send_request():316] send_request: stop_status
+2026-03-04 10:52:02,234 DEBUG   SenderThread:155855 [sender.py:send():302] send: stats
+2026-03-04 10:52:14,881 DEBUG   HandlerThread:155855 [handler.py:handle_request():141] handle_request: stop_status
+2026-03-04 10:52:14,881 DEBUG   SenderThread:155855 [sender.py:send_request():316] send_request: stop_status
+2026-03-04 10:52:16,155 DEBUG   SenderThread:155855 [sender.py:send():302] send: config
+2026-03-04 10:52:18,746 INFO    Thread-12 :155855 [dir_watcher.py:_on_file_modified():292] file/dir modified: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260304_104730-2g35ef0o/files/output.log
+2026-03-04 10:52:20,747 INFO    Thread-12 :155855 [dir_watcher.py:_on_file_modified():292] file/dir modified: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260304_104730-2g35ef0o/files/output.log
+2026-03-04 10:52:21,747 INFO    Thread-12 :155855 [dir_watcher.py:_on_file_modified():292] file/dir modified: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260304_104730-2g35ef0o/files/output.log
+2026-03-04 10:52:24,580 DEBUG   SenderThread:155855 [sender.py:send():302] send: exit
+2026-03-04 10:52:24,580 INFO    SenderThread:155855 [sender.py:send_exit():438] handling exit code: 255
+2026-03-04 10:52:24,580 INFO    SenderThread:155855 [sender.py:send_exit():440] handling runtime: 293
+2026-03-04 10:52:24,580 DEBUG   HandlerThread:155855 [handler.py:handle_request():141] handle_request: poll_exit
+2026-03-04 10:52:24,581 INFO    SenderThread:155855 [sender.py:_save_file():1156] saving file wandb-summary.json with policy end
+2026-03-04 10:52:24,581 INFO    SenderThread:155855 [sender.py:send_exit():446] send defer
+2026-03-04 10:52:24,581 DEBUG   SenderThread:155855 [sender.py:send_request():316] send_request: poll_exit
+2026-03-04 10:52:24,581 DEBUG   HandlerThread:155855 [handler.py:handle_request():141] handle_request: defer
+2026-03-04 10:52:24,582 INFO    HandlerThread:155855 [handler.py:handle_request_defer():164] handle defer: 0
+2026-03-04 10:52:24,582 DEBUG   SenderThread:155855 [sender.py:send_request():316] send_request: defer
+2026-03-04 10:52:24,582 INFO    SenderThread:155855 [sender.py:send_request_defer():455] handle sender defer: 0
+2026-03-04 10:52:24,582 INFO    SenderThread:155855 [sender.py:transition_state():459] send defer: 1
+2026-03-04 10:52:24,582 DEBUG   HandlerThread:155855 [handler.py:handle_request():141] handle_request: defer
+2026-03-04 10:52:24,582 INFO    HandlerThread:155855 [handler.py:handle_request_defer():164] handle defer: 1
+2026-03-04 10:52:24,619 DEBUG   SenderThread:155855 [sender.py:send_request():316] send_request: defer
+2026-03-04 10:52:24,620 INFO    SenderThread:155855 [sender.py:send_request_defer():455] handle sender defer: 1
+2026-03-04 10:52:24,620 INFO    SenderThread:155855 [sender.py:transition_state():459] send defer: 2
+2026-03-04 10:52:24,620 DEBUG   SenderThread:155855 [sender.py:send():302] send: stats
+2026-03-04 10:52:24,620 DEBUG   HandlerThread:155855 [handler.py:handle_request():141] handle_request: defer
+2026-03-04 10:52:24,620 INFO    HandlerThread:155855 [handler.py:handle_request_defer():164] handle defer: 2
+2026-03-04 10:52:24,620 DEBUG   SenderThread:155855 [sender.py:send_request():316] send_request: defer
+2026-03-04 10:52:24,620 INFO    SenderThread:155855 [sender.py:send_request_defer():455] handle sender defer: 2
+2026-03-04 10:52:24,620 INFO    SenderThread:155855 [sender.py:transition_state():459] send defer: 3
+2026-03-04 10:52:24,620 DEBUG   HandlerThread:155855 [handler.py:handle_request():141] handle_request: defer
+2026-03-04 10:52:24,620 INFO    HandlerThread:155855 [handler.py:handle_request_defer():164] handle defer: 3
+2026-03-04 10:52:24,621 DEBUG   SenderThread:155855 [sender.py:send_request():316] send_request: defer
+2026-03-04 10:52:24,621 INFO    SenderThread:155855 [sender.py:send_request_defer():455] handle sender defer: 3
+2026-03-04 10:52:24,621 INFO    SenderThread:155855 [sender.py:transition_state():459] send defer: 4
+2026-03-04 10:52:24,621 DEBUG   HandlerThread:155855 [handler.py:handle_request():141] handle_request: defer
+2026-03-04 10:52:24,621 INFO    HandlerThread:155855 [handler.py:handle_request_defer():164] handle defer: 4
+2026-03-04 10:52:24,621 DEBUG   SenderThread:155855 [sender.py:send():302] send: summary
+2026-03-04 10:52:24,621 INFO    SenderThread:155855 [sender.py:_save_file():1156] saving file wandb-summary.json with policy end
+2026-03-04 10:52:24,621 DEBUG   SenderThread:155855 [sender.py:send_request():316] send_request: defer
+2026-03-04 10:52:24,621 INFO    SenderThread:155855 [sender.py:send_request_defer():455] handle sender defer: 4
+2026-03-04 10:52:24,621 INFO    SenderThread:155855 [sender.py:transition_state():459] send defer: 5
+2026-03-04 10:52:24,622 DEBUG   HandlerThread:155855 [handler.py:handle_request():141] handle_request: defer
+2026-03-04 10:52:24,622 INFO    HandlerThread:155855 [handler.py:handle_request_defer():164] handle defer: 5
+2026-03-04 10:52:24,622 DEBUG   SenderThread:155855 [sender.py:send_request():316] send_request: defer
+2026-03-04 10:52:24,622 INFO    SenderThread:155855 [sender.py:send_request_defer():455] handle sender defer: 5
+2026-03-04 10:52:24,682 DEBUG   HandlerThread:155855 [handler.py:handle_request():141] handle_request: poll_exit
+2026-03-04 10:52:24,748 INFO    Thread-12 :155855 [dir_watcher.py:_on_file_modified():292] file/dir modified: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260304_104730-2g35ef0o/files/wandb-summary.json
+2026-03-04 10:52:24,851 INFO    SenderThread:155855 [sender.py:transition_state():459] send defer: 6
+2026-03-04 10:52:24,851 DEBUG   SenderThread:155855 [sender.py:send_request():316] send_request: poll_exit
+2026-03-04 10:52:24,851 DEBUG   HandlerThread:155855 [handler.py:handle_request():141] handle_request: defer
+2026-03-04 10:52:24,852 INFO    HandlerThread:155855 [handler.py:handle_request_defer():164] handle defer: 6
+2026-03-04 10:52:24,852 DEBUG   SenderThread:155855 [sender.py:send_request():316] send_request: defer
+2026-03-04 10:52:24,852 INFO    SenderThread:155855 [sender.py:send_request_defer():455] handle sender defer: 6
+2026-03-04 10:52:24,953 DEBUG   HandlerThread:155855 [handler.py:handle_request():141] handle_request: poll_exit
+2026-03-04 10:52:25,748 INFO    Thread-12 :155855 [dir_watcher.py:_on_file_modified():292] file/dir modified: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260304_104730-2g35ef0o/files/config.yaml
+2026-03-04 10:52:25,749 INFO    Thread-12 :155855 [dir_watcher.py:_on_file_modified():292] file/dir modified: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260304_104730-2g35ef0o/files/output.log
+2026-03-04 10:52:27,052 INFO    SenderThread:155855 [sender.py:transition_state():459] send defer: 7
+2026-03-04 10:52:27,052 DEBUG   SenderThread:155855 [sender.py:send_request():316] send_request: poll_exit
+2026-03-04 10:52:27,053 DEBUG   HandlerThread:155855 [handler.py:handle_request():141] handle_request: defer
+2026-03-04 10:52:27,053 INFO    HandlerThread:155855 [handler.py:handle_request_defer():164] handle defer: 7
+2026-03-04 10:52:27,053 DEBUG   SenderThread:155855 [sender.py:send_request():316] send_request: defer
+2026-03-04 10:52:27,053 INFO    SenderThread:155855 [sender.py:send_request_defer():455] handle sender defer: 7
+2026-03-04 10:52:27,053 INFO    SenderThread:155855 [dir_watcher.py:finish():362] shutting down directory watcher
+2026-03-04 10:52:27,396 WARNING StreamThr :155855 [internal.py:is_dead():387] Internal process exiting, parent pid 155299 disappeared
+2026-03-04 10:52:27,396 ERROR   StreamThr :155855 [internal.py:wandb_internal():149] Internal process shutdown.
+2026-03-04 10:52:27,622 INFO    WriterThread:155855 [datastore.py:close():279] close: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260304_104730-2g35ef0o/run-2g35ef0o.wandb
+2026-03-04 10:52:27,749 INFO    Thread-12 :155855 [dir_watcher.py:_on_file_modified():292] file/dir modified: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260304_104730-2g35ef0o/files/output.log
+2026-03-04 10:52:27,750 INFO    SenderThread:155855 [dir_watcher.py:finish():392] scan: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260304_104730-2g35ef0o/files
+2026-03-04 10:52:27,750 INFO    SenderThread:155855 [dir_watcher.py:finish():406] scan save: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260304_104730-2g35ef0o/files/conda-environment.yaml conda-environment.yaml
+2026-03-04 10:52:27,750 INFO    SenderThread:155855 [dir_watcher.py:finish():406] scan save: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260304_104730-2g35ef0o/files/output.log output.log
+2026-03-04 10:52:27,750 INFO    SenderThread:155855 [dir_watcher.py:finish():406] scan save: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260304_104730-2g35ef0o/files/wandb-summary.json wandb-summary.json
+2026-03-04 10:52:27,753 INFO    SenderThread:155855 [dir_watcher.py:finish():406] scan save: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260304_104730-2g35ef0o/files/requirements.txt requirements.txt
+2026-03-04 10:52:27,753 INFO    SenderThread:155855 [dir_watcher.py:finish():406] scan save: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260304_104730-2g35ef0o/files/wandb-metadata.json wandb-metadata.json
+2026-03-04 10:52:27,753 INFO    SenderThread:155855 [dir_watcher.py:finish():406] scan save: /home/tsp_jw/Desktop/dino_wm/wandb/run-20260304_104730-2g35ef0o/files/config.yaml config.yaml
+2026-03-04 10:52:27,753 INFO    SenderThread:155855 [sender.py:transition_state():459] send defer: 8
+2026-03-04 10:52:27,753 INFO    SenderThread:155855 [sender.py:finish():1312] shutting down sender
+2026-03-04 10:52:27,753 INFO    SenderThread:155855 [file_pusher.py:finish():171] shutting down file pusher
+2026-03-04 10:52:27,753 INFO    SenderThread:155855 [file_pusher.py:join():176] waiting for file pusher
+2026-03-04 10:52:27,754 DEBUG   HandlerThread:155855 [handler.py:handle_request():141] handle_request: defer
+2026-03-04 10:52:27,754 INFO    HandlerThread:155855 [handler.py:handle_request_defer():164] handle defer: 8
+2026-03-04 10:52:27,754 INFO    HandlerThread:155855 [handler.py:finish():810] shutting down handler
+2026-03-04 10:52:28,074 INFO    MainThread:155855 [internal.py:handle_exit():80] Internal process exited

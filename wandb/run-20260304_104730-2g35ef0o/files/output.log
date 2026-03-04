@@ -19,3 +19,52 @@
   Gripper: QUANT
   Suchraum: 80D (H=5 × D=16)
 Server laeuft auf localhost:5555
+Warte auf Client...
+[+] Client: ('127.0.0.1', 38358)
+  W&B Config aktualisiert mit Client-Config (14 Keys)
+  Client-Config empfangen: ['port', 'n_episodes', 'max_steps', 'headless', 'goal_image', 'goal_image_place', 'settle_steps', 'ee_threshold', 'timeout', 'mode', 'log_dir', 'robot_opacity_for_capture', 'two_phase_enabled', 'scene_config']
+  Reset
+  Reset
+  Goal gesetzt: (224, 224, 3) uint8, ee_pos=[0.6498672  0.22968149 0.06565295]
+  Error: Given groups=1, weight of size [10, 12, 1], expected input[39, 16, 1] to have 12 channels, but got 16 channels instead
+[-] Client getrennt
+Traceback (most recent call last):
+  File "/home/tsp_jw/Desktop/dino_wm/planning_server.py", line 639, in <module>
+    if not size_data:
+  File "/home/tsp_jw/Desktop/dino_wm/planning/cem.py", line 225, in plan
+    i_z_obses, i_zs = self.wm.rollout(
+  File "/home/tsp_jw/Desktop/dino_wm/planning_server.py", line 194, in rollout
+    # Der CEM-Planner sieht keinen Unterschied (gleiches Interface).
+  File "/home/tsp_jw/Desktop/dino_wm/models/visual_world_model.py", line 295, in rollout
+    z = self.encode(obs_0, act_0)
+  File "/home/tsp_jw/Desktop/dino_wm/models/visual_world_model.py", line 97, in encode
+    act_emb = self.encode_act(act)
+  File "/home/tsp_jw/Desktop/dino_wm/models/visual_world_model.py", line 113, in encode_act
+    act = self.action_encoder(act) # (b, num_frames, action_emb_dim)
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1532, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1541, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/tsp_jw/Desktop/dino_wm/models/proprio.py", line 67, in forward
+    x = self.patch_embed(x)
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1532, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/site-packages/torch/nn/modules/module.py", line 1541, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/site-packages/torch/nn/modules/conv.py", line 310, in forward
+    return self._conv_forward(input, self.weight, self.bias)
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/site-packages/torch/nn/modules/conv.py", line 306, in _conv_forward
+    return F.conv1d(input, weight, bias, self.stride,
+RuntimeError: Given groups=1, weight of size [10, 12, 1], expected input[39, 16, 1] to have 12 channels, but got 16 channels instead
+Traceback (most recent call last):
+  File "/home/tsp_jw/Desktop/dino_wm/planning_server.py", line 573, in <module>
+    objective_fn=objective_fn,
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/socket.py", line 293, in accept
+    fd, addr = self._accept()
+KeyboardInterrupt
+Traceback (most recent call last):
+  File "/home/tsp_jw/Desktop/dino_wm/planning_server.py", line 573, in <module>
+    objective_fn=objective_fn,
+  File "/home/tsp_jw/miniconda3/envs/dino_wm/lib/python3.10/socket.py", line 293, in accept
+    fd, addr = self._accept()
+KeyboardInterrupt

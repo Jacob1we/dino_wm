@@ -63,8 +63,7 @@ parser.add_argument("--n_sub_actions", type=int, default=1,
                     help="Anzahl Sub-Actions pro Plan-Step (default: 1). "
                          "Max = frameskip. 0 = alle (=frameskip).")
 parser.add_argument("--planning_config", type=str, default="plan_franka",
-                    help="Name der Planning-Config (ohne .yaml). "
-                         "Default: plan_franka")
+                    help="Name der Planning-Config (ohne .yaml). Default: plan_franka")
 args = parser.parse_args()
 
 # # Default Parameter aus dem Paper:
@@ -472,121 +471,77 @@ server_config = {
 wandb_run = WandBPlanningRun(server_config)
 
 # =============================================================================
-# PLANNING CONFIG laden (Änderungen Jacob W.)
+# PLANNING CONFIG (Franka-spezifisch: sigma_scale, workspace_bounds, gripper)
 # =============================================================================
-# Franka-spezifische CEM-Priors (Workspace Bounds, Gripper-Quantisierung,
-# Open-Prior) werden aus der Planning-Config gelesen, NICHT hardcoded.
-# → Alle Priors an einem Ort, einfach änderbar ohne Code-Änderung.
 
-_planning_cfg_path = f"{dino_wm_dir}/conf/{args.planning_config}.yaml"
-if os.path.exists(_planning_cfg_path):
-    planning_cfg = OmegaConf.load(_planning_cfg_path)
-    print(f"  Planning-Config: {_planning_cfg_path}")
+planning_cfg = None
+planning_config_path = f"{dino_wm_dir}/conf/{args.planning_config}.yaml"
+if os.path.exists(planning_config_path):
+    planning_cfg = OmegaConf.load(planning_config_path)
+    print(f"\n  Planning-Config: {args.planning_config}.yaml geladen")
 else:
-    planning_cfg = OmegaConf.create({})
-    print(f"  WARNUNG: {_planning_cfg_path} nicht gefunden, verwende Defaults")
+    print(f"\n  Planning-Config: {args.planning_config}.yaml nicht gefunden, defaults")
 
-# --- Gripper-Konfiguration (aus Config) ---
-_grip_cfg = OmegaConf.to_container(planning_cfg.get("gripper", {}), resolve=True)
-gripper_mask = _grip_cfg.get("mask", False)
-
-# Bei 6D-Modellen (ohne Gripper): Gripper-Config komplett deaktivieren
-_has_gripper_in_action = (base_action_dim == 8)
-
-if _grip_cfg.get("base_indices") and _has_gripper_in_action:
-    base_gripper_idx = _grip_cfg["base_indices"]
-    gripper_indices = [
-        gi + k * base_action_dim
-        for k in range(frameskip)
-        for gi in base_gripper_idx
-    ]
-    gripper_open_prior = _grip_cfg.get("open_prior", True)
-    print(f"  Gripper-Indices (full {full_action_dim}D): {gripper_indices}")
-    
-    if gripper_mask:
-        print(f"  Gripper-Mask: AKTIV — CEM ignoriert Gripper-Dims (sigma=0)")
-        print(f"  Gripper-Quantisierung: implizit INAKTIV (Mask hat Vorrang)")
-    elif _grip_cfg.get("quantize", False):
-        print(f"  Gripper-Quantisierung: AKTIV")
-        print(f"  Gripper Open-Prior: {'AKTIV' if gripper_open_prior else 'INAKTIV'}")
+# --- Sigma-Scale ---
+sigma_scale = None
+if planning_cfg:
+    _ss_cfg = OmegaConf.to_container(planning_cfg.get("sigma_scale", {}), resolve=True)
+    if _ss_cfg.get("enabled", False):
+        _xy_s = _ss_cfg.get("xy", 1.0)
+        _z_s = _ss_cfg.get("z", 1.0)
+        _g_s = _ss_cfg.get("g", 1.0)
+        if base_action_dim == 8:
+            _ss_base = torch.tensor([_xy_s, _xy_s, _z_s, _g_s, _xy_s, _xy_s, _z_s, _g_s])
+        else:
+            _ss_base = torch.tensor([_xy_s, _xy_s, _z_s, _xy_s, _xy_s, _z_s])
+        sigma_scale = _ss_base.repeat(frameskip)[:full_action_dim]
+        print(f"  Sigma-Scale: xy={_xy_s}, z={_z_s}, g={_g_s}")
     else:
-        print(f"  Gripper-Quantisierung: INAKTIV")
-else:
-    gripper_indices = None
-    gripper_open_prior = False
-    gripper_mask = False
-    if not _has_gripper_in_action:
-        print(f"  Gripper-Konfiguration: UEBERSPRUNGEN (Model hat {base_action_dim}D Actions, kein Gripper)")
+        print(f"  Sigma-Scale: INAKTIV")
+
+# --- Workspace Bounds ---
+action_bounds = None
+if planning_cfg:
+    _ws_cfg = OmegaConf.to_container(planning_cfg.get("workspace_bounds", {}), resolve=True)
+    if _ws_cfg.get("enabled", False) and _ws_cfg.get("lower_8d") and _ws_cfg.get("upper_8d"):
+        _lower_base = torch.tensor(_ws_cfg["lower_8d"][:base_action_dim], dtype=torch.float32)
+        _upper_base = torch.tensor(_ws_cfg["upper_8d"][:base_action_dim], dtype=torch.float32)
+        _lower_full = _lower_base.repeat(frameskip)[:full_action_dim]
+        _upper_full = _upper_base.repeat(frameskip)[:full_action_dim]
+        # In normalisierten Raum konvertieren
+        norm_lower = ((_lower_full - action_mean) / action_std)
+        norm_upper = ((_upper_full - action_mean) / action_std)
+        action_bounds = {
+            "lower": torch.min(norm_lower, norm_upper),
+            "upper": torch.max(norm_lower, norm_upper),
+        }
+        print(f"  Workspace Bounds: AKTIV (z: [{_ws_cfg['lower_8d'][2]}, {_ws_cfg['upper_8d'][2]}])")
     else:
-        print(f"  Gripper-Konfiguration: keine base_indices definiert")
+        print(f"  Workspace Bounds: INAKTIV")
 
-# --- Sigma-Scale (aus Config) ---
-# Per-Dimension Multiplikator auf var_scale im normalisierten Raum.
-# Kompensiert unterschiedliche action_std pro Dimension:
-#   action_std_z < action_std_xy → bei sigma=1 (norm) wird z weniger exploriert.
-#   sigma_scale_z > 1.0 → gleich viel physische Exploration wie xy.
-_ss_cfg = OmegaConf.to_container(planning_cfg.get("sigma_scale", {}), resolve=True)
-if _ss_cfg.get("enabled", False):
-    _xy_s = _ss_cfg.get("xy", 1.0)
-    _z_s = _ss_cfg.get("z", 1.0)
-    _g_s = _ss_cfg.get("g", 1.0)
-    if base_action_dim == 8:
-        # [x_s, y_s, z_s, g_s, x_e, y_e, z_e, g_e]
-        _ss_base = torch.tensor([_xy_s, _xy_s, _z_s, _g_s, _xy_s, _xy_s, _z_s, _g_s])
+# --- Gripper ---
+gripper_indices = None
+gripper_open_prior = True
+gripper_mask = False
+if planning_cfg:
+    _g_cfg = OmegaConf.to_container(planning_cfg.get("gripper", {}), resolve=True)
+    _base_indices = _g_cfg.get("base_indices", [])
+    if _base_indices and base_action_dim == 8:
+        gripper_indices = []
+        for bi in _base_indices:
+            for fs in range(frameskip):
+                gi = fs * base_action_dim + bi
+                if gi < full_action_dim:
+                    gripper_indices.append(gi)
+        gripper_open_prior = _g_cfg.get("open_prior", True)
+        gripper_mask = _g_cfg.get("mask", False)
+        print(f"  Gripper: indices={gripper_indices}, mask={gripper_mask}, open_prior={gripper_open_prior}")
     else:
-        # [x_s, y_s, z_s, x_e, y_e, z_e]
-        _ss_base = torch.tensor([_xy_s, _xy_s, _z_s, _xy_s, _xy_s, _z_s])
-    sigma_scale = _ss_base.repeat(frameskip)[:full_action_dim]
-    print(f"\n  Sigma-Scale: xy={_xy_s}, z={_z_s}, g={_g_s}")
-    print(f"    (full {full_action_dim}D): {sigma_scale.tolist()}")
-else:
-    sigma_scale = None
-    print(f"\n  Sigma-Scale: INAKTIV (alle Dims gleich)")
+        print(f"  Gripper: keine base_indices definiert")
 
-# --- Workspace Bounds (aus Config) ---
-_ws_cfg = OmegaConf.to_container(planning_cfg.get("workspace_bounds", {}), resolve=True)
-if _ws_cfg.get("enabled", False) and _ws_cfg.get("lower_8d") and _ws_cfg.get("upper_8d"):
-    _ws_lower_8d = torch.tensor(_ws_cfg["lower_8d"], dtype=torch.float32)
-    _ws_upper_8d = torch.tensor(_ws_cfg["upper_8d"], dtype=torch.float32)
-
-    # Bei 6D-Modellen: Gripper-Dims (Index 3, 7) aus 8D-Bounds entfernen
-    if base_action_dim == 6:
-        _keep_ws = [0, 1, 2, 4, 5, 6]  # xyz_start + xyz_end (ohne Gripper)
-        _ws_lower_base = _ws_lower_8d[_keep_ws]
-        _ws_upper_base = _ws_upper_8d[_keep_ws]
-        _dim_names = ['x_s', 'y_s', 'z_s', 'x_e', 'y_e', 'z_e'] * frameskip
-    else:
-        _ws_lower_base = _ws_lower_8d
-        _ws_upper_base = _ws_upper_8d
-        _dim_names = ['x_s', 'y_s', 'z_s', 'g_s', 'x_e', 'y_e', 'z_e', 'g_e'] * frameskip
-
-    # Auf full_action_dim erweitern (frameskip-Wiederholung)
-    ws_lower = _ws_lower_base.repeat(frameskip)[:full_action_dim]
-    ws_upper = _ws_upper_base.repeat(frameskip)[:full_action_dim]
-
-    # In normalisierten Raum transformieren: norm = (world - mean) / std
-    norm_lower = (ws_lower - preprocessor.action_mean) / preprocessor.action_std
-    norm_upper = (ws_upper - preprocessor.action_mean) / preprocessor.action_std
-
-    # Sicherstellen: lower < upper (falls durch Normalisierung invertiert)
-    action_bounds = {
-        "lower": torch.min(norm_lower, norm_upper),
-        "upper": torch.max(norm_lower, norm_upper),
-    }
-
-    print(f"\n  Action Bounds (Workspace → Normalized):")
-    for i in range(min(len(_dim_names), full_action_dim)):
-        print(f"    {_dim_names[i]:>3s}: [{ws_lower[i]:.2f}, {ws_upper[i]:.2f}] "
-              f"→ norm [{action_bounds['lower'][i]:.2f}, {action_bounds['upper'][i]:.2f}]")
-
-    # Belt-and-suspenders: auch für Safety-Clipping im Server
-    WS_LOWER_NP = _ws_lower_base.numpy()
-    WS_UPPER_NP = _ws_upper_base.numpy()
-else:
-    action_bounds = None
-    WS_LOWER_NP = None
-    WS_UPPER_NP = None
-    print(f"  Workspace Bounds: INAKTIV")
+# =============================================================================
+# CEM PLANNER
+# =============================================================================
 
 planner = hydra.utils.instantiate(
     planner_cfg,
@@ -595,10 +550,10 @@ planner = hydra.utils.instantiate(
     action_dim=full_action_dim,
     objective_fn=objective_fn,
     preprocessor=preprocessor,
-    evaluator=None,  # Keine Evaluation im Server (macht der Client)
+    evaluator=None,
     wandb_run=wandb_run,
-    gripper_indices=gripper_indices,
     action_bounds=action_bounds,
+    gripper_indices=gripper_indices,
     gripper_open_prior=gripper_open_prior,
     gripper_mask=gripper_mask,
     sigma_scale=sigma_scale,
@@ -608,10 +563,7 @@ search_dim = horizon * full_action_dim
 print(f"\n✓ Setup komplett")
 print(f"  Modus: {args.mode.upper()}")
 print(f"  CEM: samples={planner_cfg.num_samples}, steps={planner_cfg.opt_steps}, "
-      f"topk={planner_cfg.topk}, horizon={horizon}")
-print(f"  Sigma-Scale: {sigma_scale[:min(8,full_action_dim)].tolist() if sigma_scale is not None else 'uniform'}")
-print(f"  Action Bounds: {'AKTIV' if action_bounds else 'INAKTIV'}, var_scale={planner_cfg.var_scale}")
-print(f"  Gripper: {'MASK (sigma=0)' if gripper_mask else 'QUANT' if gripper_indices else 'INAKTIV'}")
+      f"topk={planner_cfg.topk}, horizon={horizon}, var_scale={planner_cfg.var_scale}")
 print(f"  Suchraum: {search_dim}D (H={horizon} × D={full_action_dim})")
 
 # =============================================================================
@@ -640,22 +592,30 @@ def img_to_obs(img: np.ndarray, ee_pos: np.ndarray = None) -> dict:
     }
 
 # =============================================================================
+# HELPERS
+# =============================================================================
+
+def _denorm_to_sub_actions(actions_tensor, first_only=True):
+    """Denormalisiere CEM-Actions und splitte in Sub-Actions.
+    
+    Args:
+        actions_tensor: (1, horizon, full_action_dim) normalisierte Actions
+        first_only: True → nur erste Horizon-Action, False → alle
+    Returns:
+        sub_actions: (N, base_action_dim) numpy array
+    """
+    if first_only:
+        denorm = preprocessor.denormalize_actions(actions_tensor[0, 0:1].cpu())
+    else:
+        denorm = preprocessor.denormalize_actions(actions_tensor[0].cpu())
+    return rearrange(denorm, "t (f d) -> (t f) d", f=frameskip).numpy()
+
+# =============================================================================
 # SOCKET SERVER
 # =============================================================================
 
-warm_start = None  # (1, horizon, action_dim) fuer MPC Warm-Start
+warm_start = None
 goal_obs = None
-
-def _safe_resolve(cfg):
-    """OmegaConf.to_container mit Fallback auf resolve=False.
-    
-    Manche Configs enthalten Hydra-Interpolationen (${now:...}, ${oc.env:...})
-    die ausserhalb eines Hydra-Kontexts nicht aufloesbar sind.
-    """
-    try:
-        return OmegaConf.to_container(cfg, resolve=True)
-    except Exception:
-        return OmegaConf.to_container(cfg, resolve=False)
 
 server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -686,61 +646,8 @@ while True:
             cmd = msg.get("cmd")
 
             if cmd == "get_run_info":
-                # Client fragt Server-Konfiguration ab (fuer run_config.yaml)
-                run_info = {
-                    # Modell-Info
-                    "model_name": args.model_name,
-                    "model_path": model_path,
-                    "model_epoch": "latest",
-                    "model_ckpt": str(model_ckpt),
-                    # Dataset-Info (aus Trainings-Config)
-                    "dataset_path": _safe_resolve(model_cfg.env.dataset).get("data_path", "unknown"),
-                    "dataset_action_dim": dset_action_dim,
-                    "model_action_dim": model_action_dim,
-                    "base_action_dim": base_action_dim,
-                    "full_action_dim": full_action_dim,
-                    "frameskip": frameskip,
-                    # Trainings-Hyperparameter
-                    "training": {
-                        "epochs": model_cfg.training.get("epochs", None),
-                        "batch_size": model_cfg.training.get("batch_size", None),
-                        "encoder_lr": model_cfg.training.get("encoder_lr", None),
-                        "decoder_lr": model_cfg.training.get("decoder_lr", None),
-                        "predictor_lr": model_cfg.training.get("predictor_lr", None),
-                        "img_size": model_cfg.get("img_size", None),
-                        "num_hist": model_cfg.get("num_hist", None),
-                        "num_pred": model_cfg.get("num_pred", None),
-                        "frameskip": model_cfg.get("frameskip", None),
-                        "concat_dim": model_cfg.get("concat_dim", None),
-                    },
-                    # CEM-Parameter
-                    "cem": {
-                        "horizon": horizon,
-                        "num_samples": int(planner_cfg.num_samples),
-                        "opt_steps": int(planner_cfg.opt_steps),
-                        "topk": int(planner_cfg.topk),
-                        "var_scale": float(planner_cfg.get("var_scale", 1.0)),
-                    },
-                    # Server-Parameter
-                    "server": {
-                        "mode": args.mode,
-                        "port": args.port,
-                        "chunk_size": args.chunk_size,
-                        "n_sub_actions": args.n_sub_actions,
-                        "planning_config": args.planning_config,
-                    },
-                    # Planning-Config (Workspace Bounds, Gripper)
-                    "planning_config_content": _safe_resolve(planning_cfg) if planning_cfg else {},
-                    # Normalisierungs-Statistiken
-                    "normalization": {
-                        "action_mean": action_mean.tolist(),
-                        "action_std": action_std.tolist(),
-                        "proprio_mean": proprio_mean.tolist(),
-                        "proprio_std": proprio_std.tolist(),
-                    },
-                }
-                response = {"status": "ok", "run_info": run_info}
-                print(f"  Run-Info gesendet ({len(run_info)} Keys)")
+                response = {"status": "ok", "run_info": server_config}
+                print(f"  Run-Info gesendet")
 
             elif cmd == "set_client_config":
                 # Client sendet seine komplette Konfiguration
@@ -778,12 +685,10 @@ while True:
                     cur_obs = img_to_obs(img, ee_pos)
 
                     # Warm-Start: vorherigen Plan shiften
-                    # Letzte Action wird wiederholt statt Nullen (vermeidet Null-Bias)
                     actions_init = None
                     if warm_start is not None:
                         shifted = warm_start[:, 1:, :]
-                        last_action = warm_start[:, -1:, :]  # Letzte bekannte Action
-                        actions_init = torch.cat([shifted, last_action], dim=1)
+                        actions_init = torch.cat([shifted, warm_start[:, -1:, :]], dim=1)
 
                     wandb_run.reset()
                     t0 = time.time()
@@ -795,22 +700,11 @@ while True:
 
                     print(f"  Plan: {wandb_run.get_summary(t_plan)}")
 
-                    # Erste Horizon-Aktion → frameskip Sub-Actions, dann auf n_sub_actions kuerzen
-                    denorm = preprocessor.denormalize_actions(actions[0, 0:1].cpu())
-                    all_sub = rearrange(denorm, "t (f d) -> (t f) d",
-                                        f=frameskip).numpy()
-                    # n_sub_actions: 0 oder >= frameskip → alle, sonst kuerzen
+                    all_sub = _denorm_to_sub_actions(actions, first_only=True)
                     n_ret = args.n_sub_actions if 0 < args.n_sub_actions < len(all_sub) else len(all_sub)
                     sub_actions = all_sub[:n_ret]
-                    
-                    # Safety-Clipping: Workspace-Bounds erzwingen (belt-and-suspenders)
-                    if WS_LOWER_NP is not None:
-                        for sa in sub_actions:
-                            sa[:base_action_dim] = np.clip(sa[:base_action_dim], WS_LOWER_NP, WS_UPPER_NP)
-                    
+
                     wandb_run.log_plan_summary(t_plan, len(sub_actions), mode="plan")
-                    # Diagnostik: denormalisierte Zielposition
-                    # 8D: target_ee bei [4:7], 6D: bei [3:6]
                     _ee_start = 4 if base_action_dim == 8 else 3
                     for si, sa in enumerate(sub_actions):
                         print(f"    Sub-Action {si}: target_ee=[{sa[_ee_start]:.3f}, {sa[_ee_start+1]:.3f}, {sa[_ee_start+2]:.3f}]")
@@ -837,25 +731,11 @@ while True:
 
                     print(f"  PlanAll: {wandb_run.get_summary(t_plan)}")
 
-                    # Alle Horizon-Actions → Einzel-Steps, n_sub_actions pro Horizon-Step
-                    denorm = preprocessor.denormalize_actions(actions[0].cpu())
-                    all_sub = rearrange(denorm, "t (f d) -> (t f) d",
-                                        f=frameskip).numpy()
-                    
-                    # Safety-Clipping: Workspace-Bounds erzwingen (belt-and-suspenders)
-                    if WS_LOWER_NP is not None:
-                        for sa in all_sub:
-                            sa[:base_action_dim] = np.clip(sa[:base_action_dim], WS_LOWER_NP, WS_UPPER_NP)
-                    
-                    # n_sub_actions pro Horizon-Step anwenden:
-                    # all_sub hat (horizon * frameskip) Zeilen, in horizon-Bloecke aufteilen
+                    all_sub = _denorm_to_sub_actions(actions, first_only=False)
                     n_ret = args.n_sub_actions if 0 < args.n_sub_actions < frameskip else frameskip
                     if n_ret < frameskip:
-                        # Je Horizon-Block nur die ersten n_ret Sub-Actions behalten
                         n_horizon = len(all_sub) // frameskip
-                        kept = []
-                        for h in range(n_horizon):
-                            kept.append(all_sub[h * frameskip : h * frameskip + n_ret])
+                        kept = [all_sub[h*frameskip : h*frameskip+n_ret] for h in range(n_horizon)]
                         all_actions = np.concatenate(kept, axis=0)
                     else:
                         all_actions = all_sub
@@ -866,7 +746,7 @@ while True:
                         "plan_time": t_plan,
                     }
                     wandb_run.log_plan_summary(t_plan, len(all_actions), mode="plan_all")
-                    print(f"  → {len(all_actions)} Actions ({n_ret}/{frameskip} Sub-Actions/Step) in {t_plan:.1f}s")
+                    print(f"  → {len(all_actions)} Actions in {t_plan:.1f}s")
 
             elif cmd == "reset":
                 goal_obs = None

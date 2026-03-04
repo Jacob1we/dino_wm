@@ -1,7 +1,8 @@
 __pycache__
 *.pyc
-outputs
-plan_outputs
+outputs/
+plan_outputs/
+wandb/
 *.mp4
 *.pth
 *.pkl

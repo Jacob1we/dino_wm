@@ -1,0 +1,21 @@
+  W&B Run: https://wandb.ai/jacob-weyer-rwth-aachen-university/dino_wm_planning/runs/2g35ef0o
+  Planning-Config: /home/tsp_jw/Desktop/dino_wm/conf/plan_franka.yaml
+  Gripper-Indices (full 16D): [3, 7, 11, 15]
+  Gripper-Quantisierung: INAKTIV
+  Action Bounds (Workspace → Normalized):
+    x_s: [0.05, 0.80] → norm [-3.59, 2.49]
+    y_s: [-0.40, 0.45] → norm [-2.51, 2.84]
+    z_s: [0.02, 0.50] → norm [-2.24, 5.41]
+    g_s: [0.00, 1.00] → norm [-1.00, 1.00]
+    x_e: [0.05, 0.80] → norm [-3.59, 2.49]
+    y_e: [-0.40, 0.45] → norm [-2.52, 2.85]
+    z_e: [0.02, 0.50] → norm [-2.22, 5.39]
+    g_e: [0.00, 1.00] → norm [-1.00, 1.00]
+  CEM Action Bounds: lower=[-3.5913031101226807, -2.511000871658325, -2.2385077476501465, -0.999972939491272], upper=[2.4873666763305664, 2.8411786556243896, 5.412055492401123, 0.999972939491272] (erste 4 Dims)
+✓ Setup komplett
+  Modus: ONLINE
+  CEM: samples=300, steps=10, topk=30, horizon=5
+  Action Bounds: AKTIV, var_scale=1
+  Gripper: QUANT
+  Suchraum: 80D (H=5 × D=16)
+Server laeuft auf localhost:5555

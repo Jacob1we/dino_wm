@@ -115,7 +115,7 @@ _full_dset = FrankaCubeStackDataset(
     preload_images=False,  # ← KEIN Bild-RAM! Nur Actions/EEF fuer Statistiken
 )
 
-base_action_dim = _full_dset.action_dim
+dset_action_dim = _full_dset.action_dim
 dset_transform = _full_dset.transform
 action_mean = _full_dset.action_mean.clone()
 action_std = _full_dset.action_std.clone()
@@ -128,6 +128,48 @@ del _full_dset, _transform, _dset_cfg
 gc.collect()
 if torch.cuda.is_available():
     torch.cuda.empty_cache()
+
+# --- Action-Dim-Konsistenzcheck: model_cfg vs. Dataset ---
+# Das Model wurde mit model_cfg.env.action_dim trainiert. Wenn das Dataset
+# inzwischen eine andere action_dim hat (z.B. 8D statt 6D weil es nach dem
+# Training mit Gripper-Tracking regeneriert wurde), muessen wir die Stats
+# auf die Trainings-Dimension anpassen. Sonst bekommt der CEM die falsche
+# Dimension und der Action-Encoder crasht (Conv1d Kanal-Mismatch).
+model_action_dim = model_cfg.env.action_dim
+if dset_action_dim != model_action_dim:
+    print(f"\n  ⚠ ACTION-DIM MISMATCH: Dataset hat {dset_action_dim}D, "
+          f"Model wurde mit {model_action_dim}D trainiert!")
+    if dset_action_dim == 8 and model_action_dim == 6:
+        # 8D → 6D: Gripper-Dims (Index 3, 7) entfernen
+        # 8D: [x_s, y_s, z_s, g_s, x_e, y_e, z_e, g_e]
+        # 6D: [x_s, y_s, z_s, x_e, y_e, z_e]
+        keep_idx = [0, 1, 2, 4, 5, 6]
+        action_mean = action_mean[keep_idx]
+        action_std = action_std[keep_idx]
+        print(f"  → Stats auf 6D reduziert (Gripper-Dims 3,7 entfernt)")
+        print(f"  ⚠ WARNUNG: Stats stammen aus regeneriertem 8D-Dataset und "
+              f"koennten leicht von den Original-Trainings-Stats abweichen!")
+    elif dset_action_dim == 6 and model_action_dim == 8:
+        # 6D → 8D: Gripper-Dims (g_s=0.5, g_e=0.5) einfuegen
+        _new_mean = torch.zeros(8)
+        _new_std = torch.ones(8)
+        _new_mean[[0, 1, 2, 4, 5, 6]] = action_mean
+        _new_std[[0, 1, 2, 4, 5, 6]] = action_std
+        _new_mean[[3, 7]] = 0.5   # Gripper Midpoint
+        _new_std[[3, 7]] = 0.5    # Gripper Std (binaer 0/1)
+        action_mean = _new_mean
+        action_std = _new_std
+        print(f"  → Stats auf 8D erweitert (Gripper-Dims 3,7 mit default mean=0.5, std=0.5)")
+    else:
+        raise ValueError(
+            f"Kann action_dim Mismatch ({dset_action_dim}D→{model_action_dim}D) "
+            f"nicht automatisch aufloesen. Bitte Dataset neu generieren oder "
+            f"passendes Model verwenden."
+        )
+    base_action_dim = model_action_dim
+else:
+    base_action_dim = dset_action_dim
+
 print(f"  action_dim={base_action_dim}, Stats extrahiert, Dataset freigegeben ✓")
 
 # 3. Model laden (wie plan.py)
@@ -448,7 +490,10 @@ else:
 _grip_cfg = OmegaConf.to_container(planning_cfg.get("gripper", {}), resolve=True)
 gripper_mask = _grip_cfg.get("mask", False)
 
-if _grip_cfg.get("base_indices"):
+# Bei 6D-Modellen (ohne Gripper): Gripper-Config komplett deaktivieren
+_has_gripper_in_action = (base_action_dim == 8)
+
+if _grip_cfg.get("base_indices") and _has_gripper_in_action:
     base_gripper_idx = _grip_cfg["base_indices"]
     gripper_indices = [
         gi + k * base_action_dim
@@ -469,7 +514,11 @@ if _grip_cfg.get("base_indices"):
 else:
     gripper_indices = None
     gripper_open_prior = False
-    print(f"  Gripper-Konfiguration: keine base_indices definiert")
+    gripper_mask = False
+    if not _has_gripper_in_action:
+        print(f"  Gripper-Konfiguration: UEBERSPRUNGEN (Model hat {base_action_dim}D Actions, kein Gripper)")
+    else:
+        print(f"  Gripper-Konfiguration: keine base_indices definiert")
 
 # --- Workspace Bounds (aus Config) ---
 _ws_cfg = OmegaConf.to_container(planning_cfg.get("workspace_bounds", {}), resolve=True)
@@ -477,9 +526,20 @@ if _ws_cfg.get("enabled", False) and _ws_cfg.get("lower_8d") and _ws_cfg.get("up
     _ws_lower_8d = torch.tensor(_ws_cfg["lower_8d"], dtype=torch.float32)
     _ws_upper_8d = torch.tensor(_ws_cfg["upper_8d"], dtype=torch.float32)
 
+    # Bei 6D-Modellen: Gripper-Dims (Index 3, 7) aus 8D-Bounds entfernen
+    if base_action_dim == 6:
+        _keep_ws = [0, 1, 2, 4, 5, 6]  # xyz_start + xyz_end (ohne Gripper)
+        _ws_lower_base = _ws_lower_8d[_keep_ws]
+        _ws_upper_base = _ws_upper_8d[_keep_ws]
+        _dim_names = ['x_s', 'y_s', 'z_s', 'x_e', 'y_e', 'z_e'] * frameskip
+    else:
+        _ws_lower_base = _ws_lower_8d
+        _ws_upper_base = _ws_upper_8d
+        _dim_names = ['x_s', 'y_s', 'z_s', 'g_s', 'x_e', 'y_e', 'z_e', 'g_e'] * frameskip
+
     # Auf full_action_dim erweitern (frameskip-Wiederholung)
-    ws_lower = _ws_lower_8d.repeat(frameskip)[:full_action_dim]
-    ws_upper = _ws_upper_8d.repeat(frameskip)[:full_action_dim]
+    ws_lower = _ws_lower_base.repeat(frameskip)[:full_action_dim]
+    ws_upper = _ws_upper_base.repeat(frameskip)[:full_action_dim]
 
     # In normalisierten Raum transformieren: norm = (world - mean) / std
     norm_lower = (ws_lower - preprocessor.action_mean) / preprocessor.action_std
@@ -492,14 +552,13 @@ if _ws_cfg.get("enabled", False) and _ws_cfg.get("lower_8d") and _ws_cfg.get("up
     }
 
     print(f"\n  Action Bounds (Workspace → Normalized):")
-    _dim_names = ['x_s', 'y_s', 'z_s', 'g_s', 'x_e', 'y_e', 'z_e', 'g_e'] * frameskip
-    for i in range(min(8, full_action_dim)):
+    for i in range(min(len(_dim_names), full_action_dim)):
         print(f"    {_dim_names[i]:>3s}: [{ws_lower[i]:.2f}, {ws_upper[i]:.2f}] "
               f"→ norm [{action_bounds['lower'][i]:.2f}, {action_bounds['upper'][i]:.2f}]")
 
     # Belt-and-suspenders: auch für Safety-Clipping im Server
-    WS_LOWER_NP = _ws_lower_8d.numpy()
-    WS_UPPER_NP = _ws_upper_8d.numpy()
+    WS_LOWER_NP = _ws_lower_base.numpy()
+    WS_UPPER_NP = _ws_upper_base.numpy()
 else:
     action_bounds = None
     WS_LOWER_NP = None
@@ -658,12 +717,15 @@ while True:
                     
                     wandb_run.log_plan_summary(t_plan, len(sub_actions), mode="plan")
                     # Diagnostik: denormalisierte Zielposition
+                    # 8D: target_ee bei [4:7], 6D: bei [3:6]
+                    _ee_start = 4 if base_action_dim == 8 else 3
                     for si, sa in enumerate(sub_actions):
-                        print(f"    Sub-Action {si}: target_ee=[{sa[4]:.3f}, {sa[5]:.3f}, {sa[6]:.3f}]")
+                        print(f"    Sub-Action {si}: target_ee=[{sa[_ee_start]:.3f}, {sa[_ee_start+1]:.3f}, {sa[_ee_start+2]:.3f}]")
                     response = {
                         "status": "ok",
                         "actions": sub_actions.tolist(),
                         "n_actions": len(sub_actions),
+                        "action_dim": base_action_dim,
                     }
 
             elif cmd == "plan_all":

@@ -3143,4 +3143,49 @@ Nach dem Neutraining interpretiert das Modell CEM-Actions korrekt als vorwärtsb
 
 - **Training-Dokumentation**: Detaillierte Code-Analyse und Fix-Implementierung → siehe Abschnitt "KRITISCH: Action-Observation Temporale Alignment-Analyse"
 - **CEM Fixes**: Action Bounds, Gripper-Quantisierung, Sigma Floor → siehe Abschnitt 10
+
+---
+
+## 14. Action-Dim Mismatch: Model vs. Dataset (04.03.2026)
+
+### 14.1 Problem
+
+Beim Start des Planning Servers mit einem älteren Model (z.B. `260216/23-42`, trainiert mit `action_dim=6`)
+crashte der CEM-Rollout mit:
+
+```
+RuntimeError: Given groups=1, weight of size [10, 12, 1], expected input[39, 16, 1]
+to have 12 channels, but got 16 channels instead
+```
+
+### 14.2 Root Cause
+
+1. Das Model wurde mit `action_dim=6` trainiert (6D Actions ohne Gripper-State, aus `hydra.yaml`)
+2. Das zugehörige Dataset im Archiv (`00_Archiv/NEps1000_RobOpac0_NPrim20_NCams4_NCube1`) wurde
+   **nach dem Training** mit 8D Actions (Gripper-Tracking) regeneriert
+3. Der Planning Server las `base_action_dim = _full_dset.action_dim` direkt vom Dataset → erhielt 8
+4. `full_action_dim = 8 × frameskip(2) = 16` → CEM erzeugte 16D Actions
+5. Das Model's Action-Encoder (`Conv1d(12, 10)`) erwartet aber `6 × 2 = 12` Kanäle → Crash
+
+**Kernproblem:** Der Server vertraute der Dataset-Action-Dim statt der Model-Config. Wenn sich
+das Dataset nachträglich ändert (z.B. durch Regenerierung), divergieren die Dimensionen.
+
+### 14.3 Fix (planning_server.py)
+
+1. **Autoritative Dimension:** `model_cfg.env.action_dim` aus `hydra.yaml` bestimmt `base_action_dim`,
+   nicht die Dataset-Klasse
+2. **Stats-Adaption:** Wenn Dataset 8D hat aber Model 6D erwartet, werden die Normalisierungs-Stats
+   angepasst (Gripper-Dims an Index 3,7 entfernt)
+3. **Workspace Bounds:** 8D-Bounds aus `plan_franka.yaml` werden automatisch auf 6D reduziert
+   (Gripper-Dims entfernt)
+4. **Gripper-Config:** Bei 6D-Modellen wird die Gripper-Konfiguration übersprungen (kein Gripper
+   in der Action)
+5. **Diagnostik-Print:** `target_ee` Index passt sich an (8D: `[4:7]`, 6D: `[3:6]`)
+
+### 14.4 Empfehlung
+
+- **Normalisierungs-Stats im Checkpoint speichern** (langfristiger Fix): Dann ist der Server
+  unabhängig vom aktuellen Dataset-Zustand
+- **Datasets nicht nachträglich regenerieren**, wenn trainierte Models darauf basieren
+- **Immer `model_cfg.env.action_dim`** als Ground Truth für die Dimension verwenden
 - **Datensatz-Verifikation**: Actions, Proprio, RGB-Check → siehe Abschnitt 11

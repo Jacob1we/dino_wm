@@ -25,6 +25,7 @@ class CEMPlanner(BasePlanner):
         action_bounds=None,
         gripper_indices=None,
         gripper_open_prior=True,
+        gripper_mask=False,
         **kwargs,
     ):
         super().__init__(
@@ -60,6 +61,17 @@ class CEMPlanner(BasePlanner):
         # In normalisiertem Raum: 0 → (0 - mean) / std, 1 → (1 - mean) / std
         self.gripper_indices = gripper_indices
         self.gripper_open_prior = gripper_open_prior
+        
+        # Gripper-Mask: Gripper-Dims werden komplett eingefroren (sigma=0).
+        # CEM verschwendet keine Optimierungskapazität auf irrelevante Dims.
+        # Wird für 2-Phase Planning verwendet, wo Gripper deterministisch
+        # auf dem Client gesteuert wird (nicht über Actions).
+        self.gripper_mask = gripper_mask
+        if self.gripper_mask and self.gripper_indices:
+            print(f"  CEM Gripper-Mask: AKTIV — Dims {self.gripper_indices} eingefroren (sigma=0)")
+            # Quantisierung wird bei Masking deaktiviert (sigma=0 → kein Sampling)
+            if gripper_indices:
+                print(f"    Gripper-Quantisierung implizit deaktiviert (Mask hat Vorrang)")
 
     def _clamp_actions(self, action):
         """Clampt Actions auf gültige Bounds (in normalisiertem Raum).
@@ -79,9 +91,13 @@ class CEMPlanner(BasePlanner):
         Gripper ist binär (offen=0, geschlossen=1). CEM sampelt aber kontinuierlich.
         → Snapping auf den nächsten gültigen normalisierten Wert reduziert den
         Suchraum und verhindert physikalisch unsinnige Gripper-Zwischenwerte.
+        
+        Wird bei gripper_mask=True NICHT aufgerufen (sigma=0 → kein Sampling).
         """
         if self.gripper_indices is None:
             return action
+        if self.gripper_mask:
+            return action  # Mask-Modus: Gripper ist fix, keine Quantisierung nötig
         
         # Normalisierte Werte für Gripper=0 und Gripper=1 berechnen
         # Gripper-Dims haben mean=0.5, std=0.5 → norm(0)=-1.0, norm(1)=+1.0
@@ -139,6 +155,21 @@ class CEMPlanner(BasePlanner):
                         new_mu[:, :, gi] = norm_open
             
             mu = torch.cat([mu, new_mu.to(device)], dim=1)
+        
+        # Gripper-Mask: sigma=0 für Gripper-Dims → kein Sampling, mu bleibt fix.
+        # CEM optimiert NUR die xyz-Positionen, Gripper-Dims sind eingefroren.
+        if self.gripper_mask and self.gripper_indices is not None:
+            for gi in self.gripper_indices:
+                if gi < self.action_dim:
+                    sigma[:, :, gi] = 0.0
+                    # mu ist bereits auf norm(0) = OPEN gesetzt (durch open_prior oben)
+                    # Falls kein open_prior: explizit auf norm(0) setzen
+                    if not self.gripper_open_prior:
+                        action_mean = self.preprocessor.action_mean
+                        action_std = self.preprocessor.action_std
+                        norm_open = (0.0 - action_mean[gi].item()) / action_std[gi].item()
+                        mu[:, :, gi] = norm_open
+        
         return mu, sigma
 
     def plan(self, obs_0, obs_g, actions=None):
@@ -205,6 +236,14 @@ class CEMPlanner(BasePlanner):
                 
                 # Auch mu auf Bounds clampen (verhindert Drift über Iterationen)
                 mu[traj] = self._clamp_actions(mu[traj].unsqueeze(0)).squeeze(0)
+                
+                # Gripper-Mask: sigma wieder auf 0 setzen (topk_action.std()
+                # koennte winzige Werte erzeugen wenn alle topk-Actions denselben
+                # Gripper-Wert haben, aber sicherheitshalber explizit nullen).
+                if self.gripper_mask and self.gripper_indices is not None:
+                    for gi in self.gripper_indices:
+                        if gi < self.action_dim:
+                            sigma[traj, :, gi] = 0.0
 
             self.wandb_run.log(
                 {f"{self.logging_prefix}/loss": np.mean(losses), "step": i + 1}

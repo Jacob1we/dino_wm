@@ -56,17 +56,25 @@ workspace_bounds:
   #   g: [0.0,  1.0]   — Gripper (binaer)
   # Mit ±10% Marge fuer CEM-Exploration.
 
-# --- Gripper-Quantisierung ---
-# Gripper ist binaer (offen=0, geschlossen=1). CEM sampelt aber kontinuierlich.
-# Quantisierung snappt auf den naechsten gueltigen Wert → reduziert Suchraum.
+# --- Gripper-Konfiguration ---
+# Fuer 2-Phase Planning: Gripper-Dimensionen werden MASKIERT (sigma=0),
+# sodass CEM keine Optimierungskapazitaet auf irrelevante Dims verschwendet.
+# Die Gripper-Steuerung erfolgt deterministisch auf dem Client.
+#
+# Fuer Single-Phase Planning (Legacy): Quantisierung auf {0, 1} + Open-Prior.
 gripper:
-  quantize: true
+  quantize: false                     # true = binäre Quantisierung {0, 1}
+                                      # false = keine Quantisierung (fuer mask-Modus)
+  mask: true                          # true = Gripper-Dims einfrieren (sigma=0, mu=norm(0))
+                                      #        CEM optimiert NUR xyz-Dimensionen.
+                                      #        Gripper-Werte in der Action werden ignoriert.
+                                      # false = CEM optimiert auch Gripper-Dims
   # Indizes der Gripper-Dimensionen in der 8D Basis-Action
   # [x_s, y_s, z_s, g_s, x_e, y_e, z_e, g_e] → Gripper bei Index 3 und 7
   base_indices: [3, 7]
   # Open-Prior: Initialisiert CEM mu fuer Gripper-Dims auf norm(0) (=OPEN)
-  # statt 0.0 (=Midpoint). Verhindert, dass 50% der Samples sofort zu
-  # "closed" quantisiert werden (weil Goal-Bild geschlossenen Gripper zeigt).
+  # statt 0.0 (=Midpoint). Relevant fuer mask=true (Gripper ganz offen fixieren)
+  # und fuer quantize=true (verhindert 50% sofortige "closed"-Samples).
   open_prior: true
 
 

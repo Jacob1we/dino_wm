@@ -444,9 +444,11 @@ else:
     planning_cfg = OmegaConf.create({})
     print(f"  WARNUNG: {_planning_cfg_path} nicht gefunden, verwende Defaults")
 
-# --- Gripper-Quantisierung (aus Config) ---
+# --- Gripper-Konfiguration (aus Config) ---
 _grip_cfg = OmegaConf.to_container(planning_cfg.get("gripper", {}), resolve=True)
-if _grip_cfg.get("quantize", False) and _grip_cfg.get("base_indices"):
+gripper_mask = _grip_cfg.get("mask", False)
+
+if _grip_cfg.get("base_indices"):
     base_gripper_idx = _grip_cfg["base_indices"]
     gripper_indices = [
         gi + k * base_action_dim
@@ -455,11 +457,19 @@ if _grip_cfg.get("quantize", False) and _grip_cfg.get("base_indices"):
     ]
     gripper_open_prior = _grip_cfg.get("open_prior", True)
     print(f"  Gripper-Indices (full {full_action_dim}D): {gripper_indices}")
-    print(f"  Gripper Open-Prior: {'AKTIV' if gripper_open_prior else 'INAKTIV'}")
+    
+    if gripper_mask:
+        print(f"  Gripper-Mask: AKTIV — CEM ignoriert Gripper-Dims (sigma=0)")
+        print(f"  Gripper-Quantisierung: implizit INAKTIV (Mask hat Vorrang)")
+    elif _grip_cfg.get("quantize", False):
+        print(f"  Gripper-Quantisierung: AKTIV")
+        print(f"  Gripper Open-Prior: {'AKTIV' if gripper_open_prior else 'INAKTIV'}")
+    else:
+        print(f"  Gripper-Quantisierung: INAKTIV")
 else:
     gripper_indices = None
     gripper_open_prior = False
-    print(f"  Gripper-Quantisierung: INAKTIV")
+    print(f"  Gripper-Konfiguration: keine base_indices definiert")
 
 # --- Workspace Bounds (aus Config) ---
 _ws_cfg = OmegaConf.to_container(planning_cfg.get("workspace_bounds", {}), resolve=True)
@@ -508,6 +518,7 @@ planner = hydra.utils.instantiate(
     gripper_indices=gripper_indices,
     action_bounds=action_bounds,
     gripper_open_prior=gripper_open_prior,
+    gripper_mask=gripper_mask,
 )
 
 search_dim = horizon * full_action_dim
@@ -516,7 +527,7 @@ print(f"  Modus: {args.mode.upper()}")
 print(f"  CEM: samples={planner_cfg.num_samples}, steps={planner_cfg.opt_steps}, "
       f"topk={planner_cfg.topk}, horizon={horizon}")
 print(f"  Action Bounds: {'AKTIV' if action_bounds else 'INAKTIV'}, var_scale={planner_cfg.var_scale}")
-print(f"  Gripper-Quantisierung: {'AKTIV' if gripper_indices else 'INAKTIV'}")
+print(f"  Gripper: {'MASK (sigma=0)' if gripper_mask else 'QUANT' if gripper_indices else 'INAKTIV'}")
 print(f"  Suchraum: {search_dim}D (H={horizon} × D={full_action_dim})")
 
 # =============================================================================

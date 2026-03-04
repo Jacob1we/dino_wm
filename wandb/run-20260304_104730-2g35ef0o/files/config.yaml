@@ -48,6 +48,132 @@ base_action_dim:
 chunk_size:
   desc: null
   value: null
+client:
+  desc: null
+  value:
+    ee_threshold: 0.005
+    goal_image: /media/tsp_jw/data/DINO_WM/fcs_datasets/00_Archiv/NEps1000_RobOpac0_NPrim20_NCams4_NCube1/:2:-1
+    goal_image_place: null
+    headless: false
+    log_dir: null
+    max_steps: 50
+    mode: online
+    n_episodes: 5
+    port: 5555
+    robot_opacity_for_capture: 1.0
+    scene_config:
+      cam_frequency: 20
+      cam_resolution:
+      - 224
+      - 224
+      cameras:
+      - euler:
+        - 66.0
+        - 0.0
+        - 32.05
+        name: front_right
+        position:
+        - 1.6
+        - -2.0
+        - 1.27
+      - euler:
+        - 66.0
+        - 0.0
+        - 147.95
+        name: front_left
+        position:
+        - 1.6
+        - 2.0
+        - 1.27
+      controller:
+        air_dt: 1.0
+        air_speed_multiplier: 1.0
+        critical_dt: 0.01
+        critical_height_threshold: 0.1
+        critical_speed_factor: 0.5
+        eef_orientation_mode: fixed
+        fixed_eef_orientation:
+        - 0.0
+        - 0.0
+        - 1.0
+        - 0.0
+        grip_dt: 0.15
+        guarantee_final_position: true
+        guarantee_phases:
+        - 1
+        - 6
+        height_adaptive_speed: false
+        release_dt: 0.15
+        trajectory_resolution: 1.0
+        wait_dt: 0.5
+        wrist_hard_lock: false
+      cube_size: 0.05
+      dataset_name: NEps1000_RobOpac0_NPrim20_NCams2_FuseChStack_NCube1_EEFfix_TrackGrip
+      dataset_path: /media/tsp_jw/data/DINO_WM/fcs_datasets
+      fixed_cube_color:
+      - 0.9
+      - 0.1
+      - 0.1
+      fixed_light:
+        intensity: 8000.0
+        position:
+        - 0.4
+        - 0.0
+        - 2.0
+        radius: 0.5
+      fixed_plane_rgba:
+      - 0.82
+      - 0.82
+      - 0.82
+      - 1.0
+      fusion:
+        alpha: 0.5
+        channel_mode: anaglyph3d
+        depth_max: 5.0
+        enabled: true
+        mode: channel_stack
+        primary_camera: 0
+        secondary_camera: 1
+      max_placement_tries: 200
+      min_dist_factor: 1.5
+      n_cubes: 1
+      plane_lift: 0.001
+      robot_base_clearance: 0.3
+      robot_max_reach: 0.75
+      robot_min_reach: 0.3
+      robot_opacity_for_capture: 1.0
+      scene:
+        length: 0.75
+        plane_lift: 0.001
+        width: 0.6
+      scene_length: 0.75
+      scene_width: 0.6
+      seed: 111
+      vis_rand_enabled: false
+      visual_randomization:
+        enabled: false
+        fixed_cube_color:
+        - 0.9
+        - 0.1
+        - 0.1
+        fixed_light:
+          intensity: 8000.0
+          position:
+          - 0.4
+          - 0.0
+          - 2.0
+          radius: 0.5
+        fixed_plane_rgba:
+        - 0.82
+        - 0.82
+        - 0.82
+        - 1.0
+      yaw_range:
+      - 0.0
+      - 0.0
+    settle_steps: 20
+    timeout: 1000
+    two_phase_enabled: true
 frameskip:
   desc: null
   value: 2

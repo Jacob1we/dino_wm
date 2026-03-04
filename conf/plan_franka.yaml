@@ -65,7 +65,7 @@ workspace_bounds:
 gripper:
   quantize: false                     # true = binäre Quantisierung {0, 1}
                                       # false = keine Quantisierung (fuer mask-Modus)
-  mask: false                          # true = Gripper-Dims einfrieren (sigma=0, mu=norm(0))
+  mask: True                          # true = Gripper-Dims einfrieren (sigma=0, mu=norm(0))
                                       #        CEM optimiert NUR xyz-Dimensionen.
                                       #        Gripper-Werte in der Action werden ignoriert.
                                       # false = CEM optimiert auch Gripper-Dims

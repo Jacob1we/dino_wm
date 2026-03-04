@@ -621,6 +621,17 @@ def img_to_obs(img: np.ndarray, ee_pos: np.ndarray = None) -> dict:
 warm_start = None  # (1, horizon, action_dim) fuer MPC Warm-Start
 goal_obs = None
 
+def _safe_resolve(cfg):
+    """OmegaConf.to_container mit Fallback auf resolve=False.
+    
+    Manche Configs enthalten Hydra-Interpolationen (${now:...}, ${oc.env:...})
+    die ausserhalb eines Hydra-Kontexts nicht aufloesbar sind.
+    """
+    try:
+        return OmegaConf.to_container(cfg, resolve=True)
+    except Exception:
+        return OmegaConf.to_container(cfg, resolve=False)
+
 server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 server.bind(("localhost", args.port))
@@ -649,7 +660,64 @@ while True:
             msg = pickle.loads(data)
             cmd = msg.get("cmd")
 
-            if cmd == "set_client_config":
+            if cmd == "get_run_info":
+                # Client fragt Server-Konfiguration ab (fuer run_config.yaml)
+                run_info = {
+                    # Modell-Info
+                    "model_name": args.model_name,
+                    "model_path": model_path,
+                    "model_epoch": "latest",
+                    "model_ckpt": str(model_ckpt),
+                    # Dataset-Info (aus Trainings-Config)
+                    "dataset_path": _safe_resolve(model_cfg.env.dataset).get("data_path", "unknown"),
+                    "dataset_action_dim": dset_action_dim,
+                    "model_action_dim": model_action_dim,
+                    "base_action_dim": base_action_dim,
+                    "full_action_dim": full_action_dim,
+                    "frameskip": frameskip,
+                    # Trainings-Hyperparameter
+                    "training": {
+                        "epochs": model_cfg.training.get("epochs", None),
+                        "batch_size": model_cfg.training.get("batch_size", None),
+                        "encoder_lr": model_cfg.training.get("encoder_lr", None),
+                        "decoder_lr": model_cfg.training.get("decoder_lr", None),
+                        "predictor_lr": model_cfg.training.get("predictor_lr", None),
+                        "img_size": model_cfg.get("img_size", None),
+                        "num_hist": model_cfg.get("num_hist", None),
+                        "num_pred": model_cfg.get("num_pred", None),
+                        "frameskip": model_cfg.get("frameskip", None),
+                        "concat_dim": model_cfg.get("concat_dim", None),
+                    },
+                    # CEM-Parameter
+                    "cem": {
+                        "horizon": horizon,
+                        "num_samples": int(planner_cfg.num_samples),
+                        "opt_steps": int(planner_cfg.opt_steps),
+                        "topk": int(planner_cfg.topk),
+                        "var_scale": float(planner_cfg.get("var_scale", 1.0)),
+                    },
+                    # Server-Parameter
+                    "server": {
+                        "mode": args.mode,
+                        "port": args.port,
+                        "chunk_size": args.chunk_size,
+                        "n_sub_actions": args.n_sub_actions,
+                        "planning_config": args.planning_config,
+                    },
+                    # Planning-Config (Workspace Bounds, Gripper)
+                    "planning_config_content": _safe_resolve(planning_cfg) if planning_cfg else {},
+                    # Normalisierungs-Statistiken
+                    "normalization": {
+                        "action_mean": action_mean.tolist(),
+                        "action_std": action_std.tolist(),
+                        "proprio_mean": proprio_mean.tolist(),
+                        "proprio_std": proprio_std.tolist(),
+                    },
+                }
+                response = {"status": "ok", "run_info": run_info}
+                print(f"  Run-Info gesendet ({len(run_info)} Keys)")
+
+            elif cmd == "set_client_config":
                 # Client sendet seine komplette Konfiguration
                 client_cfg = msg.get("config", {})
                 wandb_run.update_config(client_cfg)

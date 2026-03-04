@@ -26,6 +26,7 @@ class CEMPlanner(BasePlanner):
         gripper_indices=None,
         gripper_open_prior=True,
         gripper_mask=False,
+        sigma_scale=None,
         **kwargs,
     ):
         super().__init__(
@@ -45,7 +46,19 @@ class CEMPlanner(BasePlanner):
         self.eval_every = eval_every
         self.logging_prefix = logging_prefix
 
-        # Action Bounds (in normalisiertem Raum)
+        # --- Per-Dimension Sigma-Skalierung ---
+        # sigma_scale: (action_dim,) Tensor — Multiplikator auf var_scale pro Dim.
+        # Ermöglicht z.B. mehr z-Exploration bei gleicher xy-Exploration
+        # im normalisierten Raum. Kompensiert unterschiedliche action_std
+        # ohne den CEM-Raum komplett umzubauen.
+        # Default: None → alle Dims gleich (= bisheriges Verhalten)
+        if sigma_scale is not None:
+            self.sigma_scale = sigma_scale.float()
+            print(f"  CEM Sigma-Scale: {self.sigma_scale[:min(8, action_dim)].tolist()} (erste {min(8, action_dim)} Dims)")
+        else:
+            self.sigma_scale = None
+
+        # Action Bounds (im normalisierten Raum)
         # action_bounds: dict mit "lower" und "upper" als (action_dim,) Tensoren
         # → CEM-Samples werden auf diesen Bereich geclampt
         if action_bounds is not None:
@@ -61,24 +74,16 @@ class CEMPlanner(BasePlanner):
         # In normalisiertem Raum: 0 → (0 - mean) / std, 1 → (1 - mean) / std
         self.gripper_indices = gripper_indices
         self.gripper_open_prior = gripper_open_prior
-        
+
         # Gripper-Mask: Gripper-Dims werden komplett eingefroren (sigma=0).
-        # CEM verschwendet keine Optimierungskapazität auf irrelevante Dims.
-        # Wird für 2-Phase Planning verwendet, wo Gripper deterministisch
-        # auf dem Client gesteuert wird (nicht über Actions).
         self.gripper_mask = gripper_mask
         if self.gripper_mask and self.gripper_indices:
             print(f"  CEM Gripper-Mask: AKTIV — Dims {self.gripper_indices} eingefroren (sigma=0)")
-            # Quantisierung wird bei Masking deaktiviert (sigma=0 → kein Sampling)
             if gripper_indices:
                 print(f"    Gripper-Quantisierung implizit deaktiviert (Mask hat Vorrang)")
 
     def _clamp_actions(self, action):
-        """Clampt Actions auf gültige Bounds (in normalisiertem Raum).
-        
-        Verhindert, dass CEM-Samples außerhalb des physischen Arbeitsbereichs
-        landen (z.B. negative x-Koordinaten bei Franka).
-        """
+        """Clampt Actions auf gültige Bounds (normalisierter Raum)."""
         if self.action_lower is not None:
             lower = self.action_lower.to(action.device)
             upper = self.action_upper.to(action.device)
@@ -98,18 +103,15 @@ class CEMPlanner(BasePlanner):
             return action
         if self.gripper_mask:
             return action  # Mask-Modus: Gripper ist fix, keine Quantisierung nötig
-        
-        # Normalisierte Werte für Gripper=0 und Gripper=1 berechnen
-        # Gripper-Dims haben mean=0.5, std=0.5 → norm(0)=-1.0, norm(1)=+1.0
+
         action_mean = self.preprocessor.action_mean
         action_std = self.preprocessor.action_std
-        
+
         for gi in self.gripper_indices:
             if gi < action.shape[-1]:
                 norm_0 = (0.0 - action_mean[gi].item()) / action_std[gi].item()
                 norm_1 = (1.0 - action_mean[gi].item()) / action_std[gi].item()
                 mid = (norm_0 + norm_1) / 2.0
-                # Snap: < mid → norm(0), >= mid → norm(1)
                 action[..., gi] = torch.where(
                     action[..., gi] < mid,
                     torch.tensor(norm_0, device=action.device, dtype=action.dtype),
@@ -118,20 +120,28 @@ class CEMPlanner(BasePlanner):
         return action
 
     def init_mu_sigma(self, obs_0, actions=None):
-        """
-        actions: (B, T, action_dim) torch.Tensor, T <= self.horizon
-        mu, sigma could depend on current obs, but obs_0 is only used for providing n_evals for now
+        """Initialisiert CEM mu und sigma im normalisierten Raum.
         
-        GRIPPER-BIAS FIX: Gripper-Dimensionen werden auf norm(0) (= OPEN)
-        initialisiert statt auf 0.0. Grund: 0.0 liegt exakt auf dem Midpoint
-        zwischen norm(0)=-1.0 und norm(1)=+1.0 → 50% der CEM-Samples werden
-        zu "closed" quantisiert → Goal-Bild (Gripper geschlossen) selektiert
-        diese sofort → Gripper schließt bereits im allerersten Horizon-Step.
-        Mit mu=norm(0) startet der CEM mit Open-Gripper-Prior und schließt
-        erst wenn die visuelle Evidenz es an einem bestimmten Step verlangt.
+        mu = 0 (= action_mean in Weltkoordinaten).
+        sigma = var_scale * sigma_scale (per-Dimension skalierbar).
+        
+        sigma_scale erlaubt gezielte Kompensation: z.B. wenn action_std_z < action_std_xy,
+        dann sigma_scale_z > 1.0 → mehr physische z-Exploration.
+        
+        args:
+            obs_0: dict mit "visual" und "proprio"
+            actions: (B, T, action_dim) — Warm-Start Actions (normalisiert)
         """
         n_evals = obs_0["visual"].shape[0]
-        sigma = self.var_scale * torch.ones([n_evals, self.horizon, self.action_dim])
+
+        # Basis-Sigma: var_scale * ones, optional per-Dim skaliert
+        base_sigma = self.var_scale * torch.ones(self.action_dim)
+        if self.sigma_scale is not None:
+            base_sigma = base_sigma * self.sigma_scale
+        sigma = base_sigma.unsqueeze(0).unsqueeze(0).expand(
+            n_evals, self.horizon, self.action_dim
+        ).clone()
+
         if actions is None:
             mu = torch.zeros(n_evals, 0, self.action_dim)
         else:
@@ -142,10 +152,8 @@ class CEMPlanner(BasePlanner):
 
         if remaining_t > 0:
             new_mu = torch.zeros(n_evals, remaining_t, self.action_dim)
-            
-            # Gripper Open-Prior (per Config steuerbar):
-            # Initialisiert Gripper-Dims auf norm(0) = OPEN statt 0.0 = Midpoint.
-            # Verhindert, dass 50% der Samples sofort zu "closed" quantisiert werden.
+
+            # Gripper Open-Prior: mu = norm(0) statt 0.0 (= Midpoint)
             if self.gripper_open_prior and self.gripper_indices is not None:
                 action_mean = self.preprocessor.action_mean
                 action_std = self.preprocessor.action_std
@@ -153,31 +161,32 @@ class CEMPlanner(BasePlanner):
                     if gi < self.action_dim:
                         norm_open = (0.0 - action_mean[gi].item()) / action_std[gi].item()
                         new_mu[:, :, gi] = norm_open
-            
+
             mu = torch.cat([mu, new_mu.to(device)], dim=1)
-        
-        # Gripper-Mask: sigma=0 für Gripper-Dims → kein Sampling, mu bleibt fix.
-        # CEM optimiert NUR die xyz-Positionen, Gripper-Dims sind eingefroren.
+
+        # Gripper-Mask: sigma=0 für Gripper-Dims
         if self.gripper_mask and self.gripper_indices is not None:
             for gi in self.gripper_indices:
                 if gi < self.action_dim:
                     sigma[:, :, gi] = 0.0
-                    # mu ist bereits auf norm(0) = OPEN gesetzt (durch open_prior oben)
-                    # Falls kein open_prior: explizit auf norm(0) setzen
                     if not self.gripper_open_prior:
                         action_mean = self.preprocessor.action_mean
                         action_std = self.preprocessor.action_std
                         norm_open = (0.0 - action_mean[gi].item()) / action_std[gi].item()
                         mu[:, :, gi] = norm_open
-        
+
         return mu, sigma
 
     def plan(self, obs_0, obs_g, actions=None):
         """
+        CEM-Optimierung im normalisierten Raum.
+        
         Args:
-            actions: normalized
+            obs_0: Aktuelle Beobachtung (dict: visual, proprio)
+            obs_g: Ziel-Beobachtung
+            actions: (B, T, action_dim) normalisierte Warm-Start Actions
         Returns:
-            actions: (B, T, action_dim) torch.Tensor, T <= self.horizon
+            actions: (B, T, action_dim) normalisierte Actions
         """
         trans_obs_0 = move_to_device(
             self.preprocessor.transform_obs(obs_0), self.device
@@ -192,7 +201,6 @@ class CEMPlanner(BasePlanner):
         n_evals = mu.shape[0]
 
         for i in range(self.opt_steps):
-            # optimize individual instances
             losses = []
             for traj in range(n_evals):
                 cur_trans_obs_0 = {
@@ -214,13 +222,12 @@ class CEMPlanner(BasePlanner):
                     * sigma[traj]
                     + mu[traj]
                 )
-                action[0] = mu[traj]  # optional: make the first one mu itself
-                
-                # Action Bounds: auf gültigen Arbeitsbereich clippen
+                action[0] = mu[traj]  # mu selbst als ein Sample
+
+                # Action Bounds & Gripper-Quantisierung
                 action = self._clamp_actions(action)
-                # Gripper-Quantisierung: binäre Werte {0, 1} erzwingen
                 action = self._quantize_gripper(action)
-                
+
                 with torch.no_grad():
                     i_z_obses, i_zs = self.wm.rollout(
                         obs_0=cur_trans_obs_0,
@@ -233,13 +240,11 @@ class CEMPlanner(BasePlanner):
                 losses.append(loss[topk_idx[0]].item())
                 mu[traj] = topk_action.mean(dim=0)
                 sigma[traj] = topk_action.std(dim=0)
-                
-                # Auch mu auf Bounds clampen (verhindert Drift über Iterationen)
+
+                # mu auf Bounds clampen (verhindert Drift über Iterationen)
                 mu[traj] = self._clamp_actions(mu[traj].unsqueeze(0)).squeeze(0)
-                
-                # Gripper-Mask: sigma wieder auf 0 setzen (topk_action.std()
-                # koennte winzige Werte erzeugen wenn alle topk-Actions denselben
-                # Gripper-Wert haben, aber sicherheitshalber explizit nullen).
+
+                # Gripper-Mask: sigma wieder auf 0 setzen
                 if self.gripper_mask and self.gripper_indices is not None:
                     for gi in self.gripper_indices:
                         if gi < self.action_dim:
@@ -257,6 +262,6 @@ class CEMPlanner(BasePlanner):
                 self.wandb_run.log(logs)
                 self.dump_logs(logs)
                 if np.all(successes):
-                    break  # terminate planning if all success
+                    break
 
-        return mu, np.full(n_evals, np.inf)  # all actions are valid
+        return mu, np.full(n_evals, np.inf)

@@ -520,6 +520,29 @@ else:
     else:
         print(f"  Gripper-Konfiguration: keine base_indices definiert")
 
+# --- Sigma-Scale (aus Config) ---
+# Per-Dimension Multiplikator auf var_scale im normalisierten Raum.
+# Kompensiert unterschiedliche action_std pro Dimension:
+#   action_std_z < action_std_xy → bei sigma=1 (norm) wird z weniger exploriert.
+#   sigma_scale_z > 1.0 → gleich viel physische Exploration wie xy.
+_ss_cfg = OmegaConf.to_container(planning_cfg.get("sigma_scale", {}), resolve=True)
+if _ss_cfg.get("enabled", False):
+    _xy_s = _ss_cfg.get("xy", 1.0)
+    _z_s = _ss_cfg.get("z", 1.0)
+    _g_s = _ss_cfg.get("g", 1.0)
+    if base_action_dim == 8:
+        # [x_s, y_s, z_s, g_s, x_e, y_e, z_e, g_e]
+        _ss_base = torch.tensor([_xy_s, _xy_s, _z_s, _g_s, _xy_s, _xy_s, _z_s, _g_s])
+    else:
+        # [x_s, y_s, z_s, x_e, y_e, z_e]
+        _ss_base = torch.tensor([_xy_s, _xy_s, _z_s, _xy_s, _xy_s, _z_s])
+    sigma_scale = _ss_base.repeat(frameskip)[:full_action_dim]
+    print(f"\n  Sigma-Scale: xy={_xy_s}, z={_z_s}, g={_g_s}")
+    print(f"    (full {full_action_dim}D): {sigma_scale.tolist()}")
+else:
+    sigma_scale = None
+    print(f"\n  Sigma-Scale: INAKTIV (alle Dims gleich)")
+
 # --- Workspace Bounds (aus Config) ---
 _ws_cfg = OmegaConf.to_container(planning_cfg.get("workspace_bounds", {}), resolve=True)
 if _ws_cfg.get("enabled", False) and _ws_cfg.get("lower_8d") and _ws_cfg.get("upper_8d"):
@@ -578,6 +601,7 @@ planner = hydra.utils.instantiate(
     action_bounds=action_bounds,
     gripper_open_prior=gripper_open_prior,
     gripper_mask=gripper_mask,
+    sigma_scale=sigma_scale,
 )
 
 search_dim = horizon * full_action_dim
@@ -585,6 +609,7 @@ print(f"\n✓ Setup komplett")
 print(f"  Modus: {args.mode.upper()}")
 print(f"  CEM: samples={planner_cfg.num_samples}, steps={planner_cfg.opt_steps}, "
       f"topk={planner_cfg.topk}, horizon={horizon}")
+print(f"  Sigma-Scale: {sigma_scale[:min(8,full_action_dim)].tolist() if sigma_scale is not None else 'uniform'}")
 print(f"  Action Bounds: {'AKTIV' if action_bounds else 'INAKTIV'}, var_scale={planner_cfg.var_scale}")
 print(f"  Gripper: {'MASK (sigma=0)' if gripper_mask else 'QUANT' if gripper_indices else 'INAKTIV'}")
 print(f"  Suchraum: {search_dim}D (H={horizon} × D={full_action_dim})")

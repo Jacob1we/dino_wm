@@ -40,6 +40,20 @@ objective:
 # Alle Werte stammen aus dem Franka-Workspace und den Datensatz-Statistiken.
 # Fuer andere Roboter/Environments muessen sie angepasst werden.
 
+# --- Per-Dimension Sigma-Skalierung ---
+# Multiplikator auf var_scale pro Dimensions-Gruppe im normalisierten Raum.
+# Problem: action_std variiert pro Dimension:
+#   x_std=0.121, y_std=0.158, z_std=0.070
+#   → Bei sigma=1 (norm) wird z nur 0.070m exploriert, xy aber 0.12-0.16m.
+#   → z wird systematisch 1.7-2.3x weniger exploriert als xy.
+# Loesung: z-Scale hoeher setzen um physisch gleich viel zu explorieren.
+#   Empfehlung: z = action_std_xy / action_std_z ≈ 0.14 / 0.07 ≈ 2.0
+sigma_scale:
+  enabled: true
+  xy: 1.0    # Flaechenexploration (x und y gleich)
+  z:  2.0    # Hoehenexploration (kompensiert kleineres action_std_z)
+  g:  1.0    # Gripper (irrelevant bei mask=true)
+
 # --- Workspace Bounds (physischer Arbeitsbereich in Weltkoordinaten) ---
 # CEM-Samples werden auf diesen Bereich geclampt (nach Normalisierung).
 # Verhindert, dass der Planner Actions ausserhalb des physisch moeglichen
@@ -47,14 +61,16 @@ objective:
 workspace_bounds:
   enabled: true
   # 8D pro Sub-Action: [x_start, y_start, z_start, g_start, x_end, y_end, z_end, g_end]
-  lower_8d: [0.05, -0.40, 0.02, 0.0, 0.05, -0.40, 0.02, 0.0]
-  upper_8d: [0.80,  0.45, 0.50, 1.0, 0.80,  0.45, 0.50, 1.0]
-  # Grenzen aus Franka-Workspace:
-  #   x: [0.10, 0.76] — vor dem Roboter (immer positiv!)
-  #   y: [-0.35, 0.40] — links/rechts
-  #   z: [0.04, 0.45]  — Hoehe (Tisch bis Lift)
-  #   g: [0.0,  1.0]   — Gripper (binaer)
-  # Mit ±10% Marge fuer CEM-Exploration.
+  lower_8d: [0.05, -0.40, 0.00, 0.0, 0.05, -0.40, 0.00, 0.0]
+  upper_8d: [0.80,  0.45, 0.12, 1.0, 0.80,  0.45, 0.12, 1.0]
+  # Datensatz Actual Min/Max:
+  #   x: [0.094, 0.747]
+  #   y: [-0.350, 0.348]
+  #   z: [0.063, 0.415] (End: [0.063, 0.350])
+  #   g: [0.0, 1.0]
+  # Bounds fuer z bewusst eng gesetzt ([0.00, 0.12]):
+  #   Der Greifer muss tief genug kommen (Tischhoehe ~0.04-0.07).
+  #   z > 0.12 wird nicht benoetigt (Wuerfel greifen, nicht liften).
 
 # --- Gripper-Konfiguration ---
 # Fuer 2-Phase Planning: Gripper-Dimensionen werden MASKIERT (sigma=0),

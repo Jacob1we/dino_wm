@@ -122,6 +122,7 @@ state_mean = _full_dset.state_mean.clone()
 state_std = _full_dset.state_std.clone()
 proprio_mean = _full_dset.proprio_mean.clone()
 proprio_std = _full_dset.proprio_std.clone()
+dataset_path = _dset_cfg["data_path"]
 
 del _full_dset, _transform, _dset_cfg
 gc.collect()
@@ -460,6 +461,8 @@ server_config = {
     "base_action_dim": base_action_dim,
     "frameskip": frameskip,
     "search_dim": horizon * full_action_dim,
+    # Dataset-Pfad (fuer Folder-Benennung im Client)
+    "dataset_path": dataset_path,
     # Modell-Config (aus Training)
     "training_config": OmegaConf.to_container(model_cfg, resolve=True),
     # Server-Parameter
@@ -508,9 +511,11 @@ if planning_cfg:
         _upper_base = torch.tensor(_ws_cfg["upper_8d"][:base_action_dim], dtype=torch.float32)
         _lower_full = _lower_base.repeat(frameskip)[:full_action_dim]
         _upper_full = _upper_base.repeat(frameskip)[:full_action_dim]
-        # In normalisierten Raum konvertieren
-        norm_lower = ((_lower_full - action_mean) / action_std)
-        norm_upper = ((_upper_full - action_mean) / action_std)
+        # In normalisierten Raum konvertieren (repeated mean/std aus Preprocessor)
+        _act_mean = preprocessor.action_mean[:full_action_dim]
+        _act_std = preprocessor.action_std[:full_action_dim]
+        norm_lower = ((_lower_full - _act_mean) / _act_std)
+        norm_upper = ((_upper_full - _act_mean) / _act_std)
         action_bounds = {
             "lower": torch.min(norm_lower, norm_upper),
             "upper": torch.max(norm_lower, norm_upper),

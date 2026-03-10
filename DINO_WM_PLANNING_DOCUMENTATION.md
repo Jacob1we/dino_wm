@@ -69,6 +69,13 @@
     - 13.4 [Verifizierungsdaten](#134-verifizierungsdaten)
     - 13.5 [Empfohlener Fix und Workflow](#135-empfohlener-fix-und-workflow)
     - 13.6 [Querverweise](#136-querverweise)
+15. [Two-Phase Planning: EEF kommt in Phase 1 nicht tief genug — Root-Cause-Analyse (05.03.2026)](#15-two-phase-planning-eef-kommt-in-phase-1-nicht-tief-genug--root-cause-analyse-05032026)
+    - 15.1 [Beobachtung](#151-beobachtung)
+    - 15.2 [Ursache 1: OOD-Proprio durch hohe Startposition](#152-ursache-1-ood-proprio-durch-hohe-startposition)
+    - 15.3 [Ursache 2: Große z-Distanz überfordert den CEM-Horizont](#153-ursache-2-große-z-distanz-überfordert-den-cem-horizont)
+    - 15.4 [Ursache 3: Workspace-Bounds und Sigma-Asymmetrie](#154-ursache-3-workspace-bounds-und-sigma-asymmetrie)
+    - 15.5 [Zusammenfassung: Phase 1 vs. Phase 2 im Vergleich](#155-zusammenfassung-phase-1-vs-phase-2-im-vergleich)
+    - 15.6 [Lösungsansätze](#156-lösungsansätze)
 
 ---
 
@@ -3188,4 +3195,269 @@ das Dataset nachträglich ändert (z.B. durch Regenerierung), divergieren die Di
   unabhängig vom aktuellen Dataset-Zustand
 - **Datasets nicht nachträglich regenerieren**, wenn trainierte Models darauf basieren
 - **Immer `model_cfg.env.action_dim`** als Ground Truth für die Dimension verwenden
+
+---
+
+## 15. Two-Phase Planning: EEF kommt in Phase 1 nicht tief genug — Root-Cause-Analyse (05.03.2026)
+
+> **Datum:** 05.03.2026  
+> **Kontext:** Beim Two-Phase-Planning (Phase 1 = Approach/Grasp, Phase 2 = Transport/Place) wurde
+> wiederholt beobachtet, dass der End-Effektor in Phase 1 nicht tief genug kommt, um den Würfel zu
+> greifen. In Phase 2 erreicht der EEF dagegen zuverlässig die korrekte z-Tiefe. Diese Analyse
+> identifiziert drei zusammenwirkende Ursachen.
+
+### 15.1 Beobachtung
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│              BEOBACHTETES VERHALTEN (REPRODUZIERBAR)                        │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  PHASE 1 (P1-GRASP): CEM plant Anfahrt zum Würfel                         │
+│  ─────────────────────────────────────────────────                          │
+│  - EEF startet bei z ≈ 0.42 (Franka Ruhepose)                             │
+│  - Goal-Proprio: z ≈ 0.05–0.07 (Tischniveau, aus Dataset)                 │
+│  - ERGEBNIS: EEF bleibt bei z ≈ 0.10–0.15 hängen                          │
+│    → Gripper schließt sich UM den Würfel herum = VERFEHLT                  │
+│    → Zu hoch, Fingerspitzen greifen nicht um den Würfel                    │
+│                                                                             │
+│  GRIPPER-CLOSE (deterministisch, 15 settle steps)                          │
+│                                                                             │
+│  PHASE 2 (P2-PLACE): CEM plant Transport zum Ziel                         │
+│  ─────────────────────────────────────────────────                          │
+│  - EEF startet bei z ≈ 0.10–0.15 (wo Phase 1 endete)                      │
+│  - Goal-Proprio: z ≈ 0.05–0.07 (Ablageposition, aus Dataset)              │
+│  - ERGEBNIS: EEF erreicht z ≈ 0.05–0.07 zuverlässig ✓                     │
+│    → Korrekte Tiefe, aber Würfel wurde in Phase 1 nicht gegriffen          │
+│                                                                             │
+│  PARADOX: Phase 2 kann die Tiefe, Phase 1 nicht — obwohl beide            │
+│  den gleichen CEM, das gleiche World Model und ähnliche Goals nutzen.      │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Schlüsselfrage:** Warum funktioniert die z-Konvergenz in Phase 2, aber nicht in Phase 1?
+
+### 15.2 Ursache 1: OOD-Proprio durch hohe Startposition (Hauptursache)
+
+Die **Startposition des EEF** ist der entscheidende Unterschied zwischen beiden Phasen.
+
+**Phase 1** startet nach `env.reset()` von der **Franka-Ruhepose** mit z ≈ 0.42m, also ca. 40cm
+über dem Tisch. Das World Model wurde aber auf **Manipulationsdaten** trainiert, in denen der
+EEF sich ausschließlich nahe der Tischoberfläche bewegt (z ∈ [0.03, 0.15]).
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│              PROPRIO-NORMALISIERUNG: IN-DISTRIBUTION VS. OOD                │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  Proprio-Statistiken aus dem Trainings-Dataset:                             │
+│    proprio_mean_z ≈ 0.050                                                   │
+│    proprio_std_z  ≈ 0.070                                                   │
+│                                                                             │
+│  PHASE 1 START: z = 0.42 (Ruhepose)                                        │
+│    proprio_z_norm = (0.42 - 0.050) / 0.070 = +5.3σ                         │
+│    → EXTREMER AUSREISSER! 5.3 Standardabweichungen über dem Mittelwert     │
+│    → Das World Model hat NIEMALS einen Proprio-Wert in dieser Größen-      │
+│      ordnung während des Trainings gesehen                                  │
+│    → Predictions für z-Dynamik sind unzuverlässig (Extrapolation)          │
+│                                                                             │
+│  PHASE 2 START: z ≈ 0.10–0.15 (wo Phase 1 endete)                         │
+│    proprio_z_norm = (0.12 - 0.050) / 0.070 = +1.0σ                         │
+│    → NORMAL! Innerhalb der Trainingsdaten-Verteilung                       │
+│    → World Model kann z-Dynamik gut prädizieren                            │
+│                                                                             │
+│                                                                             │
+│  Verteilung der Trainings-Proprio (z-Komponente):                          │
+│                                                                             │
+│     ╎                     ████                                              │
+│     ╎                   ████████                                            │
+│     ╎                 ████████████                                          │
+│     ╎               ████████████████                                        │
+│     ╎             ████████████████████                                      │
+│     ╎           ████████████████████████                                    │
+│     ╎         ███████████████████████████                                   │
+│     ╎───────████████████████████████████───────────────────────────         │
+│     0.00   0.05   0.10   0.15   0.20          ...          0.42            │
+│     ▲       ▲                                                ▲             │
+│     │       │                                                │             │
+│     │    Trainings-                                     Phase-1-Start      │
+│     │    Bereich                                        (5.3σ OOD!)        │
+│     │                                                                      │
+│  Phase-2-Start (1.0σ, in-distribution)                                     │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Auswirkung auf die Objective-Funktion:**
+
+Die Objective-Funktion ist `loss = MSE_visual + 0.5 × MSE_proprio` (siehe `planning/objectives.py`,
+`alpha=0.5`, `mode="last"`). Der `MSE_proprio`-Term treibt den CEM dazu, Actions zu finden, deren
+**prädizierte Proprio** (EEF-Position am Horizont-Ende) nahe am Goal-Proprio liegt. Wenn aber die
+WM-Predictions bei OOD-Proprio unzuverlässig sind, liefert der Proprio-Term **irreführende
+Gradienten** — der CEM optimiert auf Basis falscher Zustandsvorhersagen.
+
+### 15.3 Ursache 2: Große z-Distanz überfordert den CEM-Horizont
+
+Der CEM plant mit **Horizon H=5** Actions. Jede Action spezifiziert eine **absolute
+EEF-Zielposition** (nicht eine Verschiebung relativ zur aktuellen Position). Das heißt, die
+z-Komponente jeder Action liegt im Bereich `[0.00, 0.12]` (Workspace Bounds).
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│           CEM-AKTIONEN: ABSOLUTE POSITIONEN VS. PHYSISCHE DISTANZ           │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  Die CEM-Actions sind absolute EEF-Zielpositionen:                         │
+│    action[4:7] = [target_x, target_y, target_z]                            │
+│                                                                             │
+│  Workspace Bounds: z ∈ [0.00, 0.12]                                        │
+│  → Jede geplante Action zielt auf z ∈ [0.00, 0.12]                         │
+│  → Das ist KORREKT — der Tisch ist bei z ≈ 0.04, Würfel-Höhe bei z ≈ 0.07│
+│                                                                             │
+│  ABER: Das RMPFlow-IK braucht PHYSISCHEN WEG, um dort hinzukommen!         │
+│                                                                             │
+│  Phase 1: EEF bei z=0.42 → Target z=0.05                                  │
+│    → IK muss 0.37m Weg zurücklegen                                         │
+│    → Bei settle_steps=20 und threshold=0.005 konvergiert IK                │
+│      möglicherweise NICHT in 20 Steps auf so große Distanzen               │
+│    → move_ee_to() gibt converged=False zurück → dist bleibt > 0            │
+│    → Der nächste MPC-Step plant mit dem REALEN z (immer noch zu hoch)      │
+│    → Erst nach mehreren MPC-Steps ist der EEF nahe genug am Target         │
+│                                                                             │
+│  Phase 2: EEF bei z=0.12 → Target z=0.05                                  │
+│    → IK muss nur 0.07m Weg zurücklegen                                     │
+│    → Konvergiert in 5-10 Steps → EEF ist sofort am Target                  │
+│    → Nächster MPC-Step plant mit korrektem z                               │
+│                                                                             │
+│  Konsequenz: In Phase 1 hinkt die REALE EEF-Position mehrere MPC-Steps    │
+│  hinter der GEPLANTEN Position her. Das World Model sieht ein Bild,        │
+│  in dem der EEF noch hoch ist, und muss erneut "nach unten" planen.        │
+│  Die 30 MPC-Steps reichen aus, um den EEF schrittweise herunter-          │
+│  zubringen — aber nicht immer bis ganz auf Greif-Tiefe (z ≈ 0.05).        │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Zusammenhang mit Ursache 1:** Die IK-Konvergenz-Problematik verstärkt die OOD-Problematik.
+Selbst wenn der CEM in Iteration 1 korrekt `z=0.05` plant, braucht der physische Roboter
+mehrere MPC-Steps, um dort anzukommen. In der Zwischenzeit beobachtet das World Model
+eine immer noch hohe z-Position → OOD-Input → schlechte Predictions → suboptimale nächste
+Planung → Teufelskreis.
+
+### 15.4 Ursache 3: Workspace-Bounds und Sigma-Asymmetrie
+
+Die CEM-Exploration in der z-Dimension wird durch **Workspace-Bounds** begrenzt und ist
+**asymmetrisch um den Mittelwert** verteilt:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│           CEM Z-EXPLORATION: BOUNDS VS. SIGMA                               │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  Action-Statistiken (z-Dimension):                                          │
+│    action_mean_z = 0.050                                                    │
+│    action_std_z  = 0.070                                                    │
+│                                                                             │
+│  CEM-Initialisierung (normalisierter Raum):                                 │
+│    mu_z = 0.0       (= action_mean = 0.050 in Weltkoord.)                  │
+│    sigma_z = 2.0    (sigma_scale_z = 2.0 aus plan_franka.yaml)             │
+│                                                                             │
+│  Workspace Bounds (z-Dimension, Weltkoord.):                               │
+│    z_lower = 0.00   → norm: (0.00 - 0.050) / 0.070 = -0.714              │
+│    z_upper = 0.12   → norm: (0.12 - 0.050) / 0.070 = +1.000              │
+│                                                                             │
+│  Gültige Bandbreite im normalisierten Raum: [-0.714, +1.000] = 1.714σ     │
+│  Initiale Exploration (sigma_z = 2.0): ±2.0σ                              │
+│                                                                             │
+│  → ~60% der initialen CEM-Samples werden durch Bounds geclampt!            │
+│    Samples < -0.714 → geclampt auf -0.714 (z=0.00)                         │
+│    Samples > +1.000 → geclampt auf +1.000 (z=0.12)                         │
+│                                                                             │
+│  Das ist an sich kein Problem (die Bounds SOLLEN den Suchraum              │
+│  einschränken), aber es bedeutet:                                          │
+│                                                                             │
+│  Die CEM-Verteilung nach Clamping ist FLACHER als eine Gauss-Verteilung    │
+│  → mehr Samples bei z=0.00 und z=0.12 (an den Rändern)                    │
+│  → weniger Samples bei z=0.05 (am Optimum, Würfel-Höhe)                   │
+│  → TopK-Selektion muss aus dieser verzerrten Verteilung wählen            │
+│                                                                             │
+│  Bei Phase 2 (Start z=0.12, Goal z=0.05): Die Verzerrung ist gering,      │
+│  weil der aktuelle Zustand nah am Goal ist. Das WM kann gut prädizieren,   │
+│  welche z-Werte zur Goal-Proprio passen → der TopK-Filter findet schnell   │
+│  die richtigen Samples.                                                     │
+│                                                                             │
+│  Bei Phase 1 (Start z=0.42, Goal z=0.05): Das WM prädiziert schlecht von   │
+│  OOD-Proprio aus → ALLE z-Werte bekommen ähnliche (hohe) Losses            │
+│  → TopK wählt quasi zufällig → mu konvergiert langsam/gar nicht richtig    │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 15.5 Zusammenfassung: Phase 1 vs. Phase 2 im Vergleich
+
+| Faktor | Phase 1 (P1-GRASP) | Phase 2 (P2-PLACE) |
+|--------|-------------------|-------------------|
+| **Start-z** | ~0.42m (Franka-Ruhepose) | ~0.05–0.12m (Ende von Phase 1) |
+| **Goal-z** | ~0.05–0.07m (Greif-Position) | ~0.05–0.07m (Ablage-Position) |
+| **z-Distanz zum Goal** | ~0.35m (groß) | ~0.00–0.07m (klein) |
+| **Proprio normalisiert** | +5.3σ (extremer OOD-Ausreißer) | ~0–1σ (in-distribution) |
+| **WM-Prediction-Qualität** | Schlecht (Extrapolation von OOD) | Gut (Interpolation in ID) |
+| **IK-Konvergenz** | Langsam (0.37m Weg pro Step) | Schnell (0.07m Weg pro Step) |
+| **CEM-Konvergenz in z** | Langsam, oft unvollständig | Schnell, zuverlässig |
+| **Ergebnis** | EEF bleibt bei z ≈ 0.10–0.15 hängen | EEF erreicht z ≈ 0.05–0.07 ✓ |
+
+**Ursachenkette Phase 1:**
+
+```
+Ruhepose (z=0.42)
+  → Proprio 5.3σ OOD
+    → WM-Predictions unzuverlässig
+      → CEM-Objective irreführend (visual + proprio MSE basiert auf falschen Predictions)
+        → CEM konvergiert langsam in z
+          → Geplantes z-Target wird vom IK nur langsam angefahren (große Distanz)
+            → Nächster MPC-Step: z immer noch zu hoch → Teufelskreis
+              → Nach 30 MPC-Steps: z ≈ 0.10–0.15, nicht tief genug zum Greifen
+```
+
+### 15.6 Lösungsansätze
+
+#### Ansatz A: Pre-Phase — EEF vor Phase 1 auf niedrige z-Position fahren
+
+Statt Phase 1 von der Ruhepose (z=0.42) starten zu lassen, könnte eine **deterministische
+Pre-Phase** den EEF auf eine Startposition nahe des Tisches fahren (z.B. z ≈ 0.15):
+
+```python
+# planning_client.py — vor Phase 1:
+# EEF deterministisch auf eine Position oberhalb des Arbeitsbereichs fahren
+pre_phase_target = [current_x, current_y, 0.15]  # nur z ändern
+env.move_ee_to(pre_phase_target, target_orientation=EE_DEFAULT_ORIENT,
+               max_steps=50, threshold=0.005)
+```
+
+- **Vorteil:** Kein WM-/CEM-Änderung nötig, rein client-seitig, sofort umsetzbar
+- **Nachteil:** Pre-Phase-Position muss gewählt werden; der Würfel ist aber noch nicht lokalisiert
+  → x/y-Position des EEF passt evtl. nicht zum Würfel
+
+#### Ansatz B: Datensammlung mit hoher Startposition (z=0.42 inkludieren)
+
+Den Datensammlungs-Controller so anpassen, dass er **von der Ruhepose aus** startet (nicht nur
+nahe Tischoberfläche). Dann wäre z=0.42 in-distribution für das World Model:
+
+- **Vorteil:** WM lernt die vollständige Bewegungsdynamik von oben nach unten
+- **Nachteil:** Deutlich aufwändigerer Fix (Datensammlung + Retraining nötig),
+  und die meisten Trainingsdaten wären "Abstieg"-Bewegungen, die nicht task-relevant sind
+
+#### Empfehlung
+
+**Ansatz A (Pre-Phase)** ist kurzfristig am vielversprechendsten: Schnell implementierbar,
+keine Änderung am World Model oder Training nötig, und bringt den EEF in den ID-Bereich
+des World Models, bevor die CEM-Planung beginnt.
+
+**Querverweise:**
+- Abschnitt 5: CEM Planner im Detail (Sigma-Initialisierung, Bounds)
+- Abschnitt 6.7.5: Warm-Start im MPC-Kontext
+- Abschnitt 11: Finaler Offline-Test (WM-Qualitätsprobleme)
+- `plan_franka.yaml`: Workspace Bounds, Sigma-Scale
+- `planning_client.py`: `_run_mpc_phase()`, Two-Phase-Logik
 - **Datensatz-Verifikation**: Actions, Proprio, RGB-Check → siehe Abschnitt 11

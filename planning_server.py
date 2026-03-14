@@ -43,6 +43,7 @@ from omegaconf import OmegaConf
 from plan import load_model, DummyWandbRun
 from preprocessor import Preprocessor
 from utils import seed
+from planning_feature_visualizer import PlanningFeatureVisualizer
 
 # =============================================================================
 # ARGS
@@ -544,6 +545,50 @@ if planning_cfg:
     else:
         print(f"  Gripper: keine base_indices definiert")
 
+# --- Feature-Visualisierung ---
+feature_viz_enabled = False
+feature_viz_cfg = {}
+visualize_wm_prediction = False
+if planning_cfg:
+    feature_viz_cfg = OmegaConf.to_container(
+        planning_cfg.get("feature_visualization", {}), resolve=True
+    )
+    feature_viz_enabled = feature_viz_cfg.get("enabled", False)
+    visualize_wm_prediction = feature_viz_cfg.get("visualize_wm_prediction", False)
+    if feature_viz_enabled:
+        print(f"  Feature-Visualisierung: AKTIVIERT")
+        print(f"    naive_pca={feature_viz_cfg.get('save_naive_pca', True)}, "
+              f"kmeans_pca={feature_viz_cfg.get('save_kmeans_pca', True)}, "
+              f"attention={feature_viz_cfg.get('save_attention', True)}")
+        print(f"    n_clusters={feature_viz_cfg.get('n_clusters', 3)}, "
+              f"interval={feature_viz_cfg.get('visualize_interval', 1)}")
+        if visualize_wm_prediction:
+            print(f"    wm_prediction=AKTIVIERT (Predicted | Goal | Overlay | Diff)")
+    else:
+        print(f"  Feature-Visualisierung: INAKTIV")
+
+# Feature-Visualisierungs-Output-Verzeichnis (wird vom Client gesetzt via set_client_config)
+# Fallback: plan_outputs/ falls kein Client-Pfad übermittelt wird
+from datetime import datetime
+_viz_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+_viz_model_short = args.model_name.replace("/", "_").replace("-", "")
+feature_viz_dir = os.path.join(dino_wm_dir, "plan_outputs", f"feature_viz_{_viz_model_short}_{_viz_timestamp}")
+feature_viz_step_counter = 0
+
+if feature_viz_enabled:
+    print(f"    output_dir: wird vom Client gesetzt (Fallback: {feature_viz_dir})")
+
+# Feature-Visualizer initialisieren (auch wenn disabled, für spätere Aktivierung)
+feature_visualizer = PlanningFeatureVisualizer(
+    encoder=model.encoder,
+    device=device,
+    enabled=feature_viz_enabled,
+)
+feature_visualizer.set_encoder_transform(model.encoder_transform)
+if feature_viz_enabled:
+    feature_visualizer.n_clusters = feature_viz_cfg.get("n_clusters", 3)
+    feature_visualizer.n_heads_show = feature_viz_cfg.get("n_heads_show", 4)
+
 # =============================================================================
 # CEM PLANNER
 # =============================================================================
@@ -570,6 +615,13 @@ print(f"  Modus: {args.mode.upper()}")
 print(f"  CEM: samples={planner_cfg.num_samples}, steps={planner_cfg.opt_steps}, "
       f"topk={planner_cfg.topk}, horizon={horizon}, var_scale={planner_cfg.var_scale}")
 print(f"  Suchraum: {search_dim}D (H={horizon} × D={full_action_dim})")
+
+# Decoder-Verfügbarkeit prüfen (für WM-Prediction Visualisierung)
+has_decoder = hasattr(model, 'decoder') and model.decoder is not None
+if has_decoder:
+    print(f"  Decoder: VERFÜGBAR (WM-Prediction Visualisierung möglich)")
+else:
+    print(f"  Decoder: NICHT VERFÜGBAR (keine WM-Prediction Visualisierung)")
 
 # =============================================================================
 # HELPER: Bild → Planner-Format
@@ -615,6 +667,66 @@ def _denorm_to_sub_actions(actions_tensor, first_only=True):
         denorm = preprocessor.denormalize_actions(actions_tensor[0].cpu())
     return rearrange(denorm, "t (f d) -> (t f) d", f=frameskip).numpy()
 
+
+def get_wm_predicted_image(cur_obs: dict, actions: torch.Tensor, goal_obs: dict) -> np.ndarray:
+    """
+    Berechnet die WM-Vorhersage für die gegebenen Actions und dekodiert das Bild.
+    
+    Args:
+        cur_obs: Aktuelles Observation-Dict (aus img_to_obs)
+        actions: (1, horizon, full_action_dim) normalisierte Actions vom CEM
+        goal_obs: Goal Observation-Dict (für Zielbild-Vergleich)
+    
+    Returns:
+        predicted_img: (H, W, 3) uint8 RGB Bild der WM-Vorhersage am letzten Horizon-Step
+                       oder None wenn kein Decoder verfügbar
+    """
+    if not has_decoder:
+        return None
+    
+    try:
+        # Preprocessor auf cur_obs anwenden (wie im CEM-Planner)
+        obs_processed = preprocessor.process_obs(cur_obs.copy())
+        
+        # Bild von (1,1,H,W,3) → (1,1,3,H,W) und normalisieren
+        visual = torch.from_numpy(obs_processed['visual']).float().to(device)
+        visual = visual.permute(0, 1, 4, 2, 3)  # NHWC → NCHW
+        visual = visual / 255.0 * 2.0 - 1.0  # [0,255] → [-1,1]
+        
+        # Proprio normalisieren
+        proprio = torch.from_numpy(obs_processed['proprio']).float().to(device)
+        proprio = (proprio - preprocessor.proprio_mean.to(device)) / preprocessor.proprio_std.to(device)
+        
+        obs_tensor = {'visual': visual, 'proprio': proprio}
+        
+        # WM Rollout
+        with torch.no_grad():
+            z_obses, _ = model.rollout(obs_tensor, actions.to(device))
+            
+            # Letzten vorhergesagten Zustand dekodieren
+            # z_obses['visual'] hat shape (1, num_pred, num_patches, emb_dim)
+            obs_decoded, _ = model.decode_obs(z_obses)
+            
+            # Letztes Frame extrahieren: (1, num_pred, 3, H, W) → (3, H, W)
+            pred_visual = obs_decoded['visual'][0, -1]  # Letzter Horizon-Step
+            
+            # Von [-1,1] → [0,255] uint8
+            pred_img = ((pred_visual + 1.0) / 2.0 * 255.0).clamp(0, 255)
+            pred_img = pred_img.permute(1, 2, 0).cpu().numpy().astype(np.uint8)  # CHW → HWC
+            
+        return pred_img
+        
+    except Exception as e:
+        print(f"  WM-Prediction Fehler: {e}")
+        return None
+
+
+def extract_goal_image(goal_obs: dict) -> np.ndarray:
+    """Extrahiert das Zielbild aus goal_obs als uint8 RGB."""
+    visual = goal_obs['visual']  # (1, 1, H, W, 3) float32 [0,255]
+    img = visual[0, 0].astype(np.uint8)
+    return img
+
 # =============================================================================
 # SOCKET SERVER
 # =============================================================================
@@ -658,6 +770,12 @@ while True:
                 # Client sendet seine komplette Konfiguration
                 client_cfg = msg.get("config", {})
                 wandb_run.update_config(client_cfg)
+                
+                # Feature-Viz-Verzeichnis aus Client-Output-Pfad setzen
+                if feature_viz_enabled and "output_dir" in client_cfg:
+                    feature_viz_dir = os.path.join(client_cfg["output_dir"], "feature_viz")
+                    print(f"  Feature-Viz-Dir: {feature_viz_dir}")
+                
                 response = {"status": "ok", "wandb_run_id": wandb_run.id}
                 print(f"  Client-Config empfangen: {list(client_cfg.keys())}")
 
@@ -679,6 +797,21 @@ while True:
                 ee_pos = np.array(msg["ee_pos"]) if "ee_pos" in msg else None
                 goal_obs = img_to_obs(img, ee_pos)
                 print(f"  Goal gesetzt: {img.shape} {img.dtype}, ee_pos={ee_pos}")
+                
+                # Feature-Visualisierung für Goal-Bild
+                if feature_viz_enabled and feature_viz_cfg.get("visualize_goal", True):
+                    try:
+                        viz_paths = feature_visualizer.visualize(
+                            img_np=img, out_dir=feature_viz_dir, step_idx=0,
+                            prefix="goal",
+                            save_naive_pca=feature_viz_cfg.get("save_naive_pca", True),
+                            save_kmeans_pca=feature_viz_cfg.get("save_kmeans_pca", True),
+                            save_attention=feature_viz_cfg.get("save_attention", True),
+                        )
+                        print(f"  Feature-Viz Goal: {feature_viz_dir}")
+                    except Exception as e:
+                        print(f"  Feature-Viz Fehler: {e}")
+                
                 response = {"status": "ok"}
 
             elif cmd == "plan":
@@ -704,6 +837,43 @@ while True:
                     warm_start = actions.clone()
 
                     print(f"  Plan: {wandb_run.get_summary(t_plan)}")
+                    
+                    # Feature-Visualisierung für aktuelles Bild
+                    viz_interval = feature_viz_cfg.get("visualize_interval", 1)
+                    if (feature_viz_enabled and 
+                        feature_viz_cfg.get("visualize_current", True) and
+                        feature_viz_step_counter % viz_interval == 0):
+                        try:
+                            viz_paths = feature_visualizer.visualize(
+                                img_np=img, out_dir=feature_viz_dir,
+                                step_idx=feature_viz_step_counter, prefix="current",
+                                save_naive_pca=feature_viz_cfg.get("save_naive_pca", True),
+                                save_kmeans_pca=feature_viz_cfg.get("save_kmeans_pca", True),
+                                save_attention=feature_viz_cfg.get("save_attention", True),
+                            )
+                            print(f"  Feature-Viz Step {feature_viz_step_counter}")
+                        except Exception as e:
+                            print(f"  Feature-Viz Fehler: {e}")
+                    
+                    # WM-Prediction Visualisierung nach CEM-Optimierung
+                    if (feature_viz_enabled and 
+                        visualize_wm_prediction and
+                        feature_viz_step_counter % viz_interval == 0):
+                        try:
+                            pred_img = get_wm_predicted_image(cur_obs, actions, goal_obs)
+                            if pred_img is not None:
+                                goal_img_np = extract_goal_image(goal_obs)
+                                feature_visualizer.visualize_wm_prediction(
+                                    predicted_img=pred_img,
+                                    goal_img=goal_img_np,
+                                    out_dir=feature_viz_dir,
+                                    step_idx=feature_viz_step_counter,
+                                    prefix="wm_pred"
+                                )
+                        except Exception as e:
+                            print(f"  WM-Prediction Viz Fehler: {e}")
+                    
+                    feature_viz_step_counter += 1
 
                     all_sub = _denorm_to_sub_actions(actions, first_only=True)
                     n_ret = args.n_sub_actions if 0 < args.n_sub_actions < len(all_sub) else len(all_sub)
@@ -735,6 +905,43 @@ while True:
                     t_plan = time.time() - t0
 
                     print(f"  PlanAll: {wandb_run.get_summary(t_plan)}")
+                    
+                    # Feature-Visualisierung für aktuelles Bild
+                    viz_interval = feature_viz_cfg.get("visualize_interval", 1)
+                    if (feature_viz_enabled and 
+                        feature_viz_cfg.get("visualize_current", True) and
+                        feature_viz_step_counter % viz_interval == 0):
+                        try:
+                            viz_paths = feature_visualizer.visualize(
+                                img_np=img, out_dir=feature_viz_dir,
+                                step_idx=feature_viz_step_counter, prefix="current",
+                                save_naive_pca=feature_viz_cfg.get("save_naive_pca", True),
+                                save_kmeans_pca=feature_viz_cfg.get("save_kmeans_pca", True),
+                                save_attention=feature_viz_cfg.get("save_attention", True),
+                            )
+                            print(f"  Feature-Viz Step {feature_viz_step_counter}")
+                        except Exception as e:
+                            print(f"  Feature-Viz Fehler: {e}")
+                    
+                    # WM-Prediction Visualisierung nach CEM-Optimierung
+                    if (feature_viz_enabled and 
+                        visualize_wm_prediction and
+                        feature_viz_step_counter % viz_interval == 0):
+                        try:
+                            pred_img = get_wm_predicted_image(cur_obs, actions, goal_obs)
+                            if pred_img is not None:
+                                goal_img_np = extract_goal_image(goal_obs)
+                                feature_visualizer.visualize_wm_prediction(
+                                    predicted_img=pred_img,
+                                    goal_img=goal_img_np,
+                                    out_dir=feature_viz_dir,
+                                    step_idx=feature_viz_step_counter,
+                                    prefix="wm_pred"
+                                )
+                        except Exception as e:
+                            print(f"  WM-Prediction Viz Fehler: {e}")
+                    
+                    feature_viz_step_counter += 1
 
                     all_sub = _denorm_to_sub_actions(actions, first_only=False)
                     n_ret = args.n_sub_actions if 0 < args.n_sub_actions < frameskip else frameskip
@@ -756,6 +963,7 @@ while True:
             elif cmd == "reset":
                 goal_obs = None
                 warm_start = None
+                feature_viz_step_counter = 0  # Reset step counter
                 response = {"status": "ok"}
                 print(f"  Reset")
 

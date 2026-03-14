@@ -40,6 +40,8 @@ if dino_wm_dir not in sys.path:
 from plan import load_model
 from preprocessor import Preprocessor
 from utils import seed
+from masterarbeit_style import apply_style, TEXTWIDTH_IN, FONT_SIZE, save_ma_figure
+apply_style()
 
 
 # =========================================================================
@@ -290,7 +292,8 @@ def run_sanity_check(args):
         
         # ── Visualisierung: Side-by-Side ──
         n_show = min(pred_visuals.shape[0], num_hist + actual_rollout_steps + 1)
-        fig, axes = plt.subplots(3, n_show, figsize=(3 * n_show, 9))
+        fig_height = max(TEXTWIDTH_IN * 0.55, 2.6)
+        fig, axes = plt.subplots(3, n_show, figsize=(TEXTWIDTH_IN, fig_height))
         if n_show == 1:
             axes = axes.reshape(3, 1)
         
@@ -298,7 +301,7 @@ def run_sanity_check(args):
             # GT
             gt_img = denorm_image(gt_visuals[t_idx])
             axes[0, t_idx].imshow(gt_img)
-            axes[0, t_idx].set_title(f"GT t={t_idx}", fontsize=8)
+            axes[0, t_idx].set_title(f"GT t={t_idx}")
             axes[0, t_idx].axis("off")
             
             # Predicted
@@ -307,14 +310,14 @@ def run_sanity_check(args):
             mse_val = ep_metrics["steps"][t_idx]["mse"]
             psnr_val = ep_metrics["steps"][t_idx]["psnr"]
             label = "Recon" if t_idx < num_hist else f"Pred {t_idx - num_hist + 1}"
-            axes[1, t_idx].set_title(f"{label}\nMSE={mse_val:.4f}", fontsize=7)
+            axes[1, t_idx].set_title(f"{label}\nMSE={mse_val:.4f}")
             axes[1, t_idx].axis("off")
             
             # Differenz (verstärkt)
             diff_img = np.abs(gt_img.astype(float) - pred_img.astype(float))
             diff_img = (diff_img / diff_img.max() * 255).astype(np.uint8) if diff_img.max() > 0 else diff_img.astype(np.uint8)
             axes[2, t_idx].imshow(diff_img)
-            axes[2, t_idx].set_title(f"Diff (×{255/max(diff_img.max(),1):.0f})", fontsize=7)
+            axes[2, t_idx].set_title(f"Diff (×{255/max(diff_img.max(),1):.0f})")
             axes[2, t_idx].axis("off")
 
         # Markiere Grenze zwischen Reconstruction und Prediction
@@ -327,15 +330,14 @@ def run_sanity_check(args):
         fig.suptitle(
             f"WM Sanity-Check — Episode {dset_idx}\n"
             f"Model: {args.model_name} | num_hist={num_hist}, frameskip={frameskip}\n"
-            f"Zeile 1: Ground-Truth | Zeile 2: WM-Vorhersage | Zeile 3: Differenz",
-            fontsize=10
+            f"Zeile 1: Ground-Truth | Zeile 2: WM-Vorhersage | Zeile 3: Differenz"
         )
-        plt.tight_layout()
+        fig.tight_layout(pad=0.45, w_pad=0.15, h_pad=0.35)
         
-        fig_path = os.path.join(output_dir, f"episode_{dset_idx:04d}.png")
-        plt.savefig(fig_path, dpi=150, bbox_inches="tight")
+        fig_stem = os.path.join(output_dir, f"episode_{dset_idx:04d}")
+        save_ma_figure(fig, fig_stem, fixed_canvas=True)
         plt.close(fig)
-        print(f"\n  → Gespeichert: {fig_path}")
+        print(f"\n  → Gespeichert: {fig_stem}.svg / {fig_stem}_unlabeled.svg")
 
     # ── 5. Aggregierte Metriken ──
     print(f"\n{'='*60}")
@@ -422,7 +424,7 @@ def run_sanity_check(args):
     
     # Zusammenfassungs-Plot: MSE über Horizont
     if pred_mses_by_step:
-        fig, ax = plt.subplots(figsize=(8, 4))
+        fig, ax = plt.subplots(figsize=(TEXTWIDTH_IN, TEXTWIDTH_IN * 0.5))
         steps = sorted(pred_mses_by_step.keys())
         step_nums = [int(s.split("_")[1]) for s in steps]
         mean_mses = [np.mean(pred_mses_by_step[s]) for s in steps]
@@ -444,10 +446,10 @@ def run_sanity_check(args):
         ax.axvline(x=0.5, color='red', linestyle='--', alpha=0.5, label='Recon ↔ Pred')
         ax.legend()
         
-        summary_path = os.path.join(output_dir, "mse_over_horizon.png")
-        plt.savefig(summary_path, dpi=150, bbox_inches="tight")
+        summary_stem = os.path.join(output_dir, "mse_over_horizon")
+        save_ma_figure(fig, summary_stem, fixed_canvas=True)
         plt.close(fig)
-        print(f"  Zusammenfassung: {summary_path}")
+        print(f"  Zusammenfassung: {summary_stem}.svg / .pdf")
     
     print(f"\n{'='*60}")
     print(f"Fertig! Alle Outputs in: {output_dir}")

@@ -11,8 +11,6 @@ Visualisierungen:
   3. DINOv2 Feature Similarity   – Cosine-Similarity eines Referenz-Patches zu allen anderen
   4. ViT Predictor Attention     – Cross-Attention-Maps des trainierten Predictors
   5. VQ-VAE Rekonstruktion       – Decoder-Ausgabe vs. Original (wenn Decoder vorhanden)
-  6. Proprio Embedding Space     – PCA des Proprio-Encoders, gefärbt nach x/y/z-Position
-  7. Proprio Prediction Quality  – Predicted vs. GT EEF-Trajektorie über Rollout
 
 Nutzung:
   conda activate dino_wm
@@ -27,8 +25,6 @@ Ausgabe:
     ├── dino_similarity_<ep>_<fr>.png
     ├── vit_attention_<ep>_<fr>.png
     ├── reconstruction_<ep>_<fr>.png
-    ├── proprio_embedding_<ep>.png
-    ├── proprio_trajectory_<ep>.png
     └── summary_<ep>_<fr>.png
 """
 
@@ -286,7 +282,7 @@ def visualize_dino_attention(img_np, cls_attn, h_patches, w_patches, save_path):
 
 
 # =====================================================================
-# Hilfsfunktion: K-Means Segmentierung + Per-Cluster PCA
+# Hilfsfunktion: FG/BG-Trennung + K-Means Segmentierung + Per-Cluster PCA
 # =====================================================================
 
 # Distinkte Cluster-Farben (ColorBrewer Set1)
@@ -302,35 +298,103 @@ CLUSTER_COLORS = np.array([
 ], dtype=np.uint8)
 
 
-def compute_kmeans_pca(patch_tokens, h_patches, w_patches, n_clusters=3, n_components=3):
+def _otsu_threshold(values_uint8):
+    """Otsu-Threshold auf uint8-Array. Gibt Schwellwert zurück."""
+    hist, _ = np.histogram(values_uint8, bins=256, range=(0, 256))
+    total = values_uint8.size
+    sum_all = np.sum(np.arange(256) * hist)
+    sum_bg, w_bg, max_var, threshold = 0.0, 0, 0.0, 0
+    for t in range(256):
+        w_bg += hist[t]
+        if w_bg == 0:
+            continue
+        w_fg = total - w_bg
+        if w_fg == 0:
+            break
+        sum_bg += t * hist[t]
+        mean_bg = sum_bg / w_bg
+        mean_fg = (sum_all - sum_bg) / w_fg
+        var_between = w_bg * w_fg * (mean_bg - mean_fg) ** 2
+        if var_between > max_var:
+            max_var = var_between
+            threshold = t
+    return threshold
+
+
+def compute_segmented_pca(patch_tokens, h_patches, w_patches,
+                          n_pca_pre=30, n_fg_clusters=3, n_components=3):
     """
-    K-Means Segmentierung auf L2-normalisierten DINOv2 Patch-Tokens,
-    dann PCA pro Cluster für Intra-Cluster-Variation.
+    Segmentierungs-basierte PCA nach Amir et al. 2022:
+
+      1. PCA(1) → Otsu-Threshold → FG/BG-Trennung
+      2. PCA(n_pca_pre) Dimensionsreduktion der FG-Tokens
+      3. K-Means auf PCA-reduzierten FG-Features
+      4. PCA(3) pro Cluster → Intra-Cluster RGB
 
     Returns:
-        labels:          (num_patches,) int – Cluster-Zuordnung
-        seg_map:         (h, w, 3) uint8 – Segmentierung in Clusterfarben
-        per_cluster_pca: (h, w, 3) float [0,1] – PCA pro Cluster
+        fg_mask:         (num_patches,) bool
+        labels:          (num_patches,) int (-1 = BG)
+        seg_map:         (h, w, 3) uint8 – Cluster-Farben (BG = grau)
+        per_cluster_pca: (h, w, 3) float [0,1] – PCA pro Cluster (BG = dunkelgrau)
         cluster_info:    dict {cluster_id: {n_patches, var_ratios}}
+        n_clusters_used: int – tatsächliche Anzahl Cluster
     """
     tokens = patch_tokens.numpy() if isinstance(patch_tokens, torch.Tensor) else patch_tokens
     n_patches = tokens.shape[0]
 
-    # L2-Normalisierung für K-Means
-    tokens_norm = tokens / (np.linalg.norm(tokens, axis=1, keepdims=True) + 1e-8)
+    # ── Schritt 1: FG/BG-Trennung via PC1 + Otsu ──
+    pca1 = PCA(n_components=1)
+    pc1 = pca1.fit_transform(tokens)[:, 0]
+    pc1_norm = (pc1 - pc1.min()) / (pc1.max() - pc1.min() + 1e-8)
+    pc1_uint8 = (pc1_norm * 255).astype(np.uint8)
+    threshold = _otsu_threshold(pc1_uint8)
 
-    # K-Means Clustering
-    kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
-    labels = kmeans.fit_predict(tokens_norm)
+    fg_mask = pc1_uint8 > threshold
+    if fg_mask.sum() > len(fg_mask) // 2:
+        fg_mask = ~fg_mask
 
-    # Segmentierungsmaske
-    seg_map = CLUSTER_COLORS[labels % len(CLUSTER_COLORS)].reshape(h_patches, w_patches, 3)
+    fg_indices = np.where(fg_mask)[0]
+    if len(fg_indices) < n_components + 1:
+        fg_indices = np.arange(n_patches)
+        fg_mask[:] = True
 
-    # Per-Cluster PCA (auf originalen, nicht-normalisierten Tokens)
-    per_cluster_pca = np.full((n_patches, n_components), 0.3)  # BG: dunkelgrau
+    # ── Schritt 2: PCA-Vorreduktion der FG-Tokens ──
+    fg_tokens = tokens[fg_indices]
+    n_pca = min(n_pca_pre, fg_tokens.shape[0] - 1, fg_tokens.shape[1])
+    pca_pre = PCA(n_components=n_pca)
+    fg_reduced = pca_pre.fit_transform(fg_tokens)
+
+    # ── Schritt 3: K-Means auf PCA-reduzierten FG-Features ──
+    from sklearn.metrics import silhouette_score
+    n_fg = len(fg_indices)
+    best_k, best_sil = 2, -1
+    max_k = min(n_fg_clusters + 2, n_fg // 3, 8)
+    for k in range(2, max_k + 1):
+        km = KMeans(n_clusters=k, random_state=42, n_init=10)
+        labs = km.fit_predict(fg_reduced)
+        sil = silhouette_score(fg_reduced, labs)
+        if sil > best_sil:
+            best_sil = sil
+            best_k = k
+
+    kmeans = KMeans(n_clusters=best_k, random_state=42, n_init=10)
+    fg_labels = kmeans.fit_predict(fg_reduced)
+
+    # Labels für alle Patches (-1 = BG)
+    labels = np.full(n_patches, -1, dtype=int)
+    labels[fg_indices] = fg_labels
+
+    # ── Segmentierungsmaske ──
+    bg_color = np.array([180, 180, 180], dtype=np.uint8)
+    seg_flat = np.tile(bg_color, (n_patches, 1))
+    seg_flat[fg_indices] = CLUSTER_COLORS[fg_labels % len(CLUSTER_COLORS)]
+    seg_map = seg_flat.reshape(h_patches, w_patches, 3)
+
+    # ── Schritt 4: PCA(3) pro Cluster ──
+    per_cluster_pca = np.full((n_patches, n_components), 0.3)
     cluster_info = {}
 
-    for ci in range(n_clusters):
+    for ci in range(best_k):
         mask = labels == ci
         cluster_tokens = tokens[mask]
         info = {"n_patches": int(mask.sum()), "var_ratios": None}
@@ -351,7 +415,7 @@ def compute_kmeans_pca(patch_tokens, h_patches, w_patches, n_clusters=3, n_compo
         cluster_info[ci] = info
 
     per_cluster_pca = per_cluster_pca.reshape(h_patches, w_patches, n_components)
-    return labels, seg_map, per_cluster_pca, cluster_info
+    return fg_mask, labels, seg_map, per_cluster_pca, cluster_info, best_k
 
 
 # =====================================================================
@@ -359,18 +423,19 @@ def compute_kmeans_pca(patch_tokens, h_patches, w_patches, n_clusters=3, n_compo
 # =====================================================================
 
 def visualize_dino_pca(img_np, patch_tokens, h_patches, w_patches, save_path,
-                       n_components=3, n_clusters=3, dataset_name=""):
+                       n_components=3):
     """
-    PCA + K-Means Segmentierung der DINOv2 Patch-Tokens.
+    Segmentierungs-basierte PCA der DINOv2 Patch-Tokens.
 
-    Erzeugt pro Cluster eine eigene Abbildung mit Single-Cluster PCA
-    (Rest schwarz), plus eine Übersichts-Abbildung.
+    Verfahren (nach Amir et al. 2022):
+      1. PC1 → Otsu-Threshold → Foreground/Background-Trennung
+      2. PCA(30) Dimensionsreduktion auf FG-Tokens
+      3. K-Means in PCA-Raum (auto-k via Silhouette)
+      4. Per-Cluster PCA(3) → RGB-Farbkodierung
 
-    Dateien:
-      dino_pca_<tag>.svg          — Übersicht (Original | PCA | Segmentierung)
-      dino_pca_<tag>_cl0.svg      — PCA nur Cluster 0
-      dino_pca_<tag>_cl1.svg      — PCA nur Cluster 1
-      dino_pca_<tag>_cl2.svg      — PCA nur Cluster 2
+    Zeigt:
+      Oben:   Original | Naive PCA | FG-Maske | FG-PCA (alle FG)
+      Unten:  Segmentierung Overlay | Einzelne Cluster-Masken
     """
     tokens = patch_tokens.numpy() if isinstance(patch_tokens, torch.Tensor) else patch_tokens
 
@@ -382,108 +447,105 @@ def visualize_dino_pca(img_np, patch_tokens, h_patches, w_patches, save_path,
         pca_all_result[:, c] = (col - col.min()) / (col.max() - col.min() + 1e-8)
     pca_all_img = pca_all_result.reshape(h_patches, w_patches, n_components)
 
-    # ── K-Means Segmentierung ──
-    labels, seg_map, _, cluster_info = compute_kmeans_pca(
-        tokens, h_patches, w_patches, n_clusters=n_clusters, n_components=n_components
+    # ── FG/BG + K-Means + Per-Cluster PCA ──
+    fg_mask, labels, seg_map, per_cluster_pca, cluster_info, n_k = compute_segmented_pca(
+        tokens, h_patches, w_patches, n_components=n_components
     )
+
+    # ── FG-only PCA (alle FG-Patches zusammen) ──
+    fg_indices = np.where(fg_mask)[0]
+    pca_fg = PCA(n_components=n_components)
+    fg_pca_result = pca_fg.fit_transform(tokens[fg_indices])
+    for c in range(n_components):
+        col = fg_pca_result[:, c]
+        fg_pca_result[:, c] = (col - col.min()) / (col.max() - col.min() + 1e-8)
+    fg_pca_img = np.full((len(tokens), n_components), 0.3)
+    fg_pca_img[fg_indices] = fg_pca_result
+    fg_pca_img = fg_pca_img.reshape(h_patches, w_patches, n_components)
 
     # ── Resize ──
+    fg_mask_2d = fg_mask.reshape(h_patches, w_patches).astype(np.uint8) * 255
+    mask_resized = np.array(Image.fromarray(fg_mask_2d).resize(
+        (img_np.shape[1], img_np.shape[0]), Image.NEAREST))
     seg_resized = np.array(Image.fromarray(seg_map).resize(
         (img_np.shape[1], img_np.shape[0]), Image.NEAREST))
+    fg_pca_resized = np.array(Image.fromarray(
+        (fg_pca_img * 255).astype(np.uint8)
+    ).resize((img_np.shape[1], img_np.shape[0]), Image.BILINEAR))
 
+    # ── Plot: 2 Reihen ──
+    n_cols = max(4, n_k + 1)
+    fig, axes = plt.subplots(2, n_cols, figsize=(4.5 * n_cols, 9))
+
+    # Obere Reihe: Original | Naive PCA | FG-Maske | FG-PCA
+    axes[0, 0].imshow(img_np)
+    axes[0, 0].set_title("Original", fontweight='bold')
+    axes[0, 0].axis("off")
+
+    axes[0, 1].imshow(pca_all_img, interpolation="nearest")
+    var_all = pca_all.explained_variance_ratio_
+    axes[0, 1].set_title(
+        f"Naive PCA (alle Patches)\nPC1={var_all[0]:.0%} PC2={var_all[1]:.0%} PC3={var_all[2]:.0%}")
+    axes[0, 1].axis("off")
+
+    n_fg = fg_mask.sum()
+    axes[0, 2].imshow(mask_resized, cmap="gray")
+    axes[0, 2].set_title(
+        f"FG-Maske (PC1+Otsu)\n{n_fg}/{len(fg_mask)} = {n_fg/len(fg_mask):.0%} Foreground")
+    axes[0, 2].axis("off")
+
+    fg_overlay = (0.45 * fg_pca_resized.astype(float) +
+                  0.55 * img_np.astype(float)).clip(0, 255).astype(np.uint8)
+    axes[0, 3].imshow(fg_overlay)
+    var_fg = pca_fg.explained_variance_ratio_
+    axes[0, 3].set_title(
+        f"FG-PCA (Overlay)\nPC1={var_fg[0]:.0%} PC2={var_fg[1]:.0%} PC3={var_fg[2]:.0%}")
+    axes[0, 3].axis("off")
+
+    for ci in range(4, n_cols):
+        axes[0, ci].axis("off")
+
+    # Untere Reihe: Segmentierung Overlay + einzelne Cluster
     seg_overlay = (0.45 * seg_resized.astype(float) +
                    0.55 * img_np.astype(float)).clip(0, 255).astype(np.uint8)
+    axes[1, 0].imshow(seg_overlay)
+    axes[1, 0].set_title(f"K-Means Segmentierung\n(k={n_k}, auto via Silhouette)")
+    axes[1, 0].axis("off")
 
-    path_stem = os.path.splitext(save_path)[0]
-
-    # ── Übersichts-Abbildung (eine Zeile) ──
-    fig, axes = plt.subplots(1, 4, figsize=(18, 4.5))
-
-    axes[0].imshow(img_np)
-    axes[0].set_title("Original", fontweight='bold')
-    axes[0].axis("off")
-
-    axes[1].imshow(pca_all_img, interpolation="nearest")
-    var_all = pca_all.explained_variance_ratio_
-    axes[1].set_title(
-        f"Naive PCA (alle Patches)\nPC1={var_all[0]:.0%} PC2={var_all[1]:.0%} PC3={var_all[2]:.0%}")
-    axes[1].axis("off")
-
-    axes[2].imshow(seg_resized)
-    axes[2].set_title(f"K-Means Segmentierung\n(k={n_clusters} Cluster)")
-    axes[2].axis("off")
-
-    axes[3].imshow(seg_overlay)
-    axes[3].set_title("Segmentierung\n(Overlay)")
-    axes[3].axis("off")
-
-    fig.suptitle(
-        f"DINOv2 PCA Feature Map ({h_patches}×{w_patches} Patches) "
-        f"— K-Means (k={n_clusters})",
-        fontweight='bold'
-    )
-    plt.tight_layout()
-    save_ma_figure(fig, path_stem)
-    plt.close(fig)
-    print(f"  ✓ DINOv2 PCA Übersicht → {save_path}")
-
-    # ── Single-Cluster PCA: eine Abbildung pro Cluster ──
-    for ci in range(n_clusters):
-        cl_mask = labels == ci
-        cl_tokens = tokens[cl_mask]
-
-        cl_pca_map = np.zeros((labels.shape[0], n_components), dtype=np.float32)
-        cl_var_str = ""
-        if cl_tokens.shape[0] >= n_components + 1:
-            pca_cl = PCA(n_components=n_components)
-            pca_result = pca_cl.fit_transform(cl_tokens)
-            for c in range(n_components):
-                col = pca_result[:, c]
-                pca_result[:, c] = (col - col.min()) / (col.max() - col.min() + 1e-8)
-            cl_pca_map[cl_mask] = pca_result
-            vr = pca_cl.explained_variance_ratio_
-            cl_var_str = f"\nPC1={vr[0]:.0%} PC2={vr[1]:.0%} PC3={vr[2]:.0%}"
-
-        cl_pca_img = cl_pca_map.reshape(h_patches, w_patches, n_components)
-        cl_pca_resized = np.array(Image.fromarray(
-            (cl_pca_img * 255).astype(np.uint8)
-        ).resize((img_np.shape[1], img_np.shape[0]), Image.NEAREST))
-
-        # Cluster-Maske auf Bild
-        mask_vis = (cl_mask.reshape(h_patches, w_patches).astype(np.uint8) * 255)
-        mask_resized = np.array(Image.fromarray(mask_vis).resize(
+    for ci in range(min(n_k, n_cols - 1)):
+        mask_ci = (labels == ci).reshape(h_patches, w_patches).astype(np.uint8) * 255
+        mask_ci_resized = np.array(Image.fromarray(mask_ci).resize(
             (img_np.shape[1], img_np.shape[0]), Image.NEAREST))
         colored = img_np.copy()
-        hi_mask = mask_resized > 128
+        hi_mask = mask_ci_resized > 128
         color = CLUSTER_COLORS[ci % len(CLUSTER_COLORS)]
         colored[hi_mask] = (
             0.5 * img_np[hi_mask].astype(float) +
             0.5 * color.astype(float)
         ).clip(0, 255).astype(np.uint8)
 
-        n_p = int(cl_mask.sum())
-        fig_cl, axes_cl = plt.subplots(1, 3, figsize=(13.5, 4.5))
+        info = cluster_info.get(ci, {})
+        n_p = info.get("n_patches", 0)
+        var_str = ""
+        vr = info.get("var_ratios")
+        if vr is not None:
+            var_str = f"\nVar: {vr[0]:.0%}/{vr[1]:.0%}/{vr[2]:.0%}"
+        axes[1, ci + 1].imshow(colored)
+        axes[1, ci + 1].set_title(f"Cluster {ci} ({n_p} Patches){var_str}")
+        axes[1, ci + 1].axis("off")
 
-        axes_cl[0].imshow(img_np)
-        axes_cl[0].set_title("Original", fontweight='bold')
-        axes_cl[0].axis("off")
+    for ci in range(n_k, n_cols - 1):
+        axes[1, ci + 1].axis("off")
 
-        axes_cl[1].imshow(colored)
-        axes_cl[1].set_title(f"Cluster {ci} ({n_p} Patches)")
-        axes_cl[1].axis("off")
-
-        axes_cl[2].imshow(cl_pca_resized)
-        axes_cl[2].set_title(f"Cluster {ci} PCA{cl_var_str}")
-        axes_cl[2].axis("off")
-
-        fig_cl.suptitle(
-            f"Single-Cluster PCA — Cluster {ci} ({n_p}/{labels.shape[0]} Patches)",
-            fontweight='bold'
-        )
-        plt.tight_layout()
-        save_ma_figure(fig_cl, f"{path_stem}_cl{ci}")
-        plt.close(fig_cl)
-        print(f"  ✓ Single-Cluster PCA Cluster {ci} → {path_stem}_cl{ci}.svg")
+    fig.suptitle(
+        f"DINOv2 PCA Feature Map ({h_patches}×{w_patches} Patches) "
+        f"— FG/BG-Trennung + K-Means (k={n_k}) + Per-Cluster PCA",
+        fontweight='bold'
+    )
+    plt.tight_layout()
+    save_ma_figure(fig, os.path.splitext(save_path)[0])
+    plt.close(fig)
+    print(f"  ✓ DINOv2 PCA Feature Map → {save_path}")
 
 
 # =====================================================================
@@ -491,33 +553,24 @@ def visualize_dino_pca(img_np, patch_tokens, h_patches, w_patches, save_path,
 # =====================================================================
 
 def visualize_dino_similarity(img_np, patch_tokens, h_patches, w_patches, save_path,
-                               ref_positions=None, n_clusters=3):
+                               ref_positions=None):
     """
     Cosine-Similarity von ausgewählten Referenz-Patches zu allen anderen.
     Zeigt, welche Bildregionen semantisch ähnlich sind.
 
     Args:
-        ref_positions: Liste von (row, col) Patch-Positionen.
-                       Default: ein Referenz-Patch pro K-Means-Cluster (nächster zum Zentroid).
-        n_clusters: Anzahl Cluster für automatische Referenzpunkt-Bestimmung.
+        ref_positions: Liste von (row, col) Patch-Positionen. Default: Würfel-Mitte + EEF + Hintergrund
     """
     tokens = patch_tokens.numpy()  # (num_patches, emb_dim)
 
     if ref_positions is None:
-        # Referenz-Patches aus K-Means-Clustern: pro Cluster der Patch
-        # der dem Cluster-Zentroid am nächsten liegt
-        tokens_norm_km = tokens / (np.linalg.norm(tokens, axis=1, keepdims=True) + 1e-8)
-        kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
-        labels = kmeans.fit_predict(tokens_norm_km)
-        ref_positions = []
-        for ci in range(n_clusters):
-            mask = labels == ci
-            indices = np.where(mask)[0]
-            centroid = kmeans.cluster_centers_[ci]
-            dists = np.linalg.norm(tokens_norm_km[indices] - centroid, axis=1)
-            nearest = indices[np.argmin(dists)]
-            r, c = divmod(nearest, w_patches)
-            ref_positions.append((r, c))
+        # Automatische Referenz-Patches: Mitte, oben-links, unten-Mitte
+        ref_positions = [
+            (h_patches // 2, w_patches // 2),     # Mitte (Würfel/Roboter)
+            (h_patches // 4, w_patches // 4),      # Oben-links (Hintergrund)
+            (3 * h_patches // 4, w_patches // 2),   # Unten-Mitte (Tisch)
+            (h_patches // 4, 3 * w_patches // 4),   # Oben-rechts
+        ]
 
     num_refs = len(ref_positions)
     fig, axes = plt.subplots(2, num_refs + 1, figsize=(4 * (num_refs + 1), 8))
@@ -772,423 +825,60 @@ def visualize_reconstruction(model, obs_dict, act, device, img_np, save_path):
 
 
 # =====================================================================
-# 6. Proprio Embedding Space (PCA)
+# 6. Zusammenfassung (Summary Grid)
 # =====================================================================
 
-def decode_proprio_embedding(model, z_proprio, device):
-    """
-    Dekodiert Proprio-Embeddings zurück in normalisierte xyz-Koordinaten.
-
-    Der ProprioceptiveEmbedding-Encoder ist ein Conv1d(3→384, kernel_size=1),
-    d.h. eine lineare Abbildung W @ x + b. Die Pseudo-Inverse ermöglicht
-    eine exakte Rücktransformation: x = W⁺ @ (z - b).
-
-    Args:
-        model: VWorldModel
-        z_proprio: (N, emb_dim) Tensor
-        device: torch.device
-    Returns:
-        (N, 3) Tensor — normalisierte proprio-Werte
-    """
-    proprio_enc = model.proprio_encoder
-    # Conv1d(in_chans=3, out_channels=384, kernel_size=1):
-    # weight shape: (384, 3, 1), bias shape: (384,)
-    W = proprio_enc.patch_embed.weight.data[:, :, 0].to(device)  # (384, 3)
-    b = proprio_enc.patch_embed.bias.data.to(device)              # (384,)
-
-    z = z_proprio.to(device) - b.unsqueeze(0)  # (N, 384)
-    W_pinv = torch.linalg.pinv(W)              # (3, 384)
-    decoded = z @ W_pinv.T                      # (N, 3)
-    return decoded.cpu()
-
-
-def visualize_proprio_embedding(obs_proprio_raw, model, device, save_path,
-                                 proprio_mean=None, proprio_std=None):
-    """
-    PCA-Visualisierung des Proprio-Embedding-Raums.
-
-    Kodiert alle Proprio-Werte einer Episode, projiziert die Embeddings via PCA
-    auf 2D und färbt die Punkte nach x/y/z-Koordinate.
-
-    Args:
-        obs_proprio_raw: (T, 3) normalisiertes Proprio (z-score)
-        model: VWorldModel mit proprio_encoder
-        proprio_mean, proprio_std: Dataset-Normalisierungs-Statistiken (optional)
-    """
-    model.eval()
-    T = obs_proprio_raw.shape[0]
-
-    # Encode: (1, T, 3) → (1, T, emb_dim)
-    with torch.no_grad():
-        z_proprio = model.encode_proprio(obs_proprio_raw.unsqueeze(0).float().to(device))
-        z_proprio = z_proprio[0].cpu().numpy()  # (T, emb_dim)
-
-    # Denormalisiere proprio für Farbgebung
-    proprio_vals = obs_proprio_raw.numpy()  # (T, 3) — normalisiert
-    if proprio_mean is not None and proprio_std is not None:
-        proprio_xyz = proprio_vals * proprio_std.numpy() + proprio_mean.numpy()
-        labels = ["x [m]", "y [m]", "z [m]"]
-    else:
-        proprio_xyz = proprio_vals
-        labels = ["x (norm.)", "y (norm.)", "z (norm.)"]
-
-    # PCA der Embeddings
-    pca = PCA(n_components=2)
-    z_pca = pca.fit_transform(z_proprio)  # (T, 2)
-
-    # --- Plot: 3 Subplots (gefärbt nach x, y, z) + 1 Roundtrip-Check ---
-    fig, axes = plt.subplots(1, 4, figsize=(20, 4.5))
-
-    for i in range(3):
-        sc = axes[i].scatter(z_pca[:, 0], z_pca[:, 1], c=proprio_xyz[:, i],
-                             cmap="viridis", s=20, edgecolors="none")
-        # Zeitliche Reihenfolge mit Pfeilen andeuten
-        for t in range(0, T - 1, max(1, T // 15)):
-            axes[i].annotate("", xy=z_pca[t + 1], xytext=z_pca[t],
-                             arrowprops=dict(arrowstyle="->", color="gray", alpha=0.4, lw=0.8))
-        axes[i].set_xlabel(f"PC1 ({pca.explained_variance_ratio_[0]:.0%})")
-        axes[i].set_ylabel(f"PC2 ({pca.explained_variance_ratio_[1]:.0%})")
-        axes[i].set_title(f"gefärbt nach {labels[i]}")
-        plt.colorbar(sc, ax=axes[i])
-
-    # Roundtrip-Check: encode → decode → vergleiche mit Input
-    with torch.no_grad():
-        z_t = model.encode_proprio(obs_proprio_raw.unsqueeze(0).float().to(device))
-        decoded = decode_proprio_embedding(model, z_t[0], device)  # (T, 3)
-
-    roundtrip_err = (decoded.numpy() - proprio_vals)
-    mae_per_dim = np.abs(roundtrip_err).mean(axis=0)
-
-    axes[3].bar(labels, mae_per_dim, color=["#e41a1c", "#377eb8", "#4daf4a"])
-    axes[3].set_ylabel("MAE (normalisiert)")
-    axes[3].set_title("Roundtrip-Fehler\n(Encode → Decode)")
-    for j, v in enumerate(mae_per_dim):
-        axes[3].text(j, v + mae_per_dim.max() * 0.05, f"{v:.2e}", ha="center", fontsize=8)
-
-    fig.suptitle("Proprio-Encoder Embedding Space (PCA)", fontweight="bold")
-    plt.tight_layout()
-    save_ma_figure(fig, os.path.splitext(save_path)[0])
-    plt.close(fig)
-    print(f"  ✓ Proprio Embedding Space → {save_path}")
-
-
-# =====================================================================
-# 7. Proprio Prediction Quality (Rollout)
-# =====================================================================
-
-def _proprio_rollout_data(model, dset, ep_idx, device, num_hist, frameskip, rollout_len):
-    """
-    Führt einen Rollout mit GT-Aktionen durch und dekodiert die vom ViT
-    vorhergesagten Proprio-Embeddings zurück in xyz-Koordinaten.
-
-    Hinweis zur Interpretation:
-      • Context-Frames (0 … num_hist-1): Encode→Decode-Roundtrip der GT-Werte
-        (nahezu perfekt, da Conv1d 3→384 exakt invertierbar ist)
-      • Ab num_hist: ECHTE ViT-Predictor-Vorhersagen im Latent-Space,
-        anschließend über Pseudo-Inverse dekodiert
-
-    Returns dict mit allen Plot-relevanten Arrays oder None bei Fehler.
-    """
-    model.eval()
-
-    obs_raw, actions, _, _ = dset[ep_idx]
-    obs_visual = obs_raw["visual"]
-    obs_proprio = obs_raw["proprio"]
-    T_total = obs_visual.shape[0]
-
-    max_wm_steps = (T_total - 1) // frameskip
-    total_steps = num_hist + (rollout_len or (max_wm_steps - num_hist))
-    total_steps = min(total_steps, max_wm_steps)
-    actual_rollout = total_steps - num_hist
-    if actual_rollout <= 0:
-        print(f"  ⚠ Episode {ep_idx} zu kurz für Proprio-Rollout.")
-        return None
-
-    max_frame = total_steps * frameskip
-    if max_frame >= T_total:
-        total_steps = (T_total - 1) // frameskip
-        actual_rollout = total_steps - num_hist
-        max_frame = total_steps * frameskip
-
-    img_indices = list(range(0, max_frame + 1, frameskip))
-    obs_frames_visual = obs_visual[img_indices]
-    obs_frames_proprio = obs_proprio[img_indices]
-
-    wm_actions = []
-    for s in range(total_steps):
-        start = s * frameskip
-        step_acts = actions[start:start + frameskip]
-        wm_actions.append(step_acts.reshape(-1))
-    wm_actions = torch.stack(wm_actions)
-
-    obs_0 = {
-        "visual": obs_frames_visual[:num_hist].unsqueeze(0).float().to(device),
-        "proprio": obs_frames_proprio[:num_hist].unsqueeze(0).float().to(device),
-    }
-    all_acts = wm_actions[:total_steps].unsqueeze(0).float().to(device)
-
-    with torch.no_grad():
-        z_obses, _ = model.rollout(obs_0, all_acts)
-
-    z_pred_proprio = z_obses["proprio"][0]
-    pred_proprio_norm = decode_proprio_embedding(model, z_pred_proprio, device)
-    gt_proprio_norm = obs_frames_proprio[:total_steps + 1]
-
-    if hasattr(dset, "proprio_mean") and dset.proprio_mean is not None:
-        pm = dset.proprio_mean.numpy()
-        ps = dset.proprio_std.numpy()
-        pred_xyz = pred_proprio_norm.numpy() * ps + pm
-        gt_xyz = gt_proprio_norm.numpy() * ps + pm
-        unit = "m"
-    else:
-        pred_xyz = pred_proprio_norm.numpy()
-        gt_xyz = gt_proprio_norm.numpy()
-        unit = "norm."
-
-    return {
-        "pred_xyz": pred_xyz, "gt_xyz": gt_xyz, "unit": unit,
-        "num_hist": num_hist, "frameskip": frameskip,
-        "actual_rollout": actual_rollout, "ep_idx": ep_idx,
-    }
-
-
-def visualize_proprio_trajectory(model, dset, ep_idx, device, save_path,
-                                  num_hist=None, frameskip=None,
-                                  rollout_len=None):
-    """
-    Erzeugt zwei cleane Abbildungen zur Proprio-Prediction-Qualität.
-
-    Bild 1 (proprio_trajectory_…):
-      3D-Trajektorie | x-y-Draufsicht (z als Farbe) | z(t)-Verlauf
-
-    Bild 2 (proprio_timeseries_…):
-      x(t), y(t), z(t) mit Context-Markierung | Positionsfehler ‖e‖(t)
-
-    Farben: GT = Rot, Predicted = Blau.
-    """
-    if num_hist is None:
-        num_hist = model.num_hist
-    if frameskip is None:
-        frameskip = 1
-
-    data = _proprio_rollout_data(model, dset, ep_idx, device,
-                                 num_hist, frameskip, rollout_len)
-    if data is None:
-        return
-
-    pred_xyz = data["pred_xyz"]
-    gt_xyz = data["gt_xyz"]
-    unit = data["unit"]
-    nh = data["num_hist"]
-    n_steps = pred_xyz.shape[0]
-    time_axis = np.arange(n_steps)
-    error = np.linalg.norm(pred_xyz - gt_xyz, axis=1)
-
-    COL_GT = "#d62728"    # rot
-    COL_PR = "#1f77b4"    # blau
-    COL_CTX = "#aaaaaa"   # grau
-
-    path_stem = os.path.splitext(save_path)[0]
-
-    # ================================================================
-    # Bild 1: 3D | x-y (z-Farbe) | z(t)
-    # ================================================================
-    # Gleiches Dimensions-/Spacing-Schema wie bei den Timeseries, aber mit 3 Panels.
-    fig1, axes1 = plt.subplots(1, 3, figsize=(18, 3.8),
-                               gridspec_kw={"wspace": 0.38})
-
-    # Ersetze das erste 2D-Axis durch ein 3D-Axis bei gleicher Panel-Position.
-    pos0 = axes1[0].get_position()
-    axes1[0].remove()
-    ax3d = fig1.add_axes(pos0, projection="3d")
-    ax_xy = axes1[1]
-    ax_z = axes1[2]
-
-    ax3d.plot(*gt_xyz.T, "-", color=COL_GT, linewidth=1.5, label="GT", zorder=2)
-    ax3d.plot(*pred_xyz.T, "--", color=COL_PR, linewidth=1.5, label="Predicted", zorder=2)
-    ax3d.scatter(*gt_xyz[0], marker="o", s=40, color=COL_GT, zorder=3)
-    ax3d.scatter(*pred_xyz[0], marker="o", s=40, color=COL_PR, zorder=3)
-    ax3d.scatter(*gt_xyz[nh - 1], marker="*", s=80, color=COL_CTX,
-                 edgecolors="k", linewidths=0.5, zorder=4)
-    ax3d.set_xlabel(f"x [{unit}]", labelpad=2)
-    ax3d.set_ylabel(f"y [{unit}]", labelpad=2)
-    ax3d.set_zlabel(f"z [{unit}]", labelpad=2)
-    ax3d.tick_params(labelsize=7, pad=1)
-    ax3d.set_title("3D-Trajektorie")
-    ax3d.legend(fontsize=7, loc="upper left")
-
-    # x-y Draufsicht mit z als Farbe
-    sc_gt = ax_xy.scatter(gt_xyz[:, 0], gt_xyz[:, 1], c=gt_xyz[:, 2],
-                          cmap="coolwarm", s=18, marker="o", edgecolors="none",
-                          zorder=2, label="GT")
-    ax_xy.scatter(pred_xyz[:, 0], pred_xyz[:, 1], c=pred_xyz[:, 2],
-                  cmap="coolwarm", s=18, marker="s", edgecolors="none",
-                  zorder=2, label="Predicted",
-                  vmin=sc_gt.get_clim()[0], vmax=sc_gt.get_clim()[1])
-    # Verbindungslinien
-    ax_xy.plot(gt_xyz[:, 0], gt_xyz[:, 1], "-", color=COL_GT, linewidth=0.7, alpha=0.5)
-    ax_xy.plot(pred_xyz[:, 0], pred_xyz[:, 1], "--", color=COL_PR, linewidth=0.7, alpha=0.5)
-    cb = plt.colorbar(sc_gt, ax=ax_xy, pad=0.02)
-    cb.set_label(f"z [{unit}]", fontsize=8)
-    cb.ax.tick_params(labelsize=7)
-    ax_xy.set_xlabel(f"x [{unit}]")
-    ax_xy.set_ylabel(f"y [{unit}]")
-    ax_xy.set_title("x-y Draufsicht (z als Farbe)")
-    ax_xy.legend(fontsize=7, markerscale=1.2)
-
-    # z(t)
-    ax_z.plot(time_axis, gt_xyz[:, 2], "-", color=COL_GT, linewidth=1.5, label="GT")
-    ax_z.plot(time_axis, pred_xyz[:, 2], "--", color=COL_PR, linewidth=1.5, label="Predicted")
-    ax_z.axvline(nh - 0.5, color=COL_CTX, linestyle=":", linewidth=0.8)
-    ax_z.set_xlabel("WM-Step")
-    ax_z.set_ylabel(f"z [{unit}]")
-    ax_z.set_title("z-Verlauf")
-    ax_z.legend(fontsize=7)
-
-    fig1.suptitle(
-        f"EEF-Trajektorie — Episode {ep_idx}    "
-        f"(Context={nh}, Prediction={data['actual_rollout']})",
-        fontweight="bold",
-    )
-    plt.tight_layout()
-    save_ma_figure(fig1, path_stem, fixed_canvas=True)
-    plt.close(fig1)
-    print(f"  ✓ Proprio Trajectory Bild 1 → {path_stem}.svg")
-
-    # ================================================================
-    # Bild 2: x(t), y(t), z(t) + Fehler
-    # ================================================================
-    path_stem2 = path_stem.replace("proprio_trajectory", "proprio_timeseries")
-    fig2, axes2 = plt.subplots(1, 4, figsize=(18, 3.8),
-                                gridspec_kw={"wspace": 0.38})
-
-    dim_labels = ["x", "y", "z"]
-    for i in range(3):
-        ax = axes2[i]
-        ax.axvspan(0, nh - 0.5, color=COL_CTX, alpha=0.08)
-        ax.plot(time_axis, gt_xyz[:, i], "-", color=COL_GT, linewidth=1.5, label="GT")
-        ax.plot(time_axis, pred_xyz[:, i], "--", color=COL_PR, linewidth=1.5, label="Predicted")
-        ax.axvline(nh - 0.5, color=COL_CTX, linestyle=":", linewidth=0.8)
-        ax.set_xlabel("WM-Step")
-        ax.set_ylabel(f"{dim_labels[i]} [{unit}]")
-        ax.set_title(f"{dim_labels[i]}(t)")
-        if i == 0:
-            ax.legend(fontsize=7)
-
-    # Fehler
-    ax_err = axes2[3]
-    err_unit = "mm" if unit == "m" else unit
-    err_vals = error * 1000 if unit == "m" else error
-    ax_err.axvspan(0, nh - 0.5, color=COL_CTX, alpha=0.08)
-    ax_err.plot(time_axis, err_vals, "-", color="#7b3294", linewidth=1.5)
-    ax_err.axvline(nh - 0.5, color=COL_CTX, linestyle=":", linewidth=0.8)
-    ax_err.set_xlabel("WM-Step")
-    ax_err.set_ylabel(f"‖e‖ [{err_unit}]")
-    ax_err.set_title("Positionsfehler")
-
-    fig2.suptitle(
-        f"EEF-Zeitreihen — Episode {ep_idx}    "
-        f"(Context={nh}, Prediction={data['actual_rollout']})",
-        fontweight="bold",
-    )
-    plt.tight_layout()
-    save_ma_figure(fig2, path_stem2, fixed_canvas=True)
-    plt.close(fig2)
-    print(f"  ✓ Proprio Timeseries Bild 2 → {path_stem2}.svg")
-
-
-# =====================================================================
-# 8. Zusammenfassung (Summary Grid)
-# =====================================================================
-
-def create_summary(img_np, patch_tokens, h_patches, w_patches, save_path,
-                   n_clusters=3, n_components=3):
-    """
-    Kompakte Zusammenfassung in einer Zeile:
-      1) Original  2) Naive PCA  3) Cluster-Overlay (alle k-means)
-      4…N) Single-Cluster PCA (je ein Bild pro Cluster)
-
-    Zusätzlich wird pro Cluster ein eigenes Einzelbild gespeichert.
-    Alle Bilder werden beschriftet UND unbeschriftet (via save_ma_figure) erzeugt.
-    """
+def create_summary(img_np, cls_attn, patch_tokens, h_patches, w_patches, save_path):
+    """Kompakte Zusammenfassung: Original + Attention + Segmentierung + Similarity."""
     tokens = patch_tokens.numpy() if isinstance(patch_tokens, torch.Tensor) else patch_tokens
-    path_stem = os.path.splitext(save_path)[0]
 
-    # ── Naive PCA (alle Patches) ──
-    pca_all = PCA(n_components=n_components)
-    pca_all_result = pca_all.fit_transform(tokens)
-    for c in range(n_components):
-        col = pca_all_result[:, c]
-        pca_all_result[:, c] = (col - col.min()) / (col.max() - col.min() + 1e-8)
-    pca_all_img = pca_all_result.reshape(h_patches, w_patches, n_components)
+    # Mean Attention
+    mean_attn = cls_attn.mean(0).numpy()
+    mean_attn_resized = np.array(Image.fromarray(
+        (mean_attn * 255 / (mean_attn.max() + 1e-8)).astype(np.uint8)
+    ).resize((img_np.shape[1], img_np.shape[0]), Image.BILINEAR)).astype(float) / 255.0
 
-    # ── K-Means Segmentierung ──
-    labels, seg_map, _, cluster_info = compute_kmeans_pca(
-        tokens, h_patches, w_patches, n_clusters=n_clusters, n_components=n_components
+    # FG/BG + K-Means Segmentierung
+    _, _, seg_map, _, _, n_k = compute_segmented_pca(
+        tokens, h_patches, w_patches
     )
     seg_resized = np.array(Image.fromarray(seg_map).resize(
         (img_np.shape[1], img_np.shape[0]), Image.NEAREST))
     seg_overlay = (0.45 * seg_resized.astype(float) +
                    0.55 * img_np.astype(float)).clip(0, 255).astype(np.uint8)
 
-    # ── Single-Cluster PCA Bilder vorbereiten ──
-    cluster_pca_imgs = []
-    cluster_var_strs = []
-    for ci in range(n_clusters):
-        cl_mask = labels == ci
-        cl_tokens = tokens[cl_mask]
-        cl_pca_map = np.zeros((labels.shape[0], n_components), dtype=np.float32)
-        cl_var_str = ""
+    # Similarity: Mitte
+    tokens_norm = tokens / (np.linalg.norm(tokens, axis=1, keepdims=True) + 1e-8)
+    center_idx = (h_patches // 2) * w_patches + w_patches // 2
+    ref_token = tokens_norm[center_idx:center_idx + 1]
+    sim = (tokens_norm @ ref_token.T).squeeze().reshape(h_patches, w_patches)
+    sim_resized = np.array(Image.fromarray(
+        ((sim - sim.min()) / (sim.max() - sim.min() + 1e-8) * 255).astype(np.uint8)
+    ).resize((img_np.shape[1], img_np.shape[0]), Image.BILINEAR)).astype(float) / 255.0
 
-        if cl_tokens.shape[0] >= n_components + 1:
-            pca_cl = PCA(n_components=n_components)
-            pca_result = pca_cl.fit_transform(cl_tokens)
-            for c in range(n_components):
-                col = pca_result[:, c]
-                pca_result[:, c] = (col - col.min()) / (col.max() - col.min() + 1e-8)
-            cl_pca_map[cl_mask] = pca_result
-            vr = pca_cl.explained_variance_ratio_
-            cl_var_str = f"\nPC1={vr[0]:.0%} PC2={vr[1]:.0%} PC3={vr[2]:.0%}"
+    fig, axes = plt.subplots(1, 4, figsize=(18, 4.5))
+    axes[0].imshow(img_np)
+    axes[0].set_title("Original", fontweight='bold')
+    axes[0].axis("off")
 
-        cl_pca_img = cl_pca_map.reshape(h_patches, w_patches, n_components)
-        cl_pca_resized = np.array(Image.fromarray(
-            (cl_pca_img * 255).astype(np.uint8)
-        ).resize((img_np.shape[1], img_np.shape[0]), Image.NEAREST))
+    axes[1].imshow(overlay_heatmap(img_np, mean_attn_resized, alpha=0.55))
+    axes[1].set_title("DINOv2 Attention\n(CLS → Patches)")
+    axes[1].axis("off")
 
-        cluster_pca_imgs.append(cl_pca_resized)
-        cluster_var_strs.append(cl_var_str)
+    axes[2].imshow(seg_overlay)
+    axes[2].set_title(f"K-Means Segmentierung\n(FG k={n_k}, Overlay)")
+    axes[2].axis("off")
 
-    # ── Pro Cluster eine Summary-Abbildung: Original | Naive PCA | Overlay | Single-Cluster PCA ──
-    var_all = pca_all.explained_variance_ratio_
+    axes[3].imshow(overlay_heatmap(img_np, sim_resized, alpha=0.55, cmap="RdYlBu_r"))
+    axes[3].set_title("Feature-Ähnlichkeit\n(Referenz: Bildmitte)")
+    axes[3].axis("off")
 
-    for ci in range(n_clusters):
-        n_p = int((labels == ci).sum())
-        fig, axes = plt.subplots(1, 4, figsize=(18, 4.5))
-
-        axes[0].imshow(img_np)
-        axes[0].set_title("Original", fontweight='bold')
-        axes[0].axis("off")
-
-        axes[1].imshow(pca_all_img, interpolation="nearest")
-        axes[1].set_title(
-            f"Naive PCA\nPC1={var_all[0]:.0%} PC2={var_all[1]:.0%} PC3={var_all[2]:.0%}")
-        axes[1].axis("off")
-
-        axes[2].imshow(seg_overlay)
-        axes[2].set_title(f"K-Means Overlay\n(k={n_clusters} Cluster)")
-        axes[2].axis("off")
-
-        axes[3].imshow(cluster_pca_imgs[ci])
-        axes[3].set_title(f"Cluster {ci} PCA\n({n_p} Patches){cluster_var_strs[ci]}")
-        axes[3].axis("off")
-
-        fig.suptitle(
-            f"DINOv2 Feature-Visualisierung — Cluster {ci}",
-            fontweight='bold')
-        plt.tight_layout()
-        save_ma_figure(fig, f"{path_stem}_cl{ci}")
-        plt.close(fig)
-        print(f"  ✓ Summary Cluster {ci} → {path_stem}_cl{ci}.svg")
+    fig.suptitle("DINOv2 Feature-Visualisierung — Franka Cube Stacking",
+                 fontweight='bold')
+    plt.tight_layout()
+    save_ma_figure(fig, os.path.splitext(save_path)[0])
+    plt.close(fig)
+    print(f"  ✓ Summary → {save_path}")
 
 
 # =====================================================================
@@ -1240,7 +930,7 @@ def main():
                            os.path.join(out_dir, f"dino_pca_{basename}.png"))
         visualize_dino_similarity(img_np, patch_tokens, hp, wp,
                                   os.path.join(out_dir, f"dino_similarity_{basename}.png"))
-        create_summary(img_np, patch_tokens, hp, wp,
+        create_summary(img_np, cls_attn, patch_tokens, hp, wp,
                        os.path.join(out_dir, f"summary_{basename}.png"))
         print(f"\n✅ Fertig! Ausgabe in: {out_dir}")
         return
@@ -1254,17 +944,6 @@ def main():
 
     with open(os.path.join(model_path, "hydra.yaml"), "r") as f:
         model_cfg = OmegaConf.load(f)
-
-    # Datensatz-Pfad auflösen (Fallback auf Archiv)
-    orig_data_path = model_cfg.env.dataset.data_path
-    if not os.path.isdir(orig_data_path):
-        dataset_name = os.path.basename(orig_data_path.rstrip("/"))
-        archiv_path = os.path.join("/media/tsp_jw/data/DINO_WM/fcs_datasets/00_Archiv", dataset_name)
-        if os.path.isdir(archiv_path):
-            print(f"  Datensatz nicht unter Original-Pfad gefunden, nutze Archiv: {archiv_path}")
-            model_cfg.env.dataset.data_path = archiv_path
-        else:
-            print(f"  ⚠ Datensatz nicht gefunden: {orig_data_path}")
 
     # Dataset laden (roh: volle Episoden)
     print("[1/4] Lade Dataset...")
@@ -1288,10 +967,8 @@ def main():
     frameskip = model_cfg.frameskip
 
     # Ausgabe-Ordner
-    dataset_name = os.path.basename(model_cfg.env.dataset.data_path.rstrip("/"))
-    dir_name = args.model_name.replace("/", "_") + "_" + dataset_name
     out_dir = args.output_dir or os.path.join(
-        DINO_WM_DIR, "feature_visualizations", dir_name)
+        DINO_WM_DIR, "feature_visualizations", args.model_name.replace("/", "_"))
     os.makedirs(out_dir, exist_ok=True)
 
     # ── Daten aus Dataset laden ──
@@ -1327,13 +1004,12 @@ def main():
                             os.path.join(out_dir, f"dino_attention_{tag}.png"))
     created_files.append(f"dino_attention_{tag}.svg")
     visualize_dino_pca(img_np, patch_tokens, hp, wp,
-                       os.path.join(out_dir, f"dino_pca_{tag}.png"),
-                       dataset_name=dataset_name)
+                       os.path.join(out_dir, f"dino_pca_{tag}.png"))
     created_files.append(f"dino_pca_{tag}.svg")
     visualize_dino_similarity(img_np, patch_tokens, hp, wp,
                               os.path.join(out_dir, f"dino_similarity_{tag}.png"))
     created_files.append(f"dino_similarity_{tag}.svg")
-    create_summary(img_np, patch_tokens, hp, wp,
+    create_summary(img_np, cls_attn, patch_tokens, hp, wp,
                    os.path.join(out_dir, f"summary_{tag}.png"))
     created_files.append(f"summary_{tag}.svg")
 
@@ -1387,31 +1063,6 @@ def main():
                                  device, ref_img_np,
                                  os.path.join(out_dir, f"reconstruction_{vit_tag}.png"))
         created_files.append(f"reconstruction_{vit_tag}.svg")
-
-    # ── Proprio Visualisierungen ──
-    if obs_proprio is not None and hasattr(model, "proprio_encoder") and model.proprio_encoder is not None:
-        proprio_tag = f"ep{ep_idx:03d}"
-
-        # Proprio-Normalisierungs-Statistiken aus Dataset
-        pm = getattr(dset, "proprio_mean", None)
-        ps = getattr(dset, "proprio_std", None)
-
-        # 6. Proprio Embedding Space
-        visualize_proprio_embedding(
-            obs_proprio, model, device,
-            os.path.join(out_dir, f"proprio_embedding_{proprio_tag}.png"),
-            proprio_mean=pm, proprio_std=ps,
-        )
-        created_files.append(f"proprio_embedding_{proprio_tag}.svg")
-
-        # 7. Proprio Prediction Quality (Rollout)
-        visualize_proprio_trajectory(
-            model, dset, ep_idx, device,
-            os.path.join(out_dir, f"proprio_trajectory_{proprio_tag}.png"),
-            num_hist=num_hist, frameskip=frameskip,
-        )
-        created_files.append(f"proprio_trajectory_{proprio_tag}.svg")
-        created_files.append(f"proprio_timeseries_{proprio_tag}.svg")
 
     print(f"\n✅ Fertig! Alle Visualisierungen in: {out_dir}")
     print(f"   Dateien:")

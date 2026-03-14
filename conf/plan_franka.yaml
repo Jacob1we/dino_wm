@@ -62,4 +62,34 @@ gripper:
   open_prior: true
   base_indices: [3, 7]  # g_s und g_e in 8D
 
+# =====================================================================
+# Feature-Visualisierung (während Inferenz)
+# =====================================================================
+# Erzeugt Feature-Maps während der Planning-Inferenz:
+#   - Naive PCA: 3-Komponenten PCA über alle DINOv2 Patch-Tokens
+#   - K-Means + PCA: K-Means Clustering (k=3) + Per-Cluster PCA
+#   - DINO Self-Attention: CLS-Token Attention auf alle Patches
+#
+# Output wird in plan_outputs/<run>/features/ gespeichert.
+# Achtung: Erzeugt ~50-100ms Overhead pro visualisiertem Frame!
+
+feature_visualization:
+  enabled: true                    # true = Feature-Maps erzeugen
+  save_naive_pca: true              # Naive PCA Feature-Map (alle Patches)
+  save_kmeans_pca: true             # K-Means Clustering + Per-Cluster PCA
+  save_attention: true              # DINO Self-Attention Maps
+  n_clusters: 3                     # Anzahl Cluster für K-Means
+  n_heads_show: 4                   # Anzahl Attention-Heads in Visualisierung
+  
+  # Wann werden Visualisierungen erzeugt?
+  visualize_goal: true              # Bei set_goal: Goal-Bild visualisieren
+  visualize_current: true           # Bei plan/plan_all: Aktuelles Bild visualisieren
+  visualize_interval: 1             # Alle N plan-Aufrufe visualisieren (1 = jeden)
+                                    # Höhere Werte reduzieren Overhead, z.B. 5 = alle 5 Steps
+  
+  # WM-Prediction Visualisierung (benötigt Decoder im Modell!)
+  # Erzeugt 4er-Grid: Predicted | Goal | Overlay | Difference
+  visualize_wm_prediction: true     # WM-Vorhersage vs Zielbild visualisieren
+                                    # Nur möglich wenn Modell mit Decoder trainiert wurde
+
 # 2026-02-09/08-12-44

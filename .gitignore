@@ -2,6 +2,13 @@ __pycache__
 *.pyc
 outputs/
 plan_outputs/
+feature_visualizations/
+00_VIsualisierungen/*.png
+00_VIsualisierungen/*.pdf
+00_VIsualisierungen/*.svg
+00_VIsualisierungen/hyperparameter_analysis/
+00_VIsualisierungen/wm_sanity_outputs/
+
 wandb/
 *.mp4
 *.pth

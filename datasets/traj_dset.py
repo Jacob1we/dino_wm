@@ -44,6 +44,9 @@ class TrajSubset(TrajDataset, Subset):
     def get_seq_length(self, idx):
         return self.dataset.get_seq_length(self.indices[idx])
 
+    def get_frames(self, idx, frames):
+        return self.dataset.get_frames(self.indices[idx], frames)
+
     def __getattr__(self, name):
         if hasattr(self.dataset, name):
             return getattr(self.dataset, name)

@@ -570,10 +570,47 @@ if planning_cfg:
 # Feature-Visualisierungs-Output-Verzeichnis (wird vom Client gesetzt via set_client_config)
 # Fallback: plan_outputs/ falls kein Client-Pfad übermittelt wird
 from datetime import datetime
+import csv
 _viz_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 _viz_model_short = args.model_name.replace("/", "_").replace("-", "")
 feature_viz_dir = os.path.join(dino_wm_dir, "plan_outputs", f"feature_viz_{_viz_model_short}_{_viz_timestamp}")
 feature_viz_step_counter = 0
+feature_viz_goal_idx = 0  # Goal-Index für Multi-Goal-Runs (Pick, Place, etc.)
+current_goal_name = "goal00"  # Aktueller Goal-Name (von Client via goal_name oder aus Index)
+metrics_csv_path = None  # Wird beim ersten Schreiben gesetzt
+metrics_csv_initialized = False
+
+def init_metrics_csv(csv_path: str):
+    """Initialisiert die Metriken-CSV mit Header."""
+    global metrics_csv_initialized
+    os.makedirs(os.path.dirname(csv_path), exist_ok=True)
+    with open(csv_path, 'w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow([
+            'goal_name', 'step', 'timestamp',
+            'mae_goal_current', 'mae_goal_predicted',
+            'mse_goal_current', 'mse_goal_predicted'
+        ])
+    metrics_csv_initialized = True
+    print(f"  Metriken-CSV initialisiert: {csv_path}")
+
+def log_metrics_to_csv(csv_path: str, goal_name: str, step: int, metrics: dict):
+    """Fügt eine Zeile mit Metriken zur CSV hinzu."""
+    global metrics_csv_initialized
+    if not metrics_csv_initialized:
+        init_metrics_csv(csv_path)
+    
+    with open(csv_path, 'a', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow([
+            goal_name,
+            step,
+            datetime.now().strftime("%H:%M:%S"),
+            f"{metrics['mae_goal_current']:.6f}",
+            f"{metrics['mae_goal_predicted']:.6f}",
+            f"{metrics['mse_goal_current']:.6f}",
+            f"{metrics['mse_goal_predicted']:.6f}",
+        ])
 
 if feature_viz_enabled:
     print(f"    output_dir: wird vom Client gesetzt (Fallback: {feature_viz_dir})")
@@ -670,7 +707,10 @@ def _denorm_to_sub_actions(actions_tensor, first_only=True):
 
 def get_wm_predicted_image(cur_obs: dict, actions: torch.Tensor, goal_obs: dict) -> np.ndarray:
     """
-    Berechnet die WM-Vorhersage für die gegebenen Actions und dekodiert das Bild.
+    Berechnet die WM-Vorhersage für die ERSTE Action und dekodiert das Bild.
+    
+    Das World Model sagt den Zustand nach der ersten geplanten Action voraus,
+    d.h. den nächsten Zeitschritt von der aktuellen Beobachtung aus.
     
     Args:
         cur_obs: Aktuelles Observation-Dict (aus img_to_obs)
@@ -678,7 +718,7 @@ def get_wm_predicted_image(cur_obs: dict, actions: torch.Tensor, goal_obs: dict)
         goal_obs: Goal Observation-Dict (für Zielbild-Vergleich)
     
     Returns:
-        predicted_img: (H, W, 3) uint8 RGB Bild der WM-Vorhersage am letzten Horizon-Step
+        predicted_img: (H, W, 3) uint8 RGB Bild der WM-Vorhersage nach 1 Schritt
                        oder None wenn kein Decoder verfügbar
     """
     if not has_decoder:
@@ -686,38 +726,40 @@ def get_wm_predicted_image(cur_obs: dict, actions: torch.Tensor, goal_obs: dict)
     
     try:
         # Preprocessor auf cur_obs anwenden (wie im CEM-Planner)
-        obs_processed = preprocessor.process_obs(cur_obs.copy())
+        # transform_obs: np arrays → tensors, NHWC→NCHW, /255, normalize proprio
+        obs_tensor = preprocessor.transform_obs(cur_obs.copy())
+        obs_tensor = {k: v.float().to(device) for k, v in obs_tensor.items()}
         
-        # Bild von (1,1,H,W,3) → (1,1,3,H,W) und normalisieren
-        visual = torch.from_numpy(obs_processed['visual']).float().to(device)
-        visual = visual.permute(0, 1, 4, 2, 3)  # NHWC → NCHW
-        visual = visual / 255.0 * 2.0 - 1.0  # [0,255] → [-1,1]
+        # Nur erste Action für 1-Schritt-Vorhersage
+        first_action = actions[:, :1, :].to(device)  # (1, 1, action_dim)
         
-        # Proprio normalisieren
-        proprio = torch.from_numpy(obs_processed['proprio']).float().to(device)
-        proprio = (proprio - preprocessor.proprio_mean.to(device)) / preprocessor.proprio_std.to(device)
-        
-        obs_tensor = {'visual': visual, 'proprio': proprio}
-        
-        # WM Rollout
+        # WM Rollout mit nur einer Action
         with torch.no_grad():
-            z_obses, _ = model.rollout(obs_tensor, actions.to(device))
+            z_obses, _ = model.rollout(obs_tensor, first_action)
             
-            # Letzten vorhergesagten Zustand dekodieren
+            # Den vorhergesagten nächsten Zustand dekodieren
             # z_obses['visual'] hat shape (1, num_pred, num_patches, emb_dim)
             obs_decoded, _ = model.decode_obs(z_obses)
             
-            # Letztes Frame extrahieren: (1, num_pred, 3, H, W) → (3, H, W)
-            pred_visual = obs_decoded['visual'][0, -1]  # Letzter Horizon-Step
+            # Vorhergesagten nächsten Zustand extrahieren: (1, num_pred, 3, H, W) → (3, H, W)
+            # Nach 1 Action ist der vorhergesagte Zustand am Index -1 (letztes/einziges Ergebnis)
+            pred_visual = obs_decoded['visual'][0, -1]
             
-            # Von [-1,1] → [0,255] uint8
-            pred_img = ((pred_visual + 1.0) / 2.0 * 255.0).clamp(0, 255)
+            # Debug: Wertebereich ausgeben
+            v_min, v_max = pred_visual.min().item(), pred_visual.max().item()
+            print(f"  WM-Pred visual range: [{v_min:.3f}, {v_max:.3f}]")
+            
+            # Decoder-Output ist im Bereich [-1, 1] → auf [0, 255] skalieren
+            pred_visual = (pred_visual + 1.0) / 2.0  # [-1,1] → [0,1]
+            pred_img = (pred_visual * 255.0).clamp(0, 255)
             pred_img = pred_img.permute(1, 2, 0).cpu().numpy().astype(np.uint8)  # CHW → HWC
             
         return pred_img
         
     except Exception as e:
         print(f"  WM-Prediction Fehler: {e}")
+        import traceback
+        traceback.print_exc()
         return None
 
 
@@ -793,20 +835,36 @@ while True:
                 print(f"  Episode-Log: {episode_data}")
 
             elif cmd == "set_goal":
+                # Goal-Name vom Client (z.B. "pick", "place") oder Fallback auf Index
+                goal_name = msg.get("goal_name")
+                if goal_name:
+                    current_goal_name = goal_name
+                else:
+                    # Bei neuem Goal nach vorherigem: goal_idx erhöhen
+                    if goal_obs is not None:
+                        feature_viz_goal_idx += 1
+                    current_goal_name = f"goal{feature_viz_goal_idx:02d}"
+                
+                # Step-Counter für neues Goal zurücksetzen
+                if goal_obs is not None:
+                    feature_viz_step_counter = 0
+                    print(f"  Neues Goal '{current_goal_name}', Step-Counter zurückgesetzt")
+                
                 img = np.array(msg["image"])
                 ee_pos = np.array(msg["ee_pos"]) if "ee_pos" in msg else None
                 goal_obs = img_to_obs(img, ee_pos)
-                print(f"  Goal gesetzt: {img.shape} {img.dtype}, ee_pos={ee_pos}")
+                print(f"  Goal '{current_goal_name}' gesetzt: {img.shape} {img.dtype}, ee_pos={ee_pos}")
                 
                 # Feature-Visualisierung für Goal-Bild
                 if feature_viz_enabled and feature_viz_cfg.get("visualize_goal", True):
                     try:
                         viz_paths = feature_visualizer.visualize(
                             img_np=img, out_dir=feature_viz_dir, step_idx=0,
-                            prefix="goal",
+                            prefix=current_goal_name,
                             save_naive_pca=feature_viz_cfg.get("save_naive_pca", True),
                             save_kmeans_pca=feature_viz_cfg.get("save_kmeans_pca", True),
                             save_attention=feature_viz_cfg.get("save_attention", True),
+                            is_goal=True,  # PCA/K-Means für dieses Goal-Bild fitten und speichern
                         )
                         print(f"  Feature-Viz Goal: {feature_viz_dir}")
                     except Exception as e:
@@ -840,18 +898,21 @@ while True:
                     
                     # Feature-Visualisierung für aktuelles Bild
                     viz_interval = feature_viz_cfg.get("visualize_interval", 1)
+                    current_prefix = f"{current_goal_name}_current"
+                    wm_pred_prefix = f"{current_goal_name}_wm_pred"
+                    
                     if (feature_viz_enabled and 
                         feature_viz_cfg.get("visualize_current", True) and
                         feature_viz_step_counter % viz_interval == 0):
                         try:
                             viz_paths = feature_visualizer.visualize(
                                 img_np=img, out_dir=feature_viz_dir,
-                                step_idx=feature_viz_step_counter, prefix="current",
+                                step_idx=feature_viz_step_counter, prefix=current_prefix,
                                 save_naive_pca=feature_viz_cfg.get("save_naive_pca", True),
                                 save_kmeans_pca=feature_viz_cfg.get("save_kmeans_pca", True),
                                 save_attention=feature_viz_cfg.get("save_attention", True),
                             )
-                            print(f"  Feature-Viz Step {feature_viz_step_counter}")
+                            print(f"  Feature-Viz {current_goal_name} Step {feature_viz_step_counter}")
                         except Exception as e:
                             print(f"  Feature-Viz Fehler: {e}")
                     
@@ -863,13 +924,19 @@ while True:
                             pred_img = get_wm_predicted_image(cur_obs, actions, goal_obs)
                             if pred_img is not None:
                                 goal_img_np = extract_goal_image(goal_obs)
-                                feature_visualizer.visualize_wm_prediction(
+                                current_img_np = extract_goal_image(cur_obs)  # Aktueller realer Zustand
+                                viz_result = feature_visualizer.visualize_wm_prediction(
                                     predicted_img=pred_img,
                                     goal_img=goal_img_np,
+                                    current_img=current_img_np,
                                     out_dir=feature_viz_dir,
                                     step_idx=feature_viz_step_counter,
-                                    prefix="wm_pred"
+                                    prefix=wm_pred_prefix
                                 )
+                                # Metriken in CSV loggen
+                                if viz_result.get("metrics"):
+                                    csv_path = os.path.join(feature_viz_dir, "wm_prediction_metrics.csv")
+                                    log_metrics_to_csv(csv_path, current_goal_name, feature_viz_step_counter, viz_result["metrics"])
                         except Exception as e:
                             print(f"  WM-Prediction Viz Fehler: {e}")
                     
@@ -908,18 +975,21 @@ while True:
                     
                     # Feature-Visualisierung für aktuelles Bild
                     viz_interval = feature_viz_cfg.get("visualize_interval", 1)
+                    current_prefix = f"{current_goal_name}_current"
+                    wm_pred_prefix = f"{current_goal_name}_wm_pred"
+                    
                     if (feature_viz_enabled and 
                         feature_viz_cfg.get("visualize_current", True) and
                         feature_viz_step_counter % viz_interval == 0):
                         try:
                             viz_paths = feature_visualizer.visualize(
                                 img_np=img, out_dir=feature_viz_dir,
-                                step_idx=feature_viz_step_counter, prefix="current",
+                                step_idx=feature_viz_step_counter, prefix=current_prefix,
                                 save_naive_pca=feature_viz_cfg.get("save_naive_pca", True),
                                 save_kmeans_pca=feature_viz_cfg.get("save_kmeans_pca", True),
                                 save_attention=feature_viz_cfg.get("save_attention", True),
                             )
-                            print(f"  Feature-Viz Step {feature_viz_step_counter}")
+                            print(f"  Feature-Viz {current_goal_name} Step {feature_viz_step_counter}")
                         except Exception as e:
                             print(f"  Feature-Viz Fehler: {e}")
                     
@@ -931,13 +1001,19 @@ while True:
                             pred_img = get_wm_predicted_image(cur_obs, actions, goal_obs)
                             if pred_img is not None:
                                 goal_img_np = extract_goal_image(goal_obs)
-                                feature_visualizer.visualize_wm_prediction(
+                                current_img_np = extract_goal_image(cur_obs)  # Aktueller realer Zustand
+                                viz_result = feature_visualizer.visualize_wm_prediction(
                                     predicted_img=pred_img,
                                     goal_img=goal_img_np,
+                                    current_img=current_img_np,
                                     out_dir=feature_viz_dir,
                                     step_idx=feature_viz_step_counter,
-                                    prefix="wm_pred"
+                                    prefix=wm_pred_prefix
                                 )
+                                # Metriken in CSV loggen
+                                if viz_result.get("metrics"):
+                                    csv_path = os.path.join(feature_viz_dir, "wm_prediction_metrics.csv")
+                                    log_metrics_to_csv(csv_path, current_goal_name, feature_viz_step_counter, viz_result["metrics"])
                         except Exception as e:
                             print(f"  WM-Prediction Viz Fehler: {e}")
                     
@@ -964,8 +1040,12 @@ while True:
                 goal_obs = None
                 warm_start = None
                 feature_viz_step_counter = 0  # Reset step counter
+                feature_viz_goal_idx = 0  # Reset goal index
+                current_goal_name = "goal00"  # Reset goal name
+                metrics_csv_initialized = False  # Neue CSV bei neuem Run
+                feature_visualizer.reset_centroids()  # K-Means Zentroide zurücksetzen
                 response = {"status": "ok"}
-                print(f"  Reset")
+                print(f"  Reset (Goal-Name, Step-Counter, PCA zurückgesetzt)")
 
             elif cmd == "quit":
                 wandb_run.finish()

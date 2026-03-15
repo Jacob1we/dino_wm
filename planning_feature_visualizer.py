@@ -139,22 +139,48 @@ def extract_dino_features(encoder, img_tensor: torch.Tensor, device: torch.devic
 # ─────────────────────────────────────────────────────────────────
 
 def create_naive_pca_image(patch_tokens: torch.Tensor, h_patches: int, w_patches: int,
-                           img_size: tuple = (224, 224), n_components: int = 3) -> np.ndarray:
+                           img_size: tuple = (224, 224), n_components: int = 3,
+                           pca_data: dict = None) -> tuple:
     """
-    Erzeugt ein Naive PCA Feature-Map Bild.
+    Erzeugt ein Naive PCA Feature-Map Bild mit optionaler PCA-Konsistenz.
+    
+    Args:
+        pca_data: Optional - Dictionary mit gespeichertem PCA-Objekt und Min/Max-Werten.
+                  Wenn None, wird PCA neu berechnet und pca_data zurückgegeben.
     
     Returns:
-        (H, W, 3) uint8 RGB Bild
+        (image, pca_data): 
+            - image: (H, W, 3) uint8 RGB Bild
+            - pca_data: Dictionary mit 'pca', 'minmax' für Wiederverwendung
     """
     tokens = patch_tokens.numpy() if isinstance(patch_tokens, torch.Tensor) else patch_tokens
     
-    pca = PCA(n_components=n_components)
-    pca_result = pca.fit_transform(tokens)
-    
-    # Normalize to [0, 1] per component
-    for c in range(n_components):
-        col = pca_result[:, c]
-        pca_result[:, c] = (col - col.min()) / (col.max() - col.min() + 1e-8)
+    if pca_data is None:
+        # Goal-Bild: PCA neu fitten und Normalisierungswerte speichern
+        pca = PCA(n_components=n_components)
+        pca_result = pca.fit_transform(tokens)
+        
+        # Min/Max pro Komponente speichern
+        minmax = []
+        for c in range(n_components):
+            col = pca_result[:, c]
+            min_val, max_val = col.min(), col.max()
+            minmax.append((min_val, max_val))
+            pca_result[:, c] = (col - min_val) / (max_val - min_val + 1e-8)
+        
+        pca_data = {'pca': pca, 'minmax': minmax}
+    else:
+        # Spätere Bilder: Gespeicherte PCA-Komponenten und Normalisierung verwenden
+        pca = pca_data['pca']
+        minmax = pca_data['minmax']
+        pca_result = pca.transform(tokens)
+        
+        # Dieselbe Normalisierung wie beim Goal-Bild
+        for c in range(n_components):
+            min_val, max_val = minmax[c]
+            pca_result[:, c] = (pca_result[:, c] - min_val) / (max_val - min_val + 1e-8)
+            # Clipping für Werte außerhalb des Goal-Bereichs
+            pca_result[:, c] = np.clip(pca_result[:, c], 0, 1)
     
     # Reshape to patch grid
     pca_img = pca_result.reshape(h_patches, w_patches, n_components)
@@ -164,27 +190,58 @@ def create_naive_pca_image(patch_tokens: torch.Tensor, h_patches: int, w_patches
         (pca_img * 255).astype(np.uint8)
     ).resize(img_size, Image.NEAREST))
     
-    return pca_resized
+    return pca_resized, pca_data
 
 
 def create_kmeans_pca_image(patch_tokens: torch.Tensor, h_patches: int, w_patches: int,
                             img_np: np.ndarray, n_clusters: int = 3, 
-                            n_components: int = 3) -> np.ndarray:
+                            n_components: int = 3,
+                            goal_data: dict = None) -> tuple:
     """
     Erzeugt K-Means Clustering + Per-Cluster PCA Visualisierung.
     
+    Erzeugt PRO CLUSTER ein separates Bild. In jedem Bild ist nur der jeweilige
+    Cluster mit PCA-Farben sichtbar, alle anderen Patches sind schwarz.
+    
+    Args:
+        goal_data: Optional - Dictionary mit gespeicherten Goal-Referenzen:
+                   'centroids': K-Means Zentroide
+                   'pca_all': PCA-Objekt und minmax für Naive PCA
+                   'cluster_pcas': {cluster_id: {'pca': ..., 'minmax': ...}}
+                   Wenn None, werden diese vom Goal-Bild berechnet.
+    
     Returns:
-        (H, W, 3) uint8 RGB Bild (2x2 Grid: Original | Naive PCA | K-Means | Per-Cluster PCA)
+        (grids, goal_data): 
+            - grids: Liste von n_clusters Grids, jedes (H*2, W*2, 3) uint8 RGB
+            - goal_data: Dictionary mit allen Referenz-Daten für Wiederverwendung
     """
     tokens = patch_tokens.numpy() if isinstance(patch_tokens, torch.Tensor) else patch_tokens
     img_h, img_w = img_np.shape[:2]
+    is_goal = goal_data is None
     
-    # Naive PCA
-    pca_all = PCA(n_components=n_components)
-    pca_all_result = pca_all.fit_transform(tokens)
-    for c in range(n_components):
-        col = pca_all_result[:, c]
-        pca_all_result[:, c] = (col - col.min()) / (col.max() - col.min() + 1e-8)
+    if is_goal:
+        goal_data = {'centroids': None, 'pca_all': None, 'cluster_pcas': {}}
+    
+    # Naive PCA (gleich für alle Grids) - mit Goal-Referenz für Konsistenz
+    if is_goal:
+        pca_all = PCA(n_components=n_components)
+        pca_all_result = pca_all.fit_transform(tokens)
+        pca_all_minmax = []
+        for c in range(n_components):
+            col = pca_all_result[:, c]
+            min_val, max_val = col.min(), col.max()
+            pca_all_minmax.append((min_val, max_val))
+            pca_all_result[:, c] = (col - min_val) / (max_val - min_val + 1e-8)
+        goal_data['pca_all'] = {'pca': pca_all, 'minmax': pca_all_minmax}
+    else:
+        pca_all = goal_data['pca_all']['pca']
+        pca_all_minmax = goal_data['pca_all']['minmax']
+        pca_all_result = pca_all.transform(tokens)
+        for c in range(n_components):
+            min_val, max_val = pca_all_minmax[c]
+            pca_all_result[:, c] = (pca_all_result[:, c] - min_val) / (max_val - min_val + 1e-8)
+            pca_all_result[:, c] = np.clip(pca_all_result[:, c], 0, 1)
+    
     pca_all_img = pca_all_result.reshape(h_patches, w_patches, n_components)
     pca_all_resized = np.array(Image.fromarray(
         (pca_all_img * 255).astype(np.uint8)
@@ -192,39 +249,83 @@ def create_kmeans_pca_image(patch_tokens: torch.Tensor, h_patches: int, w_patche
     
     # K-Means Clustering
     tokens_norm = tokens / (np.linalg.norm(tokens, axis=1, keepdims=True) + 1e-8)
-    kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
-    labels = kmeans.fit_predict(tokens_norm)
     
-    # Segmentation map
+    if is_goal:
+        # Neues K-Means: Zentroide berechnen (bei Goal-Bild)
+        kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
+        labels = kmeans.fit_predict(tokens_norm)
+        goal_data['centroids'] = kmeans.cluster_centers_
+    else:
+        # Gespeicherte Zentroide verwenden: Patches dem nächsten Zentroid zuweisen
+        centroids = goal_data['centroids']
+        centroids_norm = centroids / (np.linalg.norm(centroids, axis=1, keepdims=True) + 1e-8)
+        similarities = tokens_norm @ centroids_norm.T  # (n_patches, n_clusters)
+        labels = np.argmax(similarities, axis=1)
+    
+    # Segmentation map (gleich für alle Grids)
     seg_map = CLUSTER_COLORS[labels % len(CLUSTER_COLORS)].reshape(h_patches, w_patches, 3)
     seg_resized = np.array(Image.fromarray(seg_map).resize((img_w, img_h), Image.NEAREST))
     
-    # Per-Cluster PCA
-    per_cluster_pca = np.full((tokens.shape[0], n_components), 0.3)
+    # Per-Cluster PCA berechnen (für alle Cluster) - mit Goal-Referenz
+    cluster_pca_results = {}
     for ci in range(n_clusters):
         mask = labels == ci
         cluster_tokens = tokens[mask]
+        
         if cluster_tokens.shape[0] >= n_components + 1:
-            pca_cl = PCA(n_components=n_components)
-            pca_result = pca_cl.fit_transform(cluster_tokens)
-            for c in range(n_components):
-                col = pca_result[:, c]
-                pca_result[:, c] = (col - col.min()) / (col.max() - col.min() + 1e-8)
-            per_cluster_pca[mask] = pca_result
+            if is_goal:
+                # Goal: Neue PCA fitten und speichern
+                pca_cl = PCA(n_components=n_components)
+                pca_result = pca_cl.fit_transform(cluster_tokens)
+                cluster_minmax = []
+                for c in range(n_components):
+                    col = pca_result[:, c]
+                    min_val, max_val = col.min(), col.max()
+                    cluster_minmax.append((min_val, max_val))
+                    pca_result[:, c] = (col - min_val) / (max_val - min_val + 1e-8)
+                goal_data['cluster_pcas'][ci] = {'pca': pca_cl, 'minmax': cluster_minmax}
+                cluster_pca_results[ci] = (mask, pca_result)
+            else:
+                # Später: Gespeicherte PCA-Projektion verwenden
+                if ci in goal_data['cluster_pcas']:
+                    pca_cl = goal_data['cluster_pcas'][ci]['pca']
+                    cluster_minmax = goal_data['cluster_pcas'][ci]['minmax']
+                    pca_result = pca_cl.transform(cluster_tokens)
+                    for c in range(n_components):
+                        min_val, max_val = cluster_minmax[c]
+                        pca_result[:, c] = (pca_result[:, c] - min_val) / (max_val - min_val + 1e-8)
+                        pca_result[:, c] = np.clip(pca_result[:, c], 0, 1)
+                    cluster_pca_results[ci] = (mask, pca_result)
+                else:
+                    # Fallback: Cluster existierte nicht im Goal
+                    cluster_pca_results[ci] = (mask, np.full((mask.sum(), n_components), 0.5))
+        else:
+            # Fallback: graue Patches wenn zu wenig Tokens
+            cluster_pca_results[ci] = (mask, np.full((mask.sum(), n_components), 0.5))
     
-    per_cluster_img = per_cluster_pca.reshape(h_patches, w_patches, n_components)
-    per_cluster_resized = np.array(Image.fromarray(
-        (per_cluster_img * 255).astype(np.uint8)
-    ).resize((img_w, img_h), Image.NEAREST))
+    # Erzeuge ein Grid pro Cluster
+    grids = []
+    for ci in range(n_clusters):
+        # Single-Cluster PCA: nur dieser Cluster sichtbar, Rest schwarz
+        single_cluster_pca = np.zeros((tokens.shape[0], n_components))
+        mask, pca_result = cluster_pca_results[ci]
+        single_cluster_pca[mask] = pca_result
+        
+        single_cluster_img = single_cluster_pca.reshape(h_patches, w_patches, n_components)
+        single_cluster_resized = np.array(Image.fromarray(
+            (single_cluster_img * 255).astype(np.uint8)
+        ).resize((img_w, img_h), Image.NEAREST))
+        
+        # Create 2x2 grid für diesen Cluster
+        grid = np.zeros((img_h * 2, img_w * 2, 3), dtype=np.uint8)
+        grid[:img_h, :img_w] = img_np
+        grid[:img_h, img_w:] = pca_all_resized
+        grid[img_h:, :img_w] = seg_resized
+        grid[img_h:, img_w:] = single_cluster_resized
+        
+        grids.append(grid)
     
-    # Create 2x2 grid
-    grid = np.zeros((img_h * 2, img_w * 2, 3), dtype=np.uint8)
-    grid[:img_h, :img_w] = img_np
-    grid[:img_h, img_w:] = pca_all_resized
-    grid[img_h:, :img_w] = seg_resized
-    grid[img_h:, img_w:] = per_cluster_resized
-    
-    return grid
+    return grids, goal_data
 
 
 def create_attention_image(cls_attn: torch.Tensor, h_patches: int, w_patches: int,
@@ -292,6 +393,9 @@ class PlanningFeatureVisualizer:
         self.encoder_transform = None
         self.n_clusters = 3
         self.n_heads_show = 4
+        # Gespeicherte Goal-Referenzen für konsistente Farben
+        self.goal_pca_data = None      # Für Naive PCA
+        self.goal_kmeans_data = None   # Für K-Means + Per-Cluster PCA
         
     def set_encoder_transform(self, transform):
         """Setzt den Encoder-Transform (aus model.encoder_transform)."""
@@ -305,6 +409,15 @@ class PlanningFeatureVisualizer:
         """Aktiviert Visualisierungen."""
         self.enabled = True
     
+    def reset_goal_data(self):
+        """Setzt alle gespeicherten Goal-Referenzen zurück (bei neuem Goal)."""
+        self.goal_pca_data = None
+        self.goal_kmeans_data = None
+    
+    def reset_centroids(self):
+        """Alias für reset_goal_data() - Rückwärtskompatibilität."""
+        self.reset_goal_data()
+    
     def _img_to_tensor(self, img_np: np.ndarray) -> torch.Tensor:
         """Konvertiert uint8 RGB Bild zu normalisierten Tensor."""
         if img_np.dtype != np.uint8:
@@ -317,7 +430,8 @@ class PlanningFeatureVisualizer:
     
     def visualize(self, img_np: np.ndarray, out_dir: str, step_idx: int = 0,
                   prefix: str = "frame", save_attention: bool = True,
-                  save_naive_pca: bool = True, save_kmeans_pca: bool = True) -> dict:
+                  save_naive_pca: bool = True, save_kmeans_pca: bool = True,
+                  is_goal: bool = False) -> dict:
         """
         Erzeugt und speichert Feature-Visualisierungen.
         
@@ -325,10 +439,11 @@ class PlanningFeatureVisualizer:
             img_np: (H, W, 3) uint8 RGB Bild
             out_dir: Ausgabe-Verzeichnis
             step_idx: Schritt-Index für Dateinamen
-            prefix: Präfix für Dateinamen (z.B. "goal", "current", "mpc_step")
+            prefix: Präfix für Dateinamen (z.B. "pick", "place", "pick_current")
             save_attention: Ob DINO Self-Attention gespeichert werden soll
             save_naive_pca: Ob Naive PCA gespeichert werden soll
             save_kmeans_pca: Ob K-Means + Per-Cluster PCA gespeichert werden soll
+            is_goal: Ob dies ein Goal-Bild ist (PCA/K-Means neu fitten und speichern)
             
         Returns:
             dict mit Pfaden zu erzeugten Dateien:
@@ -353,26 +468,50 @@ class PlanningFeatureVisualizer:
         
         img_size = (img_np.shape[1], img_np.shape[0])
         
-        # Save visualizations
+        # Bei Goal-Bild: PCA/K-Means neu fitten und speichern (für konsistente Farben)
+        is_goal_image = is_goal
+        
         if save_naive_pca:
-            pca_img = create_naive_pca_image(patch_tokens, h_patches, w_patches, img_size)
-            path = os.path.join(out_dir, f"{prefix}_step{step_idx:03d}_naive_pca.png")
+            # Bei Goal-Bild: PCA neu fitten, sonst gespeicherte verwenden
+            use_pca_data = None if is_goal_image else self.goal_pca_data
+            pca_img, pca_data = create_naive_pca_image(patch_tokens, h_patches, w_patches, img_size, pca_data=use_pca_data)
+            
+            if is_goal_image:
+                self.goal_pca_data = pca_data
+                print(f"  Naive PCA vom Goal-Bild gespeichert")
+            
+            path = os.path.join(out_dir, f"{prefix}_naive_pca_step{step_idx:03d}.png")
             Image.fromarray(pca_img).save(path)
             result["naive_pca"] = path
             
         if save_kmeans_pca:
-            kmeans_img = create_kmeans_pca_image(
-                patch_tokens, h_patches, w_patches, img_np, self.n_clusters
+            # Bei Goal-Bild: Alles neu berechnen und speichern
+            # Bei anderen Bildern: gespeicherte Goal-Daten verwenden (konsistente Farben)
+            use_goal_data = None if is_goal_image else self.goal_kmeans_data
+            
+            kmeans_grids, goal_data = create_kmeans_pca_image(
+                patch_tokens, h_patches, w_patches, img_np, self.n_clusters,
+                goal_data=use_goal_data
             )
-            path = os.path.join(out_dir, f"{prefix}_step{step_idx:03d}_kmeans_pca.png")
-            Image.fromarray(kmeans_img).save(path)
-            result["kmeans_pca"] = path
+            
+            # Bei Goal-Bild: Alle Daten speichern für spätere Verwendung
+            if is_goal_image:
+                self.goal_kmeans_data = goal_data
+                print(f"  K-Means + PCA vom Goal-Bild gespeichert ({self.n_clusters} Cluster)")
+            
+            # Speichere ein Bild pro Cluster
+            kmeans_paths = []
+            for ci, grid in enumerate(kmeans_grids):
+                path = os.path.join(out_dir, f"{prefix}_kmeans_pca_cluster{ci}_step{step_idx:03d}.png")
+                Image.fromarray(grid).save(path)
+                kmeans_paths.append(path)
+            result["kmeans_pca"] = kmeans_paths
             
         if save_attention:
             attn_img = create_attention_image(
                 cls_attn, h_patches, w_patches, img_np, self.n_heads_show
             )
-            path = os.path.join(out_dir, f"{prefix}_step{step_idx:03d}_attention.png")
+            path = os.path.join(out_dir, f"{prefix}_attention_step{step_idx:03d}.png")
             Image.fromarray(attn_img).save(path)
             result["attention"] = path
             
@@ -415,9 +554,9 @@ class PlanningFeatureVisualizer:
         # Side-by-side comparison: Current | Goal
         # Each with: Image | Naive PCA | K-Means
         
-        # Naive PCA comparison
-        current_pca = create_naive_pca_image(current_tokens, hp, wp, (img_w, img_h))
-        goal_pca = create_naive_pca_image(goal_tokens, hp, wp, (img_w, img_h))
+        # Naive PCA comparison (jeweils unabhängig gefittet für Vergleich)
+        current_pca, _ = create_naive_pca_image(current_tokens, hp, wp, (img_w, img_h))
+        goal_pca, _ = create_naive_pca_image(goal_tokens, hp, wp, (img_w, img_h))
         
         comparison = np.zeros((img_h * 2, img_w * 2, 3), dtype=np.uint8)
         comparison[:img_h, :img_w] = current_img
@@ -425,52 +564,80 @@ class PlanningFeatureVisualizer:
         comparison[img_h:, :img_w] = goal_img
         comparison[img_h:, img_w:] = goal_pca
         
-        path = os.path.join(out_dir, f"comparison_step{step_idx:03d}_pca.png")
+        path = os.path.join(out_dir, f"comparison_pca_step{step_idx:03d}.png")
         Image.fromarray(comparison).save(path)
         result["comparison_pca"] = path
         
         return result
 
     def visualize_wm_prediction(self, predicted_img: np.ndarray, goal_img: np.ndarray,
+                                 current_img: np.ndarray,
                                  out_dir: str, step_idx: int = 0,
                                  prefix: str = "wm_pred") -> dict:
         """
-        Erzeugt Vergleich: WM-Vorhersage vs Zielbild.
+        Erzeugt Vergleich: Aktueller Zustand, WM-Vorhersage und Zielbild.
         
         Layout (1 Zeile, 4 Bilder):
-          | Predicted | Goal | Overlay | Difference |
+          | Goal | Current | Predicted | Difference |
         
         Args:
-            predicted_img: (H, W, 3) uint8 RGB - Vom World Model vorhergesagtes Bild
+            predicted_img: (H, W, 3) uint8 RGB - Vom World Model vorhergesagter nächster Zustand
             goal_img: (H, W, 3) uint8 RGB - Zielbild
+            current_img: (H, W, 3) uint8 RGB - Aktueller realer Zustand
             out_dir: Ausgabe-Verzeichnis
             step_idx: Schritt-Index für Dateinamen
             prefix: Präfix für Dateinamen
             
         Returns:
-            dict mit Pfad zur erzeugten Datei
+            dict mit:
+                - "wm_prediction": Pfad zum gespeicherten Bild
+                - "metrics": dict mit Differenz-Metriken:
+                    - "mae_goal_current": MAE zwischen Goal und Current
+                    - "mae_goal_predicted": MAE zwischen Goal und Predicted
+                    - "mse_goal_current": MSE zwischen Goal und Current
+                    - "mse_goal_predicted": MSE zwischen Goal und Predicted
         """
-        result = {"wm_prediction": None}
+        result = {"wm_prediction": None, "metrics": None}
         
         if not self.enabled:
             return result
             
         os.makedirs(out_dir, exist_ok=True)
         
-        # Sicherstellen, dass beide Bilder uint8 sind
+        # Sicherstellen, dass alle Bilder uint8 sind
         if predicted_img.dtype != np.uint8:
             predicted_img = (predicted_img * 255).clip(0, 255).astype(np.uint8)
         if goal_img.dtype != np.uint8:
             goal_img = (goal_img * 255).clip(0, 255).astype(np.uint8)
+        if current_img.dtype != np.uint8:
+            current_img = (current_img * 255).clip(0, 255).astype(np.uint8)
             
         img_h, img_w = predicted_img.shape[:2]
         
-        # Overlay: 50% Predicted + 50% Goal
-        overlay = (0.5 * predicted_img.astype(float) + 
-                   0.5 * goal_img.astype(float)).clip(0, 255).astype(np.uint8)
+        # ─── Metriken berechnen ───
+        goal_f = goal_img.astype(float)
+        current_f = current_img.astype(float)
+        predicted_f = predicted_img.astype(float)
         
-        # Difference: Absoluter Unterschied, farbcodiert
-        diff_raw = np.abs(predicted_img.astype(float) - goal_img.astype(float))
+        # MAE (Mean Absolute Error) - normalisiert auf [0, 1] (teilen durch 255)
+        mae_goal_current = np.mean(np.abs(goal_f - current_f)) / 255.0
+        mae_goal_predicted = np.mean(np.abs(goal_f - predicted_f)) / 255.0
+        
+        # MSE (Mean Squared Error) - normalisiert
+        mse_goal_current = np.mean((goal_f - current_f) ** 2) / (255.0 ** 2)
+        mse_goal_predicted = np.mean((goal_f - predicted_f) ** 2) / (255.0 ** 2)
+        
+        metrics = {
+            "mae_goal_current": mae_goal_current,
+            "mae_goal_predicted": mae_goal_predicted,
+            "mse_goal_current": mse_goal_current,
+            "mse_goal_predicted": mse_goal_predicted,
+        }
+        result["metrics"] = metrics
+        
+        # ─── Visualisierung ───
+        # Difference: Absoluter Unterschied zwischen Prediction und Goal
+        diff_raw = np.abs(predicted_f - goal_f)
         diff_gray = np.mean(diff_raw, axis=2)  # Mittlere Differenz über Kanäle
         
         # Normalisiere auf [0, 1] für Colormap
@@ -480,20 +647,18 @@ class PlanningFeatureVisualizer:
         cm = plt.get_cmap("jet")
         diff_colored = (cm(diff_norm)[:, :, :3] * 255).astype(np.uint8)
         
-        # 1x4 Grid erstellen
+        # 1x4 Grid erstellen: Goal | Current | Predicted | Difference
         grid = np.zeros((img_h, img_w * 4, 3), dtype=np.uint8)
-        grid[:, 0*img_w:1*img_w] = predicted_img
-        grid[:, 1*img_w:2*img_w] = goal_img
-        grid[:, 2*img_w:3*img_w] = overlay
+        grid[:, 0*img_w:1*img_w] = goal_img
+        grid[:, 1*img_w:2*img_w] = current_img
+        grid[:, 2*img_w:3*img_w] = predicted_img
         grid[:, 3*img_w:4*img_w] = diff_colored
         
         path = os.path.join(out_dir, f"{prefix}_step{step_idx:03d}.png")
         Image.fromarray(grid).save(path)
         result["wm_prediction"] = path
         
-        print(f"  WM-Prediction Vergleich: {path}")
-        
-        return result
+        print(f"  WM-Pred: MAE(G↔C)={mae_goal_current:.4f}, MAE(G↔P)={mae_goal_predicted:.4f}")
         
         return result
 

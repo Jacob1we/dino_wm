@@ -662,6 +662,68 @@ class PlanningFeatureVisualizer:
         
         return result
 
+    def visualize_rollout_strip(self, current_img: np.ndarray, rollout_images: list,
+                                  goal_img: np.ndarray, out_dir: str, step_idx: int = 0,
+                                  prefix: str = "rollout") -> dict:
+        """
+        Erzeugt horizontalen Streifen mit dem kompletten WM-Rollout.
+        
+        Layout (1 Zeile):
+          | Current | t=1 | t=2 | ... | t=H | Goal |
+        
+        Args:
+            current_img: (H, W, 3) uint8 RGB - Aktueller realer Zustand
+            rollout_images: Liste von (H, W, 3) uint8 RGB - Vom WM vorhergesagte Zustände
+            goal_img: (H, W, 3) uint8 RGB - Zielbild
+            out_dir: Ausgabe-Verzeichnis
+            step_idx: Schritt-Index für Dateinamen
+            prefix: Präfix für Dateinamen
+            
+        Returns:
+            dict mit "rollout_strip": Pfad zum gespeicherten Bild oder None
+        """
+        result = {"rollout_strip": None}
+        
+        if not self.enabled or len(rollout_images) == 0:
+            return result
+            
+        os.makedirs(out_dir, exist_ok=True)
+        
+        # Sicherstellen, dass alle Bilder uint8 sind
+        def to_uint8(img):
+            if img.dtype != np.uint8:
+                return (img * 255).clip(0, 255).astype(np.uint8)
+            return img
+        
+        current_img = to_uint8(current_img)
+        goal_img = to_uint8(goal_img)
+        rollout_images = [to_uint8(img) for img in rollout_images]
+        
+        img_h, img_w = current_img.shape[:2]
+        horizon = len(rollout_images)
+        
+        # Gesamtbreite: Current + H×Rollout + Goal = (H+2) Bilder
+        n_images = horizon + 2
+        total_w = img_w * n_images
+        
+        # Grid erstellen
+        grid = np.zeros((img_h, total_w, 3), dtype=np.uint8)
+        
+        # Bilder einfügen
+        grid[:, 0:img_w] = current_img  # Current (Index 0)
+        for t, rollout_img in enumerate(rollout_images):
+            x_start = (t + 1) * img_w
+            grid[:, x_start:x_start + img_w] = rollout_img
+        grid[:, (horizon + 1) * img_w:] = goal_img  # Goal (letztes Bild)
+        
+        path = os.path.join(out_dir, f"{prefix}_step{step_idx:03d}.png")
+        Image.fromarray(grid).save(path)
+        result["rollout_strip"] = path
+        
+        print(f"  Rollout-Strip: {horizon} Schritte → {path}")
+        
+        return result
+
 
 # ─────────────────────────────────────────────────────────────────
 # Standalone Test

@@ -763,6 +763,59 @@ def get_wm_predicted_image(cur_obs: dict, actions: torch.Tensor, goal_obs: dict)
         return None
 
 
+def get_wm_rollout_images(cur_obs: dict, actions: torch.Tensor) -> list:
+    """
+    Berechnet das vollständige WM-Rollout und dekodiert alle Bilder.
+    
+    Das World Model sagt die Zustände für alle geplanten Actions voraus,
+    d.h. das gesamte Horizon-Rollout von der aktuellen Beobachtung aus.
+    
+    Args:
+        cur_obs: Aktuelles Observation-Dict (aus img_to_obs)
+        actions: (1, horizon, full_action_dim) normalisierte Actions vom CEM
+    
+    Returns:
+        rollout_images: Liste von (H, W, 3) uint8 RGB Bildern für jeden Horizon-Schritt
+                        oder leere Liste wenn kein Decoder verfügbar
+    """
+    if not has_decoder:
+        return []
+    
+    try:
+        # Preprocessor auf cur_obs anwenden
+        obs_tensor = preprocessor.transform_obs(cur_obs.copy())
+        obs_tensor = {k: v.float().to(device) for k, v in obs_tensor.items()}
+        
+        horizon = actions.shape[1]
+        actions_device = actions.to(device)
+        
+        # WM Rollout mit allen Actions
+        rollout_images = []
+        with torch.no_grad():
+            z_obses, _ = model.rollout(obs_tensor, actions_device)
+            
+            # Alle vorhergesagten Zustände dekodieren
+            obs_decoded, _ = model.decode_obs(z_obses)
+            
+            # obs_decoded['visual'] hat shape (1, horizon, 3, H, W)
+            for t in range(horizon):
+                pred_visual = obs_decoded['visual'][0, t]  # (3, H, W)
+                
+                # Decoder-Output ist im Bereich [-1, 1] → auf [0, 255] skalieren
+                pred_visual = (pred_visual + 1.0) / 2.0  # [-1,1] → [0,1]
+                pred_img = (pred_visual * 255.0).clamp(0, 255)
+                pred_img = pred_img.permute(1, 2, 0).cpu().numpy().astype(np.uint8)  # CHW → HWC
+                rollout_images.append(pred_img)
+        
+        return rollout_images
+        
+    except Exception as e:
+        print(f"  WM-Rollout Fehler: {e}")
+        import traceback
+        traceback.print_exc()
+        return []
+
+
 def extract_goal_image(goal_obs: dict) -> np.ndarray:
     """Extrahiert das Zielbild aus goal_obs als uint8 RGB."""
     visual = goal_obs['visual']  # (1, 1, H, W, 3) float32 [0,255]
@@ -912,6 +965,7 @@ while True:
                     viz_interval = feature_viz_cfg.get("visualize_interval", 1)
                     current_prefix = f"{current_goal_name}_current"
                     wm_pred_prefix = f"{current_goal_name}_wm_pred"
+                    rollout_prefix = f"{current_goal_name}_rollout"
                     
                     if (feature_viz_enabled and 
                         feature_viz_cfg.get("visualize_current", True) and
@@ -951,6 +1005,27 @@ while True:
                                     log_metrics_to_csv(csv_path, current_goal_name, feature_viz_step_counter, viz_result["metrics"])
                         except Exception as e:
                             print(f"  WM-Prediction Viz Fehler: {e}")
+                    
+                    # Rollout-Strip: Komplettes Horizon-Rollout als Bildzeile
+                    if (feature_viz_enabled and 
+                        feature_viz_cfg.get("visualize_rollout_strip", True) and
+                        visualize_wm_prediction and
+                        feature_viz_step_counter % viz_interval == 0):
+                        try:
+                            rollout_images = get_wm_rollout_images(cur_obs, actions)
+                            if len(rollout_images) > 0:
+                                goal_img_np = extract_goal_image(goal_obs)
+                                current_img_np = extract_goal_image(cur_obs)
+                                feature_visualizer.visualize_rollout_strip(
+                                    current_img=current_img_np,
+                                    rollout_images=rollout_images,
+                                    goal_img=goal_img_np,
+                                    out_dir=feature_viz_dir,
+                                    step_idx=feature_viz_step_counter,
+                                    prefix=rollout_prefix
+                                )
+                        except Exception as e:
+                            print(f"  Rollout-Strip Fehler: {e}")
                     
                     feature_viz_step_counter += 1
 
@@ -989,6 +1064,7 @@ while True:
                     viz_interval = feature_viz_cfg.get("visualize_interval", 1)
                     current_prefix = f"{current_goal_name}_current"
                     wm_pred_prefix = f"{current_goal_name}_wm_pred"
+                    rollout_prefix = f"{current_goal_name}_rollout"
                     
                     if (feature_viz_enabled and 
                         feature_viz_cfg.get("visualize_current", True) and
@@ -1028,6 +1104,27 @@ while True:
                                     log_metrics_to_csv(csv_path, current_goal_name, feature_viz_step_counter, viz_result["metrics"])
                         except Exception as e:
                             print(f"  WM-Prediction Viz Fehler: {e}")
+                    
+                    # Rollout-Strip: Komplettes Horizon-Rollout als Bildzeile
+                    if (feature_viz_enabled and 
+                        feature_viz_cfg.get("visualize_rollout_strip", True) and
+                        visualize_wm_prediction and
+                        feature_viz_step_counter % viz_interval == 0):
+                        try:
+                            rollout_images = get_wm_rollout_images(cur_obs, actions)
+                            if len(rollout_images) > 0:
+                                goal_img_np = extract_goal_image(goal_obs)
+                                current_img_np = extract_goal_image(cur_obs)
+                                feature_visualizer.visualize_rollout_strip(
+                                    current_img=current_img_np,
+                                    rollout_images=rollout_images,
+                                    goal_img=goal_img_np,
+                                    out_dir=feature_viz_dir,
+                                    step_idx=feature_viz_step_counter,
+                                    prefix=rollout_prefix
+                                )
+                        except Exception as e:
+                            print(f"  Rollout-Strip Fehler: {e}")
                     
                     feature_viz_step_counter += 1
 

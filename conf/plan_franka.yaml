@@ -88,8 +88,8 @@ feature_visualization:
                                     # Höhere Werte reduzieren Overhead, z.B. 5 = alle 5 Steps
   
   # WM-Prediction Visualisierung (benötigt Decoder im Modell!)
-  # Erzeugt 4er-Grid: Predicted | Goal | Overlay | Difference
-  visualize_wm_prediction: true     # WM-Vorhersage vs Zielbild visualisieren
-                                    # Nur möglich wenn Modell mit Decoder trainiert wurde
+  visualize_wm_prediction: true     # 4er-Grid: Goal | Current | Predicted | Difference
+  visualize_rollout_strip: true     # Komplettes Horizon-Rollout als Bildzeile:
+                                    # | Current | t=1 | t=2 | ... | t=H | Goal |
 
 # 2026-02-09/08-12-44

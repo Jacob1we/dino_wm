@@ -813,13 +813,26 @@ while True:
                 client_cfg = msg.get("config", {})
                 wandb_run.update_config(client_cfg)
                 
-                # Feature-Viz-Verzeichnis aus Client-Output-Pfad setzen
+                # Feature-Viz-Verzeichnis aus Client-Output-Pfad setzen (Fallback)
                 if feature_viz_enabled and "output_dir" in client_cfg:
                     feature_viz_dir = os.path.join(client_cfg["output_dir"], "feature_viz")
-                    print(f"  Feature-Viz-Dir: {feature_viz_dir}")
+                    print(f"  Feature-Viz-Dir (Fallback): {feature_viz_dir}")
                 
                 response = {"status": "ok", "wandb_run_id": wandb_run.id}
                 print(f"  Client-Config empfangen: {list(client_cfg.keys())}")
+
+            elif cmd == "set_episode_dir":
+                # Client startet neue Episode und sendet Episodenordner
+                episode_dir = msg.get("episode_dir")
+                if feature_viz_enabled and episode_dir:
+                    feature_viz_dir = os.path.join(episode_dir, "feature_viz")
+                    os.makedirs(feature_viz_dir, exist_ok=True)
+                    feature_viz_step_counter = 0  # Reset für neue Episode
+                    feature_viz_goal_idx = 0
+                    feature_visualizer.reset_centroids()  # PCA/K-Means zurücksetzen
+                    print(f"  Episode-Dir: {episode_dir}")
+                    print(f"  Feature-Viz-Dir: {feature_viz_dir}, Step-Counter=0")
+                response = {"status": "ok"}
 
             elif cmd == "log_step":
                 # Client sendet Per-Step-Metriken (Distanzen)
@@ -845,28 +858,27 @@ while True:
                         feature_viz_goal_idx += 1
                     current_goal_name = f"goal{feature_viz_goal_idx:02d}"
                 
-                # Step-Counter für neues Goal zurücksetzen
-                if goal_obs is not None:
-                    feature_viz_step_counter = 0
-                    print(f"  Neues Goal '{current_goal_name}', Step-Counter zurückgesetzt")
+                # Step-Counter läuft durch (KEIN Reset) für chronologische Sortierung
+                print(f"  Neues Goal '{current_goal_name}', Step-Counter bei {feature_viz_step_counter}")
                 
                 img = np.array(msg["image"])
                 ee_pos = np.array(msg["ee_pos"]) if "ee_pos" in msg else None
                 goal_obs = img_to_obs(img, ee_pos)
                 print(f"  Goal '{current_goal_name}' gesetzt: {img.shape} {img.dtype}, ee_pos={ee_pos}")
                 
-                # Feature-Visualisierung für Goal-Bild
+                # Feature-Visualisierung für Goal-Bild (verwendet durchlaufenden step_counter)
                 if feature_viz_enabled and feature_viz_cfg.get("visualize_goal", True):
                     try:
                         viz_paths = feature_visualizer.visualize(
-                            img_np=img, out_dir=feature_viz_dir, step_idx=0,
+                            img_np=img, out_dir=feature_viz_dir, step_idx=feature_viz_step_counter,
                             prefix=current_goal_name,
                             save_naive_pca=feature_viz_cfg.get("save_naive_pca", True),
                             save_kmeans_pca=feature_viz_cfg.get("save_kmeans_pca", True),
                             save_attention=feature_viz_cfg.get("save_attention", True),
                             is_goal=True,  # PCA/K-Means für dieses Goal-Bild fitten und speichern
                         )
-                        print(f"  Feature-Viz Goal: {feature_viz_dir}")
+                        feature_viz_step_counter += 1  # Nach Goal-Bild inkrementieren
+                        print(f"  Feature-Viz Goal Step {feature_viz_step_counter-1}: {feature_viz_dir}")
                     except Exception as e:
                         print(f"  Feature-Viz Fehler: {e}")
                 

@@ -76,6 +76,15 @@
     - 15.4 [Ursache 3: Workspace-Bounds und Sigma-Asymmetrie](#154-ursache-3-workspace-bounds-und-sigma-asymmetrie)
     - 15.5 [Zusammenfassung: Phase 1 vs. Phase 2 im Vergleich](#155-zusammenfassung-phase-1-vs-phase-2-im-vergleich)
     - 15.6 [Lösungsansätze](#156-lösungsansätze)
+16. [Loss-Gating: Verhinderung von MPC-Oszillationen (15.03.2026)](#16-loss-gating-verhinderung-von-mpc-oszillationen-15032026) ← NEU
+    - 16.1 [Problemstellung: CEM-Loss steigt zwischen MPC-Steps](#161-problemstellung-cem-loss-steigt-zwischen-mpc-steps)
+    - 16.2 [Root-Cause-Analyse: Horizon-Ende vs. Erste Aktion](#162-root-cause-analyse-horizon-ende-vs-erste-aktion)
+    - 16.3 [Lösungsansatz: 1-Step Loss-Gating](#163-lösungsansatz-1-step-loss-gating)
+    - 16.4 [Adaptive Toleranz und Phase-Beendigung](#164-adaptive-toleranz-und-phase-beendigung)
+    - 16.5 [Implementierung](#165-implementierung)
+    - 16.6 [Konfiguration](#166-konfiguration)
+    - 16.7 [Erwartetes Verhalten](#167-erwartetes-verhalten)
+    - 16.8 [Einschränkungen und Alternativen](#168-einschränkungen-und-alternativen)
 
 ---
 
@@ -3461,3 +3470,491 @@ des World Models, bevor die CEM-Planung beginnt.
 - `plan_franka.yaml`: Workspace Bounds, Sigma-Scale
 - `planning_client.py`: `_run_mpc_phase()`, Two-Phase-Logik
 - **Datensatz-Verifikation**: Actions, Proprio, RGB-Check → siehe Abschnitt 11
+
+---
+
+## 16. Loss-Gating: Verhinderung von MPC-Oszillationen (15.03.2026)
+
+> **Status:** Implementiert in `planning_server.py`, standardmäßig **DEAKTIVIERT**.
+> **Aktivierung:** `loss_gating.enabled: true` in `conf/plan_franka.yaml`
+
+### 16.1 Problemstellung: CEM-Loss steigt zwischen MPC-Steps
+
+Bei Online-MPC wurde ein kontraintuitives Phänomen beobachtet: **Der CEM-Loss konvergiert innerhalb eines Planning-Steps, aber steigt zwischen aufeinanderfolgenden MPC-Steps an.**
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│              BEOBACHTETES PROBLEM: LOSS-ANSTIEG ZWISCHEN MPC-STEPS          │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  MPC-Step 1:                                                                │
+│    CEM Iteration 1:  Loss = 2.50                                           │
+│    CEM Iteration 10: Loss = 1.80                                           │
+│    CEM Iteration 30: Loss = 0.85  ← konvergiert ✓                         │
+│    → Aktion ausgeführt                                                      │
+│                                                                             │
+│  MPC-Step 2 (nach Ausführung):                                              │
+│    CEM Iteration 1:  Loss = 1.20  ← HÖHER als Ende von Step 1!            │
+│    CEM Iteration 10: Loss = 0.95                                           │
+│    CEM Iteration 30: Loss = 0.90  ← konvergiert, aber schlechter!         │
+│    → Aktion ausgeführt                                                      │
+│                                                                             │
+│  MPC-Step 3:                                                                │
+│    CEM Iteration 30: Loss = 1.05  ← noch schlechter!                       │
+│                                                                             │
+│  ═══════════════════════════════════════════════════════════════════════     │
+│                                                                             │
+│  Sichtbares Verhalten:                                                      │
+│  Der Roboter oszilliert, bewegt sich VOM Ziel weg statt HIN.               │
+│  Jeder MPC-Step "verbessert" lokal, aber global wird es schlechter.        │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Die zentrale Frage:** Warum führt eine Aktion mit niedrigem CEM-Loss zu einem Zustand mit *höherem* Loss im nächsten Step?
+
+---
+
+### 16.2 Root-Cause-Analyse: Horizon-Ende vs. Erste Aktion
+
+Der CEM optimiert eine **Aktionssequenz über den gesamten Horizont** (typisch H=5), aber MPC führt nur die **erste Aktion** aus. Das erzeugt eine fundamentale Diskrepanz:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    DAS FUNDAMENTALE MPC-CEM-PROBLEM                          │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  CEM OPTIMIERT:                                                             │
+│  ═══════════════                                                            │
+│  Loss = sum(loss(pred_t, goal) for t in 1..H) / H                          │
+│                                                                             │
+│  Bei horizon=5:                                                              │
+│  Loss = (loss_1 + loss_2 + loss_3 + loss_4 + loss_5) / 5                   │
+│                                                                             │
+│  Der CEM minimiert diese SUMME — wenn loss_5 sehr klein ist,                │
+│  kann loss_1 größer sein und der Gesamtloss trotzdem niedrig!              │
+│                                                                             │
+│  ─────────────────────────────────────────────────────────────────────────   │
+│                                                                             │
+│  MPC FÜHRT AUS:                                                             │
+│  ═══════════════                                                            │
+│  Nur action_0 → Zustand bewegt sich zu pred_1                               │
+│                                                                             │
+│  Der neue Zustand nach action_0 hat Loss ≈ loss_1                          │
+│  (nicht loss_5, der optimiert wurde!)                                       │
+│                                                                             │
+│  ─────────────────────────────────────────────────────────────────────────   │
+│                                                                             │
+│  KONKRETES BEISPIEL:                                                        │
+│                                                                             │
+│  CEM-Lösung A (gewählt):                                                    │
+│    action_0 → loss_1 = 1.2 (verschlechtert kurzfristig)                    │
+│    action_1 → loss_2 = 0.9                                                  │
+│    action_2 → loss_3 = 0.5                                                  │
+│    action_3 → loss_4 = 0.2                                                  │
+│    action_4 → loss_5 = 0.1 (sehr gut am Ende!)                             │
+│    Gesamt-Loss = (1.2 + 0.9 + 0.5 + 0.2 + 0.1) / 5 = 0.58                  │
+│                                                                             │
+│  Alternative B (verworfen):                                                 │
+│    action_0 → loss_1 = 0.8 (verbessert sofort)                             │
+│    action_1 → loss_2 = 0.7                                                  │
+│    action_2 → loss_3 = 0.6                                                  │
+│    action_3 → loss_4 = 0.5                                                  │
+│    action_4 → loss_5 = 0.5 (OK am Ende, aber nicht so gut)                 │
+│    Gesamt-Loss = (0.8 + 0.7 + 0.6 + 0.5 + 0.5) / 5 = 0.62                  │
+│                                                                             │
+│  CEM wählt A (0.58 < 0.62), obwohl B nach action_0 einen BESSEREN          │
+│  Zustand erreicht hätte (loss_1 = 0.8 vs 1.2)!                             │
+│                                                                             │
+│  ═══════════════════════════════════════════════════════════════════════     │
+│                                                                             │
+│  WARUM DAS ZU OSZILLATION FÜHRT:                                            │
+│                                                                             │
+│  Step 1: CEM plant [a0, a1, a2, a3, a4] mit loss_5 = 0.1                   │
+│          Wir führen a0 aus → Zustand hat jetzt loss ≈ 1.2                  │
+│                                                                             │
+│  Step 2: Neues Bild, neuer CEM-Lauf                                         │
+│          CEM plant wieder für Horizont 5                                    │
+│          Findet andere Lösung: loss_5' = 0.15                              │
+│          Wir führen a0' aus → Zustand hat loss ≈ 1.3                       │
+│                                                                             │
+│  Step 3: loss ≈ 1.5 ... immer schlechter, weil wir immer nur              │
+│          den "Aufwärm-Move" machen und nie zum guten Ende kommen!          │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Kernproblem:** Der CEM darf Pläne finden, bei denen die erste Aktion den Zustand *verschlechtert*, solange das Horizon-Ende gut ist. Da MPC nur die erste Aktion ausführt und dann neu plant, erreichen wir das gute Ende nie.
+
+---
+
+### 16.3 Lösungsansatz: 1-Step Loss-Gating
+
+Die Idee: **Bevor eine Aktion ausgeführt wird, prüfen wir ob sie den Zustand tatsächlich verbessert.**
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         LOSS-GATING ALGORITHMUS                              │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  INITIALISIERUNG (bei neuem Goal):                                          │
+│    prev_loss = None                                                          │
+│    tolerance = initial_tolerance (z.B. 0.05 = 5%)                           │
+│    consecutive_rejections = 0                                                │
+│                                                                             │
+│  PRO MPC-STEP:                                                               │
+│                                                                             │
+│  1. CEM optimiert wie gehabt → actions[]                                    │
+│                                                                             │
+│  2. Berechne 1-Step-Loss:                                                   │
+│     z_pred_1 = WM.rollout(obs_0, actions[0:1])  # NUR erste Aktion         │
+│     loss_1step = objective_fn(z_pred_1, z_goal)                             │
+│                                                                             │
+│  3. Gating-Entscheidung:                                                    │
+│                                                                             │
+│     IF prev_loss is None:                                                    │
+│         # Erster Plan: immer akzeptieren                                    │
+│         prev_loss = loss_1step                                               │
+│         → AKZEPTIERT                                                         │
+│                                                                             │
+│     ELSE:                                                                    │
+│         threshold = prev_loss × (1 + tolerance)                             │
+│                                                                             │
+│         IF loss_1step < threshold:                                          │
+│             # Verbesserung (oder akzeptable Verschlechterung)               │
+│             prev_loss = loss_1step                                          │
+│             tolerance = max(min_tolerance, tolerance × decay)               │
+│             consecutive_rejections = 0                                       │
+│             → AKZEPTIERT                                                     │
+│                                                                             │
+│         ELSE:                                                                │
+│             # Keine Verbesserung mehr möglich                               │
+│             consecutive_rejections += 1                                     │
+│             → ABGELEHNT (Server sendet rejected=True)                       │
+│             # Client entscheidet: Retry oder Phase beenden                  │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Kernidee:**
+- Der 1-Step-Loss zeigt, wie der Zustand nach Ausführung von `action_0` aussehen wird
+- Wenn dieser Loss höher ist als der vorherige Zustand (plus Toleranz), wird die Aktion abgelehnt
+- Der Client erhält `actions: None, rejected: True`
+- Client entscheidet: Retry (bis MAX_CONSECUTIVE_REJECTIONS=5) oder Phase beenden
+
+---
+
+### 16.4 Adaptive Toleranz und Phase-Beendigung
+
+> **Update 15.03.2026:** Server-seitiger Escape-Hatch (Tolerance-Boost) wurde entfernt.
+> Wiederholte Rejections signalisieren jetzt **"Ziel erreicht"** statt **"Deadlock"**.
+
+Die Toleranz ist adaptiv mit Decay, aber **ohne Escape-Hatch**:
+
+#### Toleranz-Strategie
+
+Eine feste Toleranz von 0% würde verlangen, dass jede Aktion den Zustand verbessert. Das ist bei stochastischem CEM-Sampling und WM-Prädiktionsfehlern unrealistisch.
+
+**Lösung:** Adaptive Toleranz mit Decay
+- **Start:** `initial_tolerance: 0.05` (5% Verschlechterung erlaubt)
+- **Decay:** Nach jeder akzeptierten Aktion: `tolerance *= 0.95`
+- **Minimum:** `min_tolerance: 0.02` (2%)
+
+```
+Beispiel-Verlauf:
+  MPC Step 1: Toleranz 5.0%
+  MPC Step 5: Toleranz 4.1% (nach 4 Akzeptanzen: 5.0 × 0.95⁴)
+  MPC Step 10: Toleranz 3.3%
+  MPC Step 20: Toleranz 2.2%
+  MPC Step 30: Toleranz 2.0% (Minimum erreicht)
+```
+
+Je näher wir dem Ziel kommen, desto strenger wird das Gating.
+
+#### Wiederholte Rejections = Ziel erreicht
+
+**Design-Entscheidung (15.03.2026):** Kein server-seitiger Escape-Hatch.
+
+**Begründung:** Wenn der CEM keine verbessernde Aktion mehr findet, bedeutet das wahrscheinlich:
+
+1. Der EEF ist **nahe genug am Ziel** (Loss bereits niedrig)
+2. Weitere Bewegung würde den Zustand **verschlechtern**
+3. Die richtige Aktion ist jetzt **Pick** (Phase 1) oder **Place** (Phase 2)
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│              REJECTIONS ALS KONVERGENZ-INDIKATOR                            │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  Phase 1 (Approach):                                                        │
+│    MPC Step 15: Loss = 0.12, EEF bei z = 0.045m (nah am Würfel)            │
+│    MPC Step 16: CEM plant z = 0.050m                                        │
+│                 1-Step-Loss = 0.15 > 0.12 × 1.02 = 0.122                   │
+│                 → REJECTION #1                                              │
+│    MPC Step 17: CEM plant z = 0.048m                                        │
+│                 1-Step-Loss = 0.14 > 0.122                                  │
+│                 → REJECTION #2                                              │
+│    ...                                                                      │
+│    MPC Step 20: REJECTION #5                                                │
+│                 → Client beendet Phase 1                                    │
+│                 → GRIPPER CLOSE (deterministisch)                           │
+│                 → Würfel wird gegriffen ✓                                   │
+│                                                                             │
+│  Interpretation: Der EEF WAR bereits in Greif-Position!                    │
+│  Jede weitere Bewegung würde ihn vom Würfel wegbewegen.                   │
+│  5 Rejections = "Keine Verbesserung mehr möglich" = "Phase fertig"         │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Alter Ansatz (verworfen):** Server erhöht Toleranz nach 5 Rejections, akzeptiert schlechtere Aktionen.
+**Problem:** Roboter bewegt sich VOM Ziel weg, nur um "irgendwas zu tun".
+
+---
+
+### 16.5 Implementierung
+
+#### Server-Seite (planning_server.py)
+
+```python
+# Zustandsvariablen (Dictionary für Python-Scope)
+gating_state = {
+    "prev_loss": None,           # Loss nach letzter akzeptierter Aktion
+    "tolerance": 0.05,           # Aktuelle Toleranz (startet bei initial_tolerance)
+    "consecutive_rejections": 0  # Zähler für Logging
+}
+
+def reset_loss_gating():
+    """Zurücksetzen bei neuem Goal."""
+    gating_state["prev_loss"] = None
+    gating_state["tolerance"] = loss_gating_cfg.get("initial_tolerance", 0.10)
+    gating_state["consecutive_rejections"] = 0
+
+def compute_1step_loss(cur_obs, actions, goal_obs):
+    """
+    Berechnet den Loss nach Ausführung der ERSTEN Aktion.
+    
+    Verwendet einen 1-Step WM-Rollout mit derselben Objective-Function
+    wie der CEM, aber nur für die erste Aktion.
+    """
+    with torch.no_grad():
+        # Extrahiere nur erste Aktion: (B, H, D) → (B, 1, D)
+        first_action = actions[:, :1, :]
+        
+        # WM-Rollout mit 1 Step
+        rollout = wm.rollout(cur_obs, first_action)
+        z_pred_1 = rollout["latent"][:, -1:]  # Prediction nach Step 1
+        
+        # Goal-Encoding
+        z_goal = wm.get_z_goal(goal_obs)
+        
+        # Objective (wie CEM)
+        loss = objective_fn(z_pred_1, z_goal)
+        
+    return loss.item()
+```
+
+#### Client-Seite (franka_cube_stack_env.py)
+
+```python
+def plan(self, image, ee_pos=None, idle_fn=None):
+    # ... Socket-Kommunikation ...
+    result = pickle.loads(response)
+    
+    # Prüfe auf Gating-Ablehnung
+    if result.get("rejected"):
+        print(f"  [Gating] Aktion abgelehnt: {result.get('reason')}")
+        return None  # Client hält Position
+    
+    return result.get("actions")
+```
+
+#### MPC-Loop mit Rejection-Retry (planning_client.py)
+
+> **Fix vom 15.03.2026:** Eine einzelne Rejection beendet die Phase nicht mehr sofort.
+> Stattdessen wird bis zu `MAX_CONSECUTIVE_REJECTIONS` (5) Mal neu geplant.
+
+**Problem (vorher):**
+```
+MPC Step 3: Target=[0.409, 0.056, 0.077]
+[Gating] Action abgelehnt
+P1-GRASP MPC 4: Keine Aktion!
+Phase 1 abgeschlossen: 3 Steps   ← ZU FRÜH!
+─── GRIPPER CLOSE ───             ← Greifer schließt, obwohl EEF zu hoch
+```
+
+**Lösung (nachher):**
+```python
+# planning_client.py — _run_mpc_phase()
+
+consecutive_rejections = 0
+MAX_CONSECUTIVE_REJECTIONS = 5
+
+for mpc_iter in range(max_steps):
+    sub_actions = client.plan(cur_img, ee_pos=cur_ee_pos, idle_fn=idle_fn)
+
+    if sub_actions is None:
+        consecutive_rejections += 1
+        print(f"  {phase_name} MPC {mpc_iter+1}: Keine Aktion "
+              f"(Rejection {consecutive_rejections}/{MAX_CONSECUTIVE_REJECTIONS})")
+        
+        if consecutive_rejections >= MAX_CONSECUTIVE_REJECTIONS:
+            print(f"  {phase_name}: Max Rejections erreicht, Phase abgebrochen!")
+            break
+        
+        continue  # ← WICHTIG: Retry statt break!
+    
+    consecutive_rejections = 0  # Reset bei erfolgreicher Aktion
+    # ... normale Aktionsausführung ...
+```
+
+**Verhalten nach Fix:**
+```
+MPC Step 3: Target=[0.409, 0.056, 0.077]
+[Gating] Action abgelehnt
+P1-GRASP MPC 4: Keine Aktion (Rejection 1/5)   ← Retry!
+[Gating] AKZEPTIERT: 0.75 < 0.82
+P1-GRASP MPC 5: Target=[0.420, 0.060, 0.055]   ← Weiter approaching!
+...
+```
+
+**Bei 5 aufeinanderfolgenden Rejections:**
+```
+MPC Step 18: Target=[0.425, 0.058, 0.042]      ← Nah am Ziel
+[Gating] ABGELEHNT #1: 0.08 >= 0.077
+P1-GRASP MPC 19: Keine Aktion (Rejection 1/5)
+[Gating] ABGELEHNT #2: 0.09 >= 0.077
+P1-GRASP MPC 20: Keine Aktion (Rejection 2/5)
+...
+[Gating] ABGELEHNT #5: 0.08 >= 0.077
+P1-GRASP MPC 23: Keine Aktion (Rejection 5/5)
+P1-GRASP: Max Rejections erreicht, Phase abgebrochen!   ← Interpretiert als "Ziel erreicht"
+Phase 1 abgeschlossen: 18 Steps
+─── GRIPPER CLOSE ───   ← Korrekt: EEF war bereits in Greif-Position!
+```
+
+**Design-Rationale (15.03.2026):** Der Server hat KEINEN Escape-Hatch mehr.
+Wiederholte Rejections werden als Signal interpretiert, dass das Ziel erreicht wurde
+und die Phase beendet werden sollte (→ Pick/Place).
+
+---
+
+### 16.6 Konfiguration
+
+Die Loss-Gating-Parameter befinden sich in `conf/plan_franka.yaml`:
+
+```yaml
+# ─── Loss-Gating (verhindert MPC-Oszillationen) ───
+loss_gating:
+  enabled: true               # Loss-Gating aktivieren
+  initial_tolerance: 0.05     # 5% Verschlechterung erlaubt (Start)
+  min_tolerance: 0.02         # Minimum 2%
+  decay: 0.95                 # Toleranz-Reduktion nach Akzeptanz
+  log_gating: true            # Gating-Entscheidungen loggen
+  # Kein Escape-Hatch: Wiederholte Rejections = "Ziel erreicht"
+  # Client (planning_client.py) beendet Phase nach MAX_CONSECUTIVE_REJECTIONS
+```
+
+**Aktivierung:**
+
+```yaml
+loss_gating:
+  enabled: true
+```
+
+Oder via CLI-Override:
+
+```bash
+python planning_server.py --model_name 2026-03-15/XX-XX \
+    --loss_gating_enabled true
+```
+
+---
+
+### 16.7 Erwartetes Verhalten
+
+#### Fall 1: Normaler Fortschritt
+
+```
+MPC-Step 1: 1-Step-Loss = 0.80 → AKZEPTIERT (erster Plan)
+MPC-Step 2: 1-Step-Loss = 0.75 → AKZEPTIERT (0.75 < 0.80 × 1.05)
+            Toleranz: 5% → 4.75%
+MPC-Step 3: 1-Step-Loss = 0.70 → AKZEPTIERT (0.70 < 0.75 × 1.0475)
+            Toleranz: 4.75% → 4.5%
+...
+MPC-Step 20: 1-Step-Loss = 0.12 → Nahe am Ziel ✓
+```
+
+#### Fall 2: Temporäre Ablehnung und Recovery
+
+```
+MPC-Step 5: 1-Step-Loss = 0.60, prev = 0.55, threshold = 0.578
+            0.60 > 0.578 → ABGELEHNT #1
+            consecutive_rejections = 1, Client hält Position
+MPC-Step 6: 1-Step-Loss = 0.56 → AKZEPTIERT (neuer CEM-Lauf fand besseren Plan)
+            consecutive_rejections = 0
+```
+
+#### Fall 3: Ziel erreicht (Konvergenz)
+
+```
+MPC-Step 15: 1-Step-Loss = 0.08, prev = 0.07, threshold = 0.0714 (Toleranz 2%)
+             EEF bei z = 0.042m — sehr nah am Würfel!
+             0.08 > 0.0714 → ABGELEHNT #1
+MPC-Step 16: CEM versucht erneut, findet keine Verbesserung
+             0.09 > 0.0714 → ABGELEHNT #2
+MPC-Step 17: 0.08 > 0.0714 → ABGELEHNT #3
+MPC-Step 18: 0.085 > 0.0714 → ABGELEHNT #4
+MPC-Step 19: 0.08 > 0.0714 → ABGELEHNT #5
+             
+             Client: "Max Rejections erreicht, Phase abgebrochen!"
+             → Interpretiert als: "Keine Verbesserung mehr möglich"
+             → Phase 1 beendet
+             → GRIPPER CLOSE (deterministisch)
+             → Würfel wird erfolgreich gegriffen ✓
+```
+
+**Wichtig:** Der niedrige Loss (0.07-0.09) zeigt, dass der EEF bereits gut positioniert ist.
+Wiederholte Rejections bedeuten: "Jede Bewegung verschlechtert den Zustand" — also sind wir angekommen!
+
+---
+
+### 16.8 Einschränkungen und Alternativen
+
+#### Einschränkungen des Loss-Gating
+
+1. **Zusätzlicher WM-Rollout pro MPC-Step**
+   - `compute_1step_loss()` führt einen zusätzlichen Forward-Pass durch
+   - Bei großen Batch-Sizes vernachlässigbar (~5% Overhead)
+
+2. **Abhängig von WM-Qualität**
+   - Wenn das WM systematisch falsche Predictions macht, ist der 1-Step-Loss nicht aussagekräftig
+   - Bei OOD-Zuständen (z.B. Phase 1 mit z=0.42) kann das Gating unzuverlässig sein
+
+3. **Filtert nur — verbessert CEM nicht**
+   - Das Gating macht den CEM nicht besser, es filtert nur schlechte Pläne
+   - Bei systematisch schlechten CEM-Lösungen wird die Phase frühzeitig beendet
+   - Das ist **beabsichtigt**: Wiederholte Rejections = "Ziel erreicht"
+
+#### Alternative Ansätze
+
+| Ansatz | Beschreibung | Vor-/Nachteile |
+|--------|--------------|----------------|
+| **1-Step Objective** | CEM optimiert nur `loss_1` statt `sum(loss_1..H)` | ✓ Direkt am Problem ✗ Verliert Planning-Horizont |
+| **Weighted Horizon** | `loss = w_1×loss_1 + w_2×loss_2 + ... ` mit abnehmenden Gewichten | ✓ Balance ✗ Zusätzliche Hyperparameter |
+| **Multi-Step Execution** | MPC führt >1 Aktion aus bevor neu geplant wird | ✓ Nutzt geplanten Horizont ✗ Weniger reaktiv |
+| **Receding Horizon mit Overlap** | Warm-Start mit überlappenden Plänen | ✓ Bereits implementiert ✗ Löst nicht das Fundamental-Problem |
+
+**Empfehlung:** Loss-Gating mit Phase-Beendigung bei Konvergenz ist der empfohlene Ansatz.
+Es verhindert Oszillationen und interpretiert wiederholte Rejections als Signal,
+dass die Phase abgeschlossen werden kann (→ Pick/Place). Overhead ist minimal (~5%).
+
+---
+
+**Querverweise:**
+- Abschnitt 5: CEM Planner im Detail (Objective Function)
+- Abschnitt 6.7: Strategische Entscheidung für MPC
+- Abschnitt 6.7.5: Warm-Start im MPC-Kontext
+- Abschnitt 15: Two-Phase Planning Root-Cause (OOD-Proprio)
+- `conf/plan_franka.yaml`: Loss-Gating-Konfiguration
+- `planning_server.py`: `compute_1step_loss()`, `reset_loss_gating()`

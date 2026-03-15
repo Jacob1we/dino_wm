@@ -639,8 +639,7 @@ if planning_cfg:
         print(f"    initial_tolerance={loss_gating_cfg.get('initial_tolerance', 0.10):.2f}, "
               f"min_tolerance={loss_gating_cfg.get('min_tolerance', 0.02):.2f}, "
               f"decay={loss_gating_cfg.get('decay', 0.95):.2f}")
-        print(f"    max_rejections={loss_gating_cfg.get('max_rejections', 5)}, "
-              f"rejection_boost={loss_gating_cfg.get('rejection_tolerance_boost', 1.5):.1f}")
+        # Kein Escape-Hatch mehr: Client beendet Phase nach wiederholten Rejections
     else:
         print(f"  Loss-Gating: INAKTIV")
 
@@ -1134,21 +1133,13 @@ while True:
                                     )
                                     gating_state["consecutive_rejections"] = 0
                                 else:
-                                    # Abgelehnt
+                                    # Abgelehnt — Client entscheidet über Phase-Abbruch
+                                    # Kein Escape-Hatch: Wiederholte Rejections bedeuten "Ziel erreicht"
                                     action_rejected = True
                                     gating_state["consecutive_rejections"] += 1
                                     if loss_gating_cfg.get("log_gating", True):
                                         print(f"  [Gating] ABGELEHNT #{gating_state['consecutive_rejections']}: "
                                               f"{loss_1step:.4f} >= {threshold:.4f}")
-                                    
-                                    # Escape-Hatch: Nach zu vielen Ablehnungen Toleranz erhöhen
-                                    max_rej = loss_gating_cfg.get("max_rejections", 5)
-                                    if gating_state["consecutive_rejections"] >= max_rej:
-                                        boost = loss_gating_cfg.get("rejection_tolerance_boost", 1.5)
-                                        gating_state["tolerance"] = min(0.5, gating_state["tolerance"] * boost)
-                                        gating_state["consecutive_rejections"] = 0
-                                        if loss_gating_cfg.get("log_gating", True):
-                                            print(f"  [Gating] Escape: Toleranz erhöht auf {gating_state['tolerance']:.2f}")
 
                     # Response basierend auf Gating-Ergebnis
                     if action_rejected:

@@ -92,4 +92,23 @@ feature_visualization:
   visualize_rollout_strip: true     # Komplettes Horizon-Rollout als Bildzeile:
                                     # | Current | t=1 | t=2 | ... | t=H | Goal |
 
+# =====================================================================
+# Loss-Gating: Verhindert Aktionen die den Loss erhöhen
+# =====================================================================
+# Problem: CEM optimiert auf Horizon-Ende, nicht auf Action 1. Bei MPC
+# wird aber nur Action 1 ausgeführt → manchmal bewegt sich der Roboter
+# VOM Ziel weg, obwohl er näher dran war.
+#
+# Lösung: Berechne den 1-Step-Loss (nach Action 1) und führe die Action
+# nur aus wenn sie den Loss verbessert (oder innerhalb Toleranz hält).
+loss_gating:
+  enabled: false                    # true = Loss-Gating aktivieren
+  initial_tolerance: 0.10           # Anfangs-Toleranz: Action akzeptiert wenn
+                                    # loss_new < loss_prev * (1 + tolerance)
+  min_tolerance: 0.02               # Minimale Toleranz (wird strenger über Zeit)
+  decay: 0.95                       # Toleranz *= decay nach jeder Akzeptanz
+  max_rejections: 5                 # Nach N Ablehnungen: Toleranz erhöhen (Escape)
+  rejection_tolerance_boost: 1.5    # Toleranz *= boost bei max_rejections erreicht
+  log_gating: true                  # Gating-Entscheidungen loggen
+
 # 2026-02-09/08-12-44

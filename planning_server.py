@@ -626,6 +626,76 @@ if feature_viz_enabled:
     feature_visualizer.n_clusters = feature_viz_cfg.get("n_clusters", 3)
     feature_visualizer.n_heads_show = feature_viz_cfg.get("n_heads_show", 4)
 
+# --- Loss-Gating Konfiguration ---
+loss_gating_cfg = {}
+loss_gating_enabled = False
+if planning_cfg:
+    loss_gating_cfg = OmegaConf.to_container(
+        planning_cfg.get("loss_gating", {}), resolve=True
+    )
+    loss_gating_enabled = loss_gating_cfg.get("enabled", False)
+    if loss_gating_enabled:
+        print(f"  Loss-Gating: AKTIVIERT")
+        print(f"    initial_tolerance={loss_gating_cfg.get('initial_tolerance', 0.10):.2f}, "
+              f"min_tolerance={loss_gating_cfg.get('min_tolerance', 0.02):.2f}, "
+              f"decay={loss_gating_cfg.get('decay', 0.95):.2f}")
+        print(f"    max_rejections={loss_gating_cfg.get('max_rejections', 5)}, "
+              f"rejection_boost={loss_gating_cfg.get('rejection_tolerance_boost', 1.5):.1f}")
+    else:
+        print(f"  Loss-Gating: INAKTIV")
+
+# Loss-Gating State (Dictionary für einfache Mutation ohne global)
+gating_state = {
+    "prev_loss": None,
+    "tolerance": loss_gating_cfg.get("initial_tolerance", 0.10) if loss_gating_enabled else 0.10,
+    "consecutive_rejections": 0,
+}
+
+def reset_loss_gating():
+    """Setzt Loss-Gating State zurück (z.B. bei neuem Goal)."""
+    gating_state["prev_loss"] = None
+    gating_state["tolerance"] = loss_gating_cfg.get("initial_tolerance", 0.10)
+    gating_state["consecutive_rejections"] = 0
+
+def compute_1step_loss(cur_obs: dict, actions: torch.Tensor, goal_obs: dict) -> float:
+    """
+    Berechnet den Loss nach Ausführung der ersten Action (1-Step-Loss).
+    
+    Args:
+        cur_obs: Aktuelles Observation-Dict
+        actions: (1, horizon, action_dim) Actions vom CEM
+        goal_obs: Goal Observation-Dict
+        
+    Returns:
+        1-Step-Loss (float) oder None bei Fehler
+    """
+    try:
+        # Preprocessor auf cur_obs und goal_obs anwenden
+        obs_tensor = preprocessor.transform_obs(cur_obs.copy())
+        obs_tensor = {k: v.float().to(device) for k, v in obs_tensor.items()}
+        
+        goal_tensor = preprocessor.transform_obs(goal_obs.copy())
+        goal_tensor = {k: v.float().to(device) for k, v in goal_tensor.items()}
+        
+        # Nur erste Action für 1-Schritt-Rollout
+        first_action = actions[:, :1, :].to(device)  # (1, 1, action_dim)
+        
+        with torch.no_grad():
+            # Rollout mit einer Action
+            z_pred, _ = model.rollout(obs_tensor, first_action)
+            
+            # Goal encodieren
+            z_goal = model.encode_obs(goal_tensor)
+            
+            # Loss berechnen (selbe Objective wie CEM)
+            loss = objective_fn(z_pred, z_goal)
+            
+            return loss.item()
+            
+    except Exception as e:
+        print(f"  [Gating] 1-Step-Loss Fehler: {e}")
+        return None
+
 # =============================================================================
 # CEM PLANNER
 # =============================================================================
@@ -919,6 +989,11 @@ while True:
                 goal_obs = img_to_obs(img, ee_pos)
                 print(f"  Goal '{current_goal_name}' gesetzt: {img.shape} {img.dtype}, ee_pos={ee_pos}")
                 
+                # Loss-Gating State zurücksetzen bei neuem Goal
+                if loss_gating_enabled:
+                    reset_loss_gating()
+                    print(f"  Loss-Gating: State zurückgesetzt (tolerance={gating_state['tolerance']:.2f})")
+                
                 # Feature-Visualisierung für Goal-Bild (verwendet durchlaufenden step_counter)
                 if feature_viz_enabled and feature_viz_cfg.get("visualize_goal", True):
                     try:
@@ -1029,20 +1104,77 @@ while True:
                     
                     feature_viz_step_counter += 1
 
-                    all_sub = _denorm_to_sub_actions(actions, first_only=True)
-                    n_ret = args.n_sub_actions if 0 < args.n_sub_actions < len(all_sub) else len(all_sub)
-                    sub_actions = all_sub[:n_ret]
+                    # ─── Loss-Gating ───
+                    # Prüfe ob die geplante Action den Loss tatsächlich verbessert
+                    action_rejected = False
+                    if loss_gating_enabled:
+                        loss_1step = compute_1step_loss(cur_obs, actions, goal_obs)
+                        
+                        if loss_1step is not None:
+                            if gating_state["prev_loss"] is None:
+                                # Erster Plan: immer akzeptieren
+                                gating_state["prev_loss"] = loss_1step
+                                if loss_gating_cfg.get("log_gating", True):
+                                    print(f"  [Gating] Erster Plan, 1-Step-Loss={loss_1step:.4f}")
+                            else:
+                                # Prüfe Akzeptanz-Kriterium
+                                threshold = gating_state["prev_loss"] * (1 + gating_state["tolerance"])
+                                
+                                if loss_1step < threshold:
+                                    # Akzeptiert: Update State
+                                    improvement = (gating_state["prev_loss"] - loss_1step) / gating_state["prev_loss"] * 100
+                                    if loss_gating_cfg.get("log_gating", True):
+                                        print(f"  [Gating] AKZEPTIERT: {loss_1step:.4f} < {threshold:.4f} "
+                                              f"(prev={gating_state['prev_loss']:.4f}, {improvement:+.1f}%)")
+                                    gating_state["prev_loss"] = loss_1step
+                                    # Toleranz reduzieren
+                                    gating_state["tolerance"] = max(
+                                        loss_gating_cfg.get("min_tolerance", 0.02),
+                                        gating_state["tolerance"] * loss_gating_cfg.get("decay", 0.95)
+                                    )
+                                    gating_state["consecutive_rejections"] = 0
+                                else:
+                                    # Abgelehnt
+                                    action_rejected = True
+                                    gating_state["consecutive_rejections"] += 1
+                                    if loss_gating_cfg.get("log_gating", True):
+                                        print(f"  [Gating] ABGELEHNT #{gating_state['consecutive_rejections']}: "
+                                              f"{loss_1step:.4f} >= {threshold:.4f}")
+                                    
+                                    # Escape-Hatch: Nach zu vielen Ablehnungen Toleranz erhöhen
+                                    max_rej = loss_gating_cfg.get("max_rejections", 5)
+                                    if gating_state["consecutive_rejections"] >= max_rej:
+                                        boost = loss_gating_cfg.get("rejection_tolerance_boost", 1.5)
+                                        gating_state["tolerance"] = min(0.5, gating_state["tolerance"] * boost)
+                                        gating_state["consecutive_rejections"] = 0
+                                        if loss_gating_cfg.get("log_gating", True):
+                                            print(f"  [Gating] Escape: Toleranz erhöht auf {gating_state['tolerance']:.2f}")
 
-                    wandb_run.log_plan_summary(t_plan, len(sub_actions), mode="plan")
-                    _ee_start = 4 if base_action_dim == 8 else 3
-                    for si, sa in enumerate(sub_actions):
-                        print(f"    Sub-Action {si}: target_ee=[{sa[_ee_start]:.3f}, {sa[_ee_start+1]:.3f}, {sa[_ee_start+2]:.3f}]")
-                    response = {
-                        "status": "ok",
-                        "actions": sub_actions.tolist(),
-                        "n_actions": len(sub_actions),
-                        "action_dim": base_action_dim,
-                    }
+                    # Response basierend auf Gating-Ergebnis
+                    if action_rejected:
+                        # Action abgelehnt: Client soll Position halten
+                        response = {
+                            "status": "ok",
+                            "actions": None,  # Keine Action → Position halten
+                            "rejected": True,
+                            "reason": "loss_gating",
+                        }
+                    else:
+                        # Action akzeptiert: Normale Response
+                        all_sub = _denorm_to_sub_actions(actions, first_only=True)
+                        n_ret = args.n_sub_actions if 0 < args.n_sub_actions < len(all_sub) else len(all_sub)
+                        sub_actions = all_sub[:n_ret]
+
+                        wandb_run.log_plan_summary(t_plan, len(sub_actions), mode="plan")
+                        _ee_start = 4 if base_action_dim == 8 else 3
+                        for si, sa in enumerate(sub_actions):
+                            print(f"    Sub-Action {si}: target_ee=[{sa[_ee_start]:.3f}, {sa[_ee_start+1]:.3f}, {sa[_ee_start+2]:.3f}]")
+                        response = {
+                            "status": "ok",
+                            "actions": sub_actions.tolist(),
+                            "n_actions": len(sub_actions),
+                            "action_dim": base_action_dim,
+                        }
 
             elif cmd == "plan_all":
                 if goal_obs is None:

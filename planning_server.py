@@ -629,13 +629,16 @@ if feature_viz_enabled:
 # --- Loss-Gating Konfiguration ---
 loss_gating_cfg = {}
 loss_gating_enabled = False
+loss_gating_mode = "combined"
 if planning_cfg:
     loss_gating_cfg = OmegaConf.to_container(
         planning_cfg.get("loss_gating", {}), resolve=True
     )
     loss_gating_enabled = loss_gating_cfg.get("enabled", False)
+    loss_gating_mode = loss_gating_cfg.get("mode", "combined")
     if loss_gating_enabled:
         print(f"  Loss-Gating: AKTIVIERT")
+        print(f"    mode={loss_gating_mode}")
         print(f"    initial_tolerance={loss_gating_cfg.get('initial_tolerance', 0.10):.2f}, "
               f"min_tolerance={loss_gating_cfg.get('min_tolerance', 0.02):.2f}, "
               f"decay={loss_gating_cfg.get('decay', 0.95):.2f}")
@@ -656,43 +659,171 @@ def reset_loss_gating():
     gating_state["tolerance"] = loss_gating_cfg.get("initial_tolerance", 0.10)
     gating_state["consecutive_rejections"] = 0
 
-def compute_1step_loss(cur_obs: dict, actions: torch.Tensor, goal_obs: dict) -> float:
-    """
-    Berechnet den Loss nach Ausführung der ersten Action (1-Step-Loss).
+# =============================================================================
+# HISTORY-BUFFER für num_hist > 1
+# =============================================================================
+# 
+# PROBLEM: Bei num_hist > 1 braucht das World Model mehrere Kontext-Frames.
+# Der Server empfängt aber nur das aktuelle Bild pro plan-Aufruf.
+# Ohne History-Buffer produziert das WM falsche Predictions → falscher Loss.
+#
+# LÖSUNG: Buffer speichert die letzten num_hist Frames und Proprio-Werte.
+# Bei jedem plan-Aufruf wird das neue Frame hinzugefügt, der älteste
+# Frame entfernt (FIFO), und der volle Buffer an den Planner übergeben.
+#
+# num_hist=1: Buffer ist de-facto deaktiviert (nur aktuelles Frame)
+# num_hist=4: Buffer enthält 4 Frames, neue Frames schieben alte raus
+
+num_hist = model_cfg.num_hist
+print(f"  num_hist={num_hist} (History-Buffer {'AKTIVIERT' if num_hist > 1 else 'nicht nötig'})")
+
+# Buffer-State (wird bei set_goal zurückgesetzt)
+history_buffer = {
+    "visual": [],    # Liste von (H, W, 3) uint8 numpy arrays
+    "proprio": [],   # Liste von (3,) float32 numpy arrays
+}
+
+def reset_history_buffer():
+    """Leert den History-Buffer (z.B. bei neuem Goal/Episode)."""
+    history_buffer["visual"].clear()
+    history_buffer["proprio"].clear()
+    print(f"  History-Buffer: zurückgesetzt (num_hist={num_hist})")
+
+def add_to_history(img: np.ndarray, ee_pos: np.ndarray):
+    """Fügt Frame zum History-Buffer hinzu (FIFO).
     
     Args:
-        cur_obs: Aktuelles Observation-Dict
+        img: (H, W, 3) uint8 RGB
+        ee_pos: (3,) float32 EEF-Position
+    """
+    if img.dtype != np.uint8:
+        img = (img * 255).astype(np.uint8) if img.max() <= 1.0 else img.astype(np.uint8)
+    if ee_pos is None:
+        ee_pos = np.zeros(3, dtype=np.float32)
+    else:
+        ee_pos = np.array(ee_pos, dtype=np.float32).ravel()
+    
+    history_buffer["visual"].append(img)
+    history_buffer["proprio"].append(ee_pos)
+    
+    # FIFO: älteste Frames entfernen wenn Buffer voll
+    while len(history_buffer["visual"]) > num_hist:
+        history_buffer["visual"].pop(0)
+        history_buffer["proprio"].pop(0)
+
+def get_obs_with_history() -> dict:
+    """Erstellt Observation-Dict aus dem History-Buffer.
+    
+    Returns:
+        dict mit "visual" (1, T, H, W, 3) und "proprio" (1, T, 3)
+        wobei T = min(len(buffer), num_hist)
+    
+    Bei leerem Buffer: Gibt None zurück (Fehlerfall).
+    Bei T < num_hist: Älteste Frames werden dupliziert (Padding).
+    """
+    if len(history_buffer["visual"]) == 0:
+        print("  ⚠ FEHLER: History-Buffer leer!")
+        return None
+    
+    T = len(history_buffer["visual"])
+    
+    # Padding: Wiederhole ältestes Frame wenn Buffer noch nicht voll
+    if T < num_hist:
+        # Pad mit dem ältesten Frame
+        pad_count = num_hist - T
+        visual_list = [history_buffer["visual"][0]] * pad_count + history_buffer["visual"]
+        proprio_list = [history_buffer["proprio"][0]] * pad_count + history_buffer["proprio"]
+    else:
+        visual_list = history_buffer["visual"]
+        proprio_list = history_buffer["proprio"]
+    
+    # Stack zu Arrays: (T, H, W, 3) und (T, 3)
+    visual_arr = np.stack(visual_list, axis=0).astype(np.float32)  # (T, H, W, 3)
+    proprio_arr = np.stack(proprio_list, axis=0).astype(np.float32)  # (T, 3)
+    
+    # Batch-Dimension hinzufügen: (1, T, H, W, 3) und (1, T, 3)
+    return {
+        "visual": visual_arr[np.newaxis, ...],    # (1, T, H, W, 3)
+        "proprio": proprio_arr[np.newaxis, ...],   # (1, T, 3)
+    }
+
+def compute_gating_losses(cur_obs: dict, actions: torch.Tensor, goal_obs: dict) -> dict:
+    """
+    Berechnet BEIDE Losses für das Improvement-Gating im GLEICHEN Feature-Space.
+    
+    IMPROVEMENT-ANSATZ:
+      - zero_loss:    Rollout mit Zero-Action → "Was wenn ich nichts tue?"
+      - planned_loss: Rollout mit geplanter Action → "Was wenn ich die Action ausführe?"
+    
+    Beide durch predict() → gleicher Feature-Space → fairer Vergleich!
+    
+    Die Frage: "Bringt mich DIESE Action näher ans Ziel als STILLSTAND?"
+    
+    Args:
+        cur_obs: Observation-Dict mit voller History (visual: 1, T, H, W, 3)
         actions: (1, horizon, action_dim) Actions vom CEM
         goal_obs: Goal Observation-Dict
         
     Returns:
-        1-Step-Loss (float) oder None bei Fehler
+        Dict mit {"planned_loss": float, "zero_loss": float} oder None bei Fehler
     """
     try:
-        # Preprocessor auf cur_obs und goal_obs anwenden
+        # Preprocessor anwenden
         obs_tensor = preprocessor.transform_obs(cur_obs.copy())
         obs_tensor = {k: v.float().to(device) for k, v in obs_tensor.items()}
         
         goal_tensor = preprocessor.transform_obs(goal_obs.copy())
         goal_tensor = {k: v.float().to(device) for k, v in goal_tensor.items()}
         
-        # Nur erste Action für 1-Schritt-Rollout
-        first_action = actions[:, :1, :].to(device)  # (1, 1, action_dim)
+        # Debug: Shape prüfen
+        T_obs = obs_tensor["visual"].shape[1]
+        if T_obs < num_hist:
+            print(f"  [Gating] ⚠ History zu kurz: {T_obs} < {num_hist}")
+        
+        metric = torch.nn.MSELoss(reduction="none")
         
         with torch.no_grad():
-            # Rollout mit einer Action
-            z_pred, _ = model.rollout(obs_tensor, first_action)
-            
             # Goal encodieren
             z_goal = model.encode_obs(goal_tensor)
             
-            # Loss berechnen (selbe Objective wie CEM)
-            loss = objective_fn(z_pred, z_goal)
+            # ═══════════════════════════════════════════════════════════════
+            # ZWEI ROLLOUTS FÜR FAIREN VERGLEICH
+            # Beide durch predict() → gleicher Feature-Space!
+            # ═══════════════════════════════════════════════════════════════
             
-            return loss.item()
+            T_obs = obs_tensor["visual"].shape[1]
+            first_action = actions[:, :1, :].to(device)
+            init_actions = torch.zeros(1, T_obs, first_action.shape[-1], device=device)
+            
+            # Rollout 1: Mit geplanter Action
+            full_actions_planned = torch.cat([init_actions, first_action], dim=1)
+            z_pred_planned, _ = model.rollout(obs_tensor, full_actions_planned)
+            z_after_planned = z_pred_planned["visual"][:, -1:]
+            
+            # Rollout 2: Mit Zero-Action ("Stillstand"/Baseline)
+            # Im normalisierten Space ist 0 = Mittelwert der Trainings-Actions
+            zero_action = torch.zeros(1, 1, first_action.shape[-1], device=device)
+            full_actions_zero = torch.cat([init_actions, zero_action], dim=1)
+            z_pred_zero, _ = model.rollout(obs_tensor, full_actions_zero)
+            z_after_zero = z_pred_zero["visual"][:, -1:]
+            
+            # Losses berechnen - beide im Prediction-Space!
+            planned_loss = metric(z_after_planned, z_goal["visual"]).mean().item()
+            zero_loss = metric(z_after_zero, z_goal["visual"]).mean().item()
+            
+            # ─── LOGGING ───
+            if loss_gating_cfg.get("log_gating", True):
+                delta = zero_loss - planned_loss
+                symbol = "↓" if planned_loss < zero_loss else "↑"
+                print(f"  [Gating] zero={zero_loss:.4f}, planned={planned_loss:.4f}, "
+                      f"delta={delta:+.4f} {symbol}")
+            
+            return {"planned_loss": planned_loss, "zero_loss": zero_loss}
             
     except Exception as e:
-        print(f"  [Gating] 1-Step-Loss Fehler: {e}")
+        print(f"  [Gating] Loss-Berechnung Fehler: {e}")
+        import traceback
+        traceback.print_exc()
         return None
 
 # =============================================================================
@@ -781,8 +912,11 @@ def get_wm_predicted_image(cur_obs: dict, actions: torch.Tensor, goal_obs: dict)
     Das World Model sagt den Zustand nach der ersten geplanten Action voraus,
     d.h. den nächsten Zeitschritt von der aktuellen Beobachtung aus.
     
+    WICHTIG: cur_obs enthält jetzt die volle History (num_hist Frames).
+    Die Actions müssen entsprechend erweitert werden (T_obs init-actions + plan-actions).
+    
     Args:
-        cur_obs: Aktuelles Observation-Dict (aus img_to_obs)
+        cur_obs: Observation-Dict mit voller History (visual: 1, T, H, W, 3)
         actions: (1, horizon, full_action_dim) normalisierte Actions vom CEM
         goal_obs: Goal Observation-Dict (für Zielbild-Vergleich)
     
@@ -802,9 +936,14 @@ def get_wm_predicted_image(cur_obs: dict, actions: torch.Tensor, goal_obs: dict)
         # Nur erste Action für 1-Schritt-Vorhersage
         first_action = actions[:, :1, :].to(device)  # (1, 1, action_dim)
         
+        # Bei num_hist > 1: Init-Actions für History-Frames hinzufügen
+        T_obs = obs_tensor["visual"].shape[1]
+        init_actions = torch.zeros(1, T_obs, first_action.shape[-1], device=device)
+        full_actions = torch.cat([init_actions, first_action], dim=1)  # (1, T_obs+1, action_dim)
+        
         # WM Rollout mit nur einer Action
         with torch.no_grad():
-            z_obses, _ = model.rollout(obs_tensor, first_action)
+            z_obses, _ = model.rollout(obs_tensor, full_actions)
             
             # Den vorhergesagten nächsten Zustand dekodieren
             # z_obses['visual'] hat shape (1, num_pred, num_patches, emb_dim)
@@ -839,8 +978,11 @@ def get_wm_rollout_images(cur_obs: dict, actions: torch.Tensor) -> list:
     Das World Model sagt die Zustände für alle geplanten Actions voraus,
     d.h. das gesamte Horizon-Rollout von der aktuellen Beobachtung aus.
     
+    WICHTIG: cur_obs enthält jetzt die volle History (num_hist Frames).
+    Die Actions müssen entsprechend erweitert werden (T_obs init-actions + plan-actions).
+    
     Args:
-        cur_obs: Aktuelles Observation-Dict (aus img_to_obs)
+        cur_obs: Observation-Dict mit voller History (visual: 1, T, H, W, 3)
         actions: (1, horizon, full_action_dim) normalisierte Actions vom CEM
     
     Returns:
@@ -858,10 +1000,15 @@ def get_wm_rollout_images(cur_obs: dict, actions: torch.Tensor) -> list:
         horizon = actions.shape[1]
         actions_device = actions.to(device)
         
+        # Bei num_hist > 1: Init-Actions für History-Frames hinzufügen
+        T_obs = obs_tensor["visual"].shape[1]
+        init_actions = torch.zeros(1, T_obs, actions_device.shape[-1], device=device)
+        full_actions = torch.cat([init_actions, actions_device], dim=1)  # (1, T_obs+horizon, action_dim)
+        
         # WM Rollout mit allen Actions
         rollout_images = []
         with torch.no_grad():
-            z_obses, _ = model.rollout(obs_tensor, actions_device)
+            z_obses, _ = model.rollout(obs_tensor, full_actions)
             
             # Alle vorhergesagten Zustände dekodieren
             obs_decoded, _ = model.decode_obs(z_obses)
@@ -886,9 +1033,14 @@ def get_wm_rollout_images(cur_obs: dict, actions: torch.Tensor) -> list:
 
 
 def extract_goal_image(goal_obs: dict) -> np.ndarray:
-    """Extrahiert das Zielbild aus goal_obs als uint8 RGB."""
-    visual = goal_obs['visual']  # (1, 1, H, W, 3) float32 [0,255]
-    img = visual[0, 0].astype(np.uint8)
+    """Extrahiert das aktuellste Bild aus einem Observation-Dict als uint8 RGB.
+    
+    Bei Single-Frame (1, 1, H, W, 3): Extrahiert das einzige Frame.
+    Bei Multi-Frame (1, T, H, W, 3): Extrahiert das LETZTE Frame (das aktuellste).
+    """
+    visual = goal_obs['visual']  # (1, T, H, W, 3) float32 [0,255]
+    # -1 nimmt das letzte Frame (bei T=1 identisch mit 0)
+    img = visual[0, -1].astype(np.uint8)
     return img
 
 # =============================================================================
@@ -954,6 +1106,15 @@ while True:
                     feature_visualizer.reset_centroids()  # PCA/K-Means zurücksetzen
                     print(f"  Episode-Dir: {episode_dir}")
                     print(f"  Feature-Viz-Dir: {feature_viz_dir}, Step-Counter=0")
+                
+                # History-Buffer zurücksetzen bei neuer Episode
+                # (neue Episode = neue Trajectory, alte Frames sind irrelevant)
+                reset_history_buffer()
+                
+                # Loss-Gating auch zurücksetzen
+                if loss_gating_enabled:
+                    reset_loss_gating()
+                
                 response = {"status": "ok"}
 
             elif cmd == "log_step":
@@ -993,6 +1154,10 @@ while True:
                     reset_loss_gating()
                     print(f"  Loss-Gating: State zurückgesetzt (tolerance={gating_state['tolerance']:.2f})")
                 
+                # History-Buffer zurücksetzen bei neuem Goal
+                # (neues Goal = neue Trajectory, alte Frames sind irrelevant)
+                reset_history_buffer()
+                
                 # Feature-Visualisierung für Goal-Bild (verwendet durchlaufenden step_counter)
                 if feature_viz_enabled and feature_viz_cfg.get("visualize_goal", True):
                     try:
@@ -1017,155 +1182,172 @@ while True:
                 else:
                     img = np.array(msg["image"])
                     ee_pos = np.array(msg["ee_pos"]) if "ee_pos" in msg else None
-                    cur_obs = img_to_obs(img, ee_pos)
+                    
+                    # History-Buffer aktualisieren (aktuelles Frame hinzufügen)
+                    add_to_history(img, ee_pos)
+                    
+                    # Observation mit voller History für CEM und Loss-Gating
+                    cur_obs = get_obs_with_history()
+                    if cur_obs is None:
+                        response = {"status": "error", "msg": "History buffer empty"}
+                    else:
+                        # Für img_to_obs fallback (Feature-Viz etc. braucht nur aktuelles Frame)
+                        cur_obs_single = img_to_obs(img, ee_pos)
 
-                    # Warm-Start: vorherigen Plan shiften
-                    actions_init = None
-                    if warm_start is not None:
-                        shifted = warm_start[:, 1:, :]
-                        actions_init = torch.cat([shifted, warm_start[:, -1:, :]], dim=1)
+                        # Warm-Start: vorherigen Plan shiften
+                        actions_init = None
+                        if warm_start is not None:
+                            shifted = warm_start[:, 1:, :]
+                            actions_init = torch.cat([shifted, warm_start[:, -1:, :]], dim=1)
 
-                    wandb_run.reset()
-                    t0 = time.time()
-                    with torch.no_grad():
-                        actions, _ = planner.plan(
-                            obs_0=cur_obs, obs_g=goal_obs, actions=actions_init)
-                    t_plan = time.time() - t0
-                    warm_start = actions.clone()
+                        wandb_run.reset()
+                        t0 = time.time()
+                        with torch.no_grad():
+                            actions, _ = planner.plan(
+                                obs_0=cur_obs, obs_g=goal_obs, actions=actions_init)
+                        t_plan = time.time() - t0
+                        warm_start = actions.clone()
 
-                    print(f"  Plan: {wandb_run.get_summary(t_plan)}")
-                    
-                    # Feature-Visualisierung für aktuelles Bild
-                    viz_interval = feature_viz_cfg.get("visualize_interval", 1)
-                    current_prefix = f"{current_goal_name}_current"
-                    wm_pred_prefix = f"{current_goal_name}_wm_pred"
-                    rollout_prefix = f"{current_goal_name}_rollout"
-                    
-                    if (feature_viz_enabled and 
-                        feature_viz_cfg.get("visualize_current", True) and
-                        feature_viz_step_counter % viz_interval == 0):
-                        try:
-                            viz_paths = feature_visualizer.visualize(
-                                img_np=img, out_dir=feature_viz_dir,
-                                step_idx=feature_viz_step_counter, prefix=current_prefix,
-                                save_naive_pca=feature_viz_cfg.get("save_naive_pca", True),
-                                save_kmeans_pca=feature_viz_cfg.get("save_kmeans_pca", True),
-                                save_attention=feature_viz_cfg.get("save_attention", True),
-                            )
-                            print(f"  Feature-Viz {current_goal_name} Step {feature_viz_step_counter}")
-                        except Exception as e:
-                            print(f"  Feature-Viz Fehler: {e}")
-                    
-                    # WM-Prediction Visualisierung nach CEM-Optimierung
-                    if (feature_viz_enabled and 
-                        visualize_wm_prediction and
-                        feature_viz_step_counter % viz_interval == 0):
-                        try:
-                            pred_img = get_wm_predicted_image(cur_obs, actions, goal_obs)
-                            if pred_img is not None:
-                                goal_img_np = extract_goal_image(goal_obs)
-                                current_img_np = extract_goal_image(cur_obs)  # Aktueller realer Zustand
-                                viz_result = feature_visualizer.visualize_wm_prediction(
-                                    predicted_img=pred_img,
-                                    goal_img=goal_img_np,
-                                    current_img=current_img_np,
-                                    out_dir=feature_viz_dir,
-                                    step_idx=feature_viz_step_counter,
-                                    prefix=wm_pred_prefix
-                                )
-                                # Metriken in CSV loggen
-                                if viz_result.get("metrics"):
-                                    csv_path = os.path.join(feature_viz_dir, "wm_prediction_metrics.csv")
-                                    log_metrics_to_csv(csv_path, current_goal_name, feature_viz_step_counter, viz_result["metrics"])
-                        except Exception as e:
-                            print(f"  WM-Prediction Viz Fehler: {e}")
-                    
-                    # Rollout-Strip: Komplettes Horizon-Rollout als Bildzeile
-                    if (feature_viz_enabled and 
-                        feature_viz_cfg.get("visualize_rollout_strip", True) and
-                        visualize_wm_prediction and
-                        feature_viz_step_counter % viz_interval == 0):
-                        try:
-                            rollout_images = get_wm_rollout_images(cur_obs, actions)
-                            if len(rollout_images) > 0:
-                                goal_img_np = extract_goal_image(goal_obs)
-                                current_img_np = extract_goal_image(cur_obs)
-                                feature_visualizer.visualize_rollout_strip(
-                                    current_img=current_img_np,
-                                    rollout_images=rollout_images,
-                                    goal_img=goal_img_np,
-                                    out_dir=feature_viz_dir,
-                                    step_idx=feature_viz_step_counter,
-                                    prefix=rollout_prefix
-                                )
-                        except Exception as e:
-                            print(f"  Rollout-Strip Fehler: {e}")
-                    
-                    feature_viz_step_counter += 1
-
-                    # ─── Loss-Gating ───
-                    # Prüfe ob die geplante Action den Loss tatsächlich verbessert
-                    action_rejected = False
-                    if loss_gating_enabled:
-                        loss_1step = compute_1step_loss(cur_obs, actions, goal_obs)
+                        print(f"  Plan: {wandb_run.get_summary(t_plan)}")
                         
-                        if loss_1step is not None:
-                            if gating_state["prev_loss"] is None:
-                                # Erster Plan: immer akzeptieren
-                                gating_state["prev_loss"] = loss_1step
-                                if loss_gating_cfg.get("log_gating", True):
-                                    print(f"  [Gating] Erster Plan, 1-Step-Loss={loss_1step:.4f}")
-                            else:
-                                # Prüfe Akzeptanz-Kriterium
-                                threshold = gating_state["prev_loss"] * (1 + gating_state["tolerance"])
+                        # ─── Loss-Gating (IMPROVEMENT-ANSATZ) ───
+                        # Zwei Rollouts im GLEICHEN Feature-Space:
+                        #   1. Mit Zero-Action ("Stillstand") → zero_loss
+                        #   2. Mit geplanter Action           → planned_loss
+                        # Akzeptiere WENN: planned_loss < zero_loss (Action bringt uns näher ans Ziel)
+                        # WICHTIG: Gating ZUERST, dann nur bei Akzeptanz visualisieren!
+                        action_rejected = False
+                        if loss_gating_enabled and loss_gating_mode != "disabled":
+                            gating_result = compute_gating_losses(cur_obs, actions, goal_obs)
+                            
+                            if gating_result is not None:
+                                zero_loss = gating_result["zero_loss"]
+                                planned_loss = gating_result["planned_loss"]
+                                tolerance = gating_state["tolerance"]
                                 
-                                if loss_1step < threshold:
-                                    # Akzeptiert: Update State
-                                    improvement = (gating_state["prev_loss"] - loss_1step) / gating_state["prev_loss"] * 100
+                                # Improvement-Kriterium: Geplante Action muss besser sein als Stillstand
+                                # Mit Toleranz: planned_loss < zero_loss * (1 + tolerance)
+                                # D.h. Action darf etwas schlechter sein wenn tolerance > 0
+                                threshold = zero_loss * (1 + tolerance)
+                                
+                                if planned_loss < threshold:
+                                    # Akzeptiert: Action ist besser als Stillstand (oder im Toleranzrahmen)
+                                    improvement = (zero_loss - planned_loss) / max(zero_loss, 1e-8) * 100
                                     if loss_gating_cfg.get("log_gating", True):
-                                        print(f"  [Gating] AKZEPTIERT: {loss_1step:.4f} < {threshold:.4f} "
-                                              f"(prev={gating_state['prev_loss']:.4f}, {improvement:+.1f}%)")
-                                    gating_state["prev_loss"] = loss_1step
-                                    # Toleranz reduzieren
+                                        print(f"  [Gating] ✓ AKZEPTIERT: planned={planned_loss:.4f} < threshold={threshold:.4f} "
+                                              f"(zero={zero_loss:.4f}, improvement={improvement:+.1f}%)")
+                                    # Toleranz reduzieren nach erfolgreicher Action
                                     gating_state["tolerance"] = max(
                                         loss_gating_cfg.get("min_tolerance", 0.02),
                                         gating_state["tolerance"] * loss_gating_cfg.get("decay", 0.95)
                                     )
                                     gating_state["consecutive_rejections"] = 0
                                 else:
-                                    # Abgelehnt — Client entscheidet über Phase-Abbruch
-                                    # Kein Escape-Hatch: Wiederholte Rejections bedeuten "Ziel erreicht"
+                                    # Abgelehnt: Action ist nicht besser als Stillstand
                                     action_rejected = True
                                     gating_state["consecutive_rejections"] += 1
+                                    degradation = (planned_loss - zero_loss) / max(zero_loss, 1e-8) * 100
                                     if loss_gating_cfg.get("log_gating", True):
-                                        print(f"  [Gating] ABGELEHNT #{gating_state['consecutive_rejections']}: "
-                                              f"{loss_1step:.4f} >= {threshold:.4f}")
+                                        print(f"  [Gating] ✗ ABGELEHNT #{gating_state['consecutive_rejections']}: "
+                                              f"planned={planned_loss:.4f} >= threshold={threshold:.4f} "
+                                              f"(zero={zero_loss:.4f}, degradation={degradation:+.1f}%)")
 
-                    # Response basierend auf Gating-Ergebnis
-                    if action_rejected:
-                        # Action abgelehnt: Client soll Position halten
-                        response = {
-                            "status": "ok",
-                            "actions": None,  # Keine Action → Position halten
-                            "rejected": True,
-                            "reason": "loss_gating",
-                        }
-                    else:
-                        # Action akzeptiert: Normale Response
-                        all_sub = _denorm_to_sub_actions(actions, first_only=True)
-                        n_ret = args.n_sub_actions if 0 < args.n_sub_actions < len(all_sub) else len(all_sub)
-                        sub_actions = all_sub[:n_ret]
+                        # Response basierend auf Gating-Ergebnis
+                        if action_rejected:
+                            # Action abgelehnt: Client soll Position halten
+                            # KEINE Feature-Visualisierung bei Rejection!
+                            response = {
+                                "status": "ok",
+                                "actions": None,  # Keine Action → Position halten
+                                "rejected": True,
+                                "reason": "loss_gating",
+                            }
+                        else:
+                            # Action akzeptiert: Normale Response
+                            all_sub = _denorm_to_sub_actions(actions, first_only=True)
+                            n_ret = args.n_sub_actions if 0 < args.n_sub_actions < len(all_sub) else len(all_sub)
+                            sub_actions = all_sub[:n_ret]
 
-                        wandb_run.log_plan_summary(t_plan, len(sub_actions), mode="plan")
-                        _ee_start = 4 if base_action_dim == 8 else 3
-                        for si, sa in enumerate(sub_actions):
-                            print(f"    Sub-Action {si}: target_ee=[{sa[_ee_start]:.3f}, {sa[_ee_start+1]:.3f}, {sa[_ee_start+2]:.3f}]")
-                        response = {
-                            "status": "ok",
-                            "actions": sub_actions.tolist(),
-                            "n_actions": len(sub_actions),
-                            "action_dim": base_action_dim,
-                        }
+                            wandb_run.log_plan_summary(t_plan, len(sub_actions), mode="plan")
+                            _ee_start = 4 if base_action_dim == 8 else 3
+                            for si, sa in enumerate(sub_actions):
+                                print(f"    Sub-Action {si}: target_ee=[{sa[_ee_start]:.3f}, {sa[_ee_start+1]:.3f}, {sa[_ee_start+2]:.3f}]")
+                            
+                            # ─── Feature-Visualisierung NUR bei akzeptierten Aktionen ───
+                            viz_interval = feature_viz_cfg.get("visualize_interval", 1)
+                            current_prefix = f"{current_goal_name}_current"
+                            wm_pred_prefix = f"{current_goal_name}_wm_pred"
+                            rollout_prefix = f"{current_goal_name}_rollout"
+                            
+                            if (feature_viz_enabled and 
+                                feature_viz_cfg.get("visualize_current", True) and
+                                feature_viz_step_counter % viz_interval == 0):
+                                try:
+                                    viz_paths = feature_visualizer.visualize(
+                                        img_np=img, out_dir=feature_viz_dir,
+                                        step_idx=feature_viz_step_counter, prefix=current_prefix,
+                                        save_naive_pca=feature_viz_cfg.get("save_naive_pca", True),
+                                        save_kmeans_pca=feature_viz_cfg.get("save_kmeans_pca", True),
+                                        save_attention=feature_viz_cfg.get("save_attention", True),
+                                    )
+                                    print(f"  Feature-Viz {current_goal_name} Step {feature_viz_step_counter}")
+                                except Exception as e:
+                                    print(f"  Feature-Viz Fehler: {e}")
+                            
+                            # WM-Prediction Visualisierung nach CEM-Optimierung
+                            if (feature_viz_enabled and 
+                                visualize_wm_prediction and
+                                feature_viz_step_counter % viz_interval == 0):
+                                try:
+                                    pred_img = get_wm_predicted_image(cur_obs, actions, goal_obs)
+                                    if pred_img is not None:
+                                        goal_img_np = extract_goal_image(goal_obs)
+                                        current_img_np = extract_goal_image(cur_obs)  # Aktueller realer Zustand
+                                        viz_result = feature_visualizer.visualize_wm_prediction(
+                                            predicted_img=pred_img,
+                                            goal_img=goal_img_np,
+                                            current_img=current_img_np,
+                                            out_dir=feature_viz_dir,
+                                            step_idx=feature_viz_step_counter,
+                                            prefix=wm_pred_prefix
+                                        )
+                                        # Metriken in CSV loggen
+                                        if viz_result.get("metrics"):
+                                            csv_path = os.path.join(feature_viz_dir, "wm_prediction_metrics.csv")
+                                            log_metrics_to_csv(csv_path, current_goal_name, feature_viz_step_counter, viz_result["metrics"])
+                                except Exception as e:
+                                    print(f"  WM-Prediction Viz Fehler: {e}")
+                            
+                            # Rollout-Strip: Komplettes Horizon-Rollout als Bildzeile
+                            if (feature_viz_enabled and 
+                                feature_viz_cfg.get("visualize_rollout_strip", True) and
+                                visualize_wm_prediction and
+                                feature_viz_step_counter % viz_interval == 0):
+                                try:
+                                    rollout_images = get_wm_rollout_images(cur_obs, actions)
+                                    if len(rollout_images) > 0:
+                                        goal_img_np = extract_goal_image(goal_obs)
+                                        current_img_np = extract_goal_image(cur_obs)
+                                        feature_visualizer.visualize_rollout_strip(
+                                            current_img=current_img_np,
+                                            rollout_images=rollout_images,
+                                            goal_img=goal_img_np,
+                                            out_dir=feature_viz_dir,
+                                            step_idx=feature_viz_step_counter,
+                                            prefix=rollout_prefix
+                                        )
+                                except Exception as e:
+                                    print(f"  Rollout-Strip Fehler: {e}")
+                            
+                            # Step-Counter NUR bei akzeptierten Aktionen inkrementieren
+                            feature_viz_step_counter += 1
+                            
+                            response = {
+                                "status": "ok",
+                                "actions": sub_actions.tolist(),
+                                "n_actions": len(sub_actions),
+                                "action_dim": base_action_dim,
+                            }
 
             elif cmd == "plan_all":
                 if goal_obs is None:

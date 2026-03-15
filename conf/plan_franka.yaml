@@ -99,16 +99,33 @@ feature_visualization:
 # wird aber nur Action 1 ausgeführt → manchmal bewegt sich der Roboter
 # VOM Ziel weg, obwohl er näher dran war.
 #
-# Lösung: Berechne den 1-Step-Loss (nach Action 1) und führe die Action
-# nur aus wenn sie den Loss verbessert (oder innerhalb Toleranz hält).
+# Lösung (IMPROVEMENT-ANSATZ): Zwei Rollouts im GLEICHEN Feature-Space:
+#   1. Mit Zero-Action ("Stillstand") → zero_loss
+#   2. Mit geplanter Action           → planned_loss
+# Akzeptiere WENN: planned_loss < zero_loss * (1 + tolerance)
+# → "Bringt mich diese Action näher ans Ziel als Stillstand?"
 loss_gating:
   enabled: true                    # true = Loss-Gating aktivieren
   initial_tolerance: 0.05           # Anfangs-Toleranz: Action akzeptiert wenn
-                                    # loss_new < loss_prev * (1 + tolerance)
+                                    # planned_loss < zero_loss * (1 + tolerance)
   min_tolerance: 0.02               # Minimale Toleranz (wird strenger über Zeit)
   decay: 0.95                       # Toleranz *= decay nach jeder Akzeptanz
   log_gating: true                  # Gating-Entscheidungen loggen
-  # Kein Escape-Hatch: Wiederholte Rejections = "Ziel erreicht"
-  # Client (planning_client.py) beendet Phase nach MAX_CONSECUTIVE_REJECTIONS
+  
+  # ─── GATING-MODUS ───
+  # IMPROVEMENT-ANSATZ: Zwei Rollouts, beide durch predict()
+  #   - zero_loss:    Rollout mit Zero-Action (Stillstand/Baseline)
+  #   - planned_loss: Rollout mit geplanter Action
+  # Vergleich im GLEICHEN Feature-Space → fairer Vergleich!
+  #
+  # Die Frage: "Bringt mich DIESE Action näher ans Ziel als STILLSTAND?"
+  #
+  # "enabled"   - Improvement-Ansatz aktiv
+  # "disabled"  - Gating deaktiviert, Actions immer akzeptiert
+  mode: "enabled"
+  
+  # IN CLIENT_CONFIG -> max_rejections: 5  # Nach N Rejections: Phase beenden (Client-seitig)
+  # Kein Server-Escape-Hatch: Wiederholte Rejections = "Ziel erreicht"
+  # Client (planning_client.py) beendet Phase nach max_rejections
 
 # 2026-02-09/08-12-44

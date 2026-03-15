@@ -203,10 +203,26 @@ class CEMPlanner(BasePlanner):
                 action = self._clamp_actions(action)
                 action = self._quantize_gripper(action)
 
+                # Init-Actions für History-Frames hinzufügen (IMMER, auch bei num_hist=1)
+                # rollout() erwartet: act.shape = (b, num_obs_init + horizon, action_dim)
+                # wobei num_obs_init = Anzahl Frames in obs_0['visual']
+                #
+                # WICHTIG: Das Original-DINO-WM hatte hier einen versteckten Off-by-One-Bug:
+                # Ohne Init-Actions wurde action[:, :1] als Init-Action "verbraucht" und
+                # nur horizon-1 Actions blieben für den Rollout übrig!
+                # FIX: IMMER Init-Actions hinzufügen (Nullen), sodass alle horizon Actions
+                # tatsächlich für die Planung verwendet werden.
+                num_obs_init = cur_trans_obs_0['visual'].shape[1]
+                init_actions = torch.zeros(
+                    self.num_samples, num_obs_init, self.action_dim,
+                    device=self.device
+                )
+                action_with_init = torch.cat([init_actions, action], dim=1)
+
                 with torch.no_grad():
                     i_z_obses, i_zs = self.wm.rollout(
                         obs_0=cur_trans_obs_0,
-                        act=action,
+                        act=action_with_init,
                     )
 
                 loss = self.objective_fn(i_z_obses, cur_z_obs_g)

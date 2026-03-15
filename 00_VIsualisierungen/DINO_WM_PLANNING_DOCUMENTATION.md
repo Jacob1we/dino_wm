@@ -3640,7 +3640,220 @@ Die Idee: **Bevor eine Aktion ausgeführt wird, prüfen wir ob sie den Zustand t
 - Der 1-Step-Loss zeigt, wie der Zustand nach Ausführung von `action_0` aussehen wird
 - Wenn dieser Loss höher ist als der vorherige Zustand (plus Toleranz), wird die Aktion abgelehnt
 - Der Client erhält `actions: None, rejected: True`
-- Client entscheidet: Retry (bis MAX_CONSECUTIVE_REJECTIONS=5) oder Phase beenden
+- Client entscheidet: Retry (bis `max_rejections`) oder Phase beenden
+
+---
+
+### 16.3.1 Exakte Loss-Berechnung im Detail
+
+Der 1-Step-Loss wird mit der **identischen Objective Function** wie der CEM berechnet.
+Die Implementierung befindet sich in `planning/objectives.py`.
+
+#### Objective Function: `objective_fn_last` (mode="last")
+
+```python
+# planning/objectives.py — create_objective_fn(alpha=0.5, base=2, mode="last")
+
+metric = nn.MSELoss(reduction="none")
+
+def objective_fn_last(z_obs_pred, z_obs_tgt):
+    """
+    Loss calculated on the last predicted frame.
+    
+    Args:
+        z_obs_pred: dict with keys:
+            'visual':  (B, T, 256, 768) — DINOv2 Patch-Embeddings, 16×16 Patches
+            'proprio': (B, T, proprio_dim) — EEF xyz Position (3D)
+        z_obs_tgt: dict with same structure (Goal-Encoding)
+    
+    Returns:
+        loss: tensor (B,) — Combined loss per batch element
+    """
+    # Visual Loss: MSE im DINOv2 Latent-Space
+    loss_visual = metric(z_obs_pred["visual"][:, -1:], z_obs_tgt["visual"])
+    loss_visual = loss_visual.mean(dim=tuple(range(1, z_obs_pred["visual"].ndim)))
+    
+    # Proprio Loss: MSE der EEF-Position
+    loss_proprio = metric(z_obs_pred["proprio"][:, -1:], z_obs_tgt["proprio"])
+    loss_proprio = loss_proprio.mean(dim=tuple(range(1, z_obs_pred["proprio"].ndim)))
+    
+    # Kombinierter Loss
+    loss = loss_visual + alpha * loss_proprio
+    return loss
+```
+
+#### Schritt-für-Schritt Berechnung
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    1-STEP LOSS BERECHNUNG — VOLLSTÄNDIG                     │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  EINGABE:                                                                   │
+│  ─────────                                                                  │
+│  cur_obs:     Aktuelles Kamerabild (224×224×3, RGB)                        │
+│  action[0]:   Erste geplante Aktion [x_s,y_s,z_s,g_s, x_e,y_e,z_e,g_e]     │
+│  goal_obs:    Zielbild (224×224×3, RGB)                                    │
+│  goal_proprio: Ziel-EEF-Position [x, y, z] aus Goal-Frame                  │
+│                                                                             │
+│  ─────────────────────────────────────────────────────────────────────────   │
+│                                                                             │
+│  SCHRITT 1: Encoding des aktuellen Zustands                                │
+│  ──────────────────────────────────────────────                             │
+│                                                                             │
+│  z_cur = DINO_Encoder(cur_obs)                                              │
+│        → Shape: (1, 256, 768)  [Batch=1, 16×16=256 Patches, 768-dim ViT]   │
+│                                                                             │
+│  cur_proprio = [aktuell EEF x, y, z]  # Vom Client gesendet                │
+│              → Shape: (1, 3)                                                │
+│                                                                             │
+│  ─────────────────────────────────────────────────────────────────────────   │
+│                                                                             │
+│  SCHRITT 2: World Model Rollout mit 1 Action                               │
+│  ──────────────────────────────────────────────                             │
+│                                                                             │
+│  Das World Model prediziert den Zustand NACH Ausführung von action[0]:     │
+│                                                                             │
+│  rollout = wm.rollout(cur_obs, action[0:1])  # Nur erste Aktion            │
+│         → rollout["latent"]["visual"]  = (1, 1, 256, 768)                  │
+│         → rollout["latent"]["proprio"] = (1, 1, 3)                         │
+│                                                                             │
+│  z_pred = rollout["latent"]  # Predicted Latent nach 1 Step               │
+│                                                                             │
+│  ─────────────────────────────────────────────────────────────────────────   │
+│                                                                             │
+│  SCHRITT 3: Encoding des Ziels                                              │
+│  ─────────────────────────────────                                          │
+│                                                                             │
+│  z_goal = DINO_Encoder(goal_obs)                                            │
+│         → Shape: (1, 1, 256, 768)                                           │
+│                                                                             │
+│  proprio_goal = [goal EEF x, y, z]  # Aus Dataset/Goal-Image               │
+│               → Shape: (1, 1, 3)                                            │
+│                                                                             │
+│  ─────────────────────────────────────────────────────────────────────────   │
+│                                                                             │
+│  SCHRITT 4: Visual Loss (MSE im DINOv2 Latent-Space)                       │
+│  ─────────────────────────────────────────────────────                      │
+│                                                                             │
+│  loss_visual = MSE(z_pred["visual"][:, -1:], z_goal["visual"])             │
+│                                                                             │
+│  Konkret:                                                                   │
+│    Differenz = z_pred["visual"] - z_goal["visual"]                         │
+│              = (1, 1, 256, 768) Tensor                                      │
+│                                                                             │
+│    Quadrierte Differenz = Differenz²                                        │
+│                                                                             │
+│    loss_visual = mean(Quadrierte Differenz)                                │
+│                = mean über alle 256×768 = 196.608 Werte                   │
+│                → Skalar pro Batch-Element                                  │
+│                                                                             │
+│  Was das misst:                                                             │
+│    "Wie ähnlich sieht das vorhergesagte Bild dem Zielbild?"                │
+│    → Im DINOv2 Feature-Space, nicht Pixel-Space!                           │
+│    → DINO-Features sind semantisch: Würfel-Position, nicht Pixelfarbe     │
+│                                                                             │
+│  Typischer Wertebereich: 0.5 – 3.0                                         │
+│    0.5: Sehr ähnlich (nah am Ziel)                                         │
+│    3.0: Sehr unterschiedlich (weit vom Ziel)                               │
+│                                                                             │
+│  ─────────────────────────────────────────────────────────────────────────   │
+│                                                                             │
+│  SCHRITT 5: Proprio Loss (MSE der EEF-Position)                            │
+│  ─────────────────────────────────────────────────                          │
+│                                                                             │
+│  loss_proprio = MSE(z_pred["proprio"][:, -1:], z_goal["proprio"])          │
+│                                                                             │
+│  Konkret (Beispielwerte):                                                   │
+│    proprio_pred = [0.42, 0.10, 0.08]  # Predicted EEF xyz                  │
+│    proprio_goal = [0.40, 0.10, 0.05]  # Goal EEF xyz                       │
+│                                                                             │
+│    Differenz = [0.02, 0.00, 0.03]                                          │
+│    Quadriert = [0.0004, 0.0000, 0.0009]                                    │
+│    loss_proprio = mean([0.0004, 0.0000, 0.0009]) = 0.00043                 │
+│                                                                             │
+│  Was das misst:                                                             │
+│    "Wie weit ist die vorhergesagte EEF-Position von der Ziel-Position?"   │
+│    → Euklidische Distanz² (normalisiert, da mean über 3 Dims)             │
+│                                                                             │
+│  Typischer Wertebereich: 0.0 – 1.0 (nach Normalisierung)                   │
+│    0.0:  Exakt am Ziel                                                     │
+│    0.5:  ~15cm Abweichung                                                  │
+│    1.0:  ~30cm Abweichung (weit weg)                                       │
+│                                                                             │
+│  ─────────────────────────────────────────────────────────────────────────   │
+│                                                                             │
+│  SCHRITT 6: Kombinierter Loss                                               │
+│  ─────────────────────────────────                                          │
+│                                                                             │
+│  alpha = 0.5  (aus plan_franka.yaml → objective.alpha)                     │
+│                                                                             │
+│  loss = loss_visual + alpha × loss_proprio                                  │
+│       = loss_visual + 0.5 × loss_proprio                                   │
+│                                                                             │
+│  Beispielrechnung:                                                          │
+│    loss_visual  = 1.45                                                      │
+│    loss_proprio = 0.45                                                      │
+│    alpha        = 0.5                                                       │
+│                                                                             │
+│    loss = 1.45 + 0.5 × 0.45                                                │
+│         = 1.45 + 0.225                                                      │
+│         = 1.675                                                             │
+│                                                                             │
+│  ─────────────────────────────────────────────────────────────────────────   │
+│                                                                             │
+│  GATING-ENTSCHEIDUNG:                                                       │
+│  ─────────────────────                                                      │
+│                                                                             │
+│  Angenommen:                                                                │
+│    prev_loss = 1.28 (vom letzten akzeptierten MPC-Step)                    │
+│    tolerance = 0.035 (nach mehreren Decays, z.B. 5% × 0.95⁷ ≈ 3.5%)       │
+│                                                                             │
+│  threshold = prev_loss × (1 + tolerance)                                    │
+│            = 1.28 × 1.035                                                   │
+│            = 1.3248                                                         │
+│                                                                             │
+│  Vergleich:                                                                 │
+│    loss = 1.675                                                             │
+│    threshold = 1.3248                                                       │
+│                                                                             │
+│    1.675 >= 1.3248  →  ABGELEHNT!                                          │
+│                                                                             │
+│  Log-Ausgabe:                                                               │
+│    [Gating] ABGELEHNT #6: 1.6750 >= 1.3248                                 │
+│                           ↑         ↑                                       │
+│                           loss      threshold                               │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Konfiguration der Loss-Komponenten
+
+Die Gewichtung der beiden Loss-Komponenten wird in `plan_franka.yaml` konfiguriert:
+
+```yaml
+# plan_franka.yaml
+objective:
+  _target_: planning.objectives.create_objective_fn
+  alpha: 0.5      # Gewichtung von Proprio-Loss (0.5 = halbe Gewichtung)
+  base: 2         # Nur relevant für mode="all" (exponentielles Horizon-Weighting)
+  mode: last      # "last" = nur letzter Frame, "all" = alle Horizon-Frames
+```
+
+#### Interpretation der Loss-Werte
+
+| Loss-Wert | Visual-Anteil | Proprio-Anteil | Interpretation |
+|-----------|---------------|----------------|----------------|
+| **0.3–0.8** | ~0.3–0.6 | ~0.0–0.2 | Sehr nah am Ziel, Phase kann enden |
+| **0.8–1.5** | ~0.6–1.2 | ~0.2–0.4 | Fortschritt erkennbar, weiter approaching |
+| **1.5–2.5** | ~1.2–2.0 | ~0.4–0.6 | Noch weit vom Ziel, aktive Bewegung nötig |
+| **> 2.5** | > 2.0 | > 0.6 | Sehr weit vom Ziel oder OOD-Zustand |
+
+#### Warum alpha=0.5?
+
+- **Zu hoch (z.B. alpha=2.0):** Proprio dominiert → Roboter könnte visuell falsches Ziel ansteuern
+- **Zu niedrig (z.B. alpha=0.1):** Visual dominiert → Proprio-Fehler werden ignoriert
+- **alpha=0.5:** Balance — beide Modalitäten tragen bei, Visual führt primär
 
 ---
 
@@ -3951,10 +4164,493 @@ dass die Phase abgeschlossen werden kann (→ Pick/Place). Overhead ist minimal 
 
 ---
 
+### 16.9 Feature-Space MSE vs. Pixel-Space MAE: Warum der Loss nicht zur Visualisierung passt
+
+> **Wichtig:** Der CEM-Loss und die Rollout-Strip Visualisierung messen **fundamental verschiedene Dinge**.
+> Ein sinkender Loss bei "schlechter" aussehenden Bildern ist **kein Bug**, sondern ein Artefakt
+> der unterschiedlichen Metriken.
+
+#### Das Problem
+
+Beim Analysieren von Rollout-Strip Visualisierungen (`p2_place_rollout_stepXXX.png`) kann es
+vorkommen, dass:
+
+1. Der Loss-Gating-Output zeigt **"AKZEPTIERT"** mit sinkendem Loss
+2. Das dekodierte WM-Prädiktions-Bild sieht **visuell schlechter** aus (Würfel weiter weg, etc.)
+3. Die MAE(G↔P) Metrik in der Konsole **sinkt nicht** oder steigt sogar
+
+**Beispiel aus der Praxis:**
+```
+[Gating] AKZEPTIERT: 2.2640 < 3.3060 (prev=3.1560, +28.3%)   ← Loss sinkt!
+WM-Pred: MAE(G↔C)=0.1678, MAE(G↔P)=0.0921                    ← MAE kaum verändert
+
+[Gating] AKZEPTIERT: 1.2841 < 1.5598 (prev=1.5072, +14.8%)   ← Loss sinkt weiter!
+WM-Pred: MAE(G↔C)=0.1390, MAE(G↔P)=0.0583                    ← MAE sinkt auch
+
+[Gating] ABGELEHNT #1: 2.8524 >= 2.1638                       ← Loss steigt!
+WM-Pred: MAE(G↔C)=0.1629, MAE(G↔P)=0.0945                    ← MAE nahezu gleich
+```
+
+**Warum sieht das Bild manchmal "schlechter" aus, obwohl der Loss sinkt?**
+
+---
+
+#### Die zwei verschiedenen Metriken
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    ZWEI METRIKEN — ZWEI VERSCHIEDENE RÄUME                  │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  ┌───────────────────────────────────┐   ┌───────────────────────────────┐ │
+│  │  CEM/LOSS-GATING METRIK           │   │  VISUALISIERUNG METRIK        │ │
+│  │  (Feature-Space MSE)              │   │  (Pixel-Space MAE)            │ │
+│  ├───────────────────────────────────┤   ├───────────────────────────────┤ │
+│  │                                   │   │                               │ │
+│  │  loss = MSE(z_pred, z_goal)       │   │  mae = MAE(img_pred, img_goal)│ │
+│  │                                   │   │                               │ │
+│  │  WO:                              │   │  WO:                          │ │
+│  │  z_pred = DINOv2(img_pred)        │   │  img_pred = Decoder(z_pred)   │ │
+│  │         = (256, 768) Features     │   │           = (224, 224, 3) RGB │ │
+│  │  z_goal = DINOv2(img_goal)        │   │  img_goal = (224, 224, 3) RGB │ │
+│  │         = (256, 768) Features     │   │                               │ │
+│  │                                   │   │                               │ │
+│  │  MISST:                           │   │  MISST:                       │ │
+│  │  Semantische Ähnlichkeit im       │   │  Pixelweisen RGB-Unterschied  │ │
+│  │  196.608-dimensionalen            │   │  im 150.528-dimensionalen     │ │
+│  │  DINOv2 Latent-Space              │   │  Bildraum (224×224×3)         │ │
+│  │                                   │   │                               │ │
+│  └───────────────────────────────────┘   └───────────────────────────────┘ │
+│                                                                             │
+│  UNTERSCHIED:                                                               │
+│  ─────────────                                                              │
+│  Feature-Space:  "Sieht die Szene konzeptuell gleich aus?"                 │
+│                  → Würfel-Position, Gripper-Zustand, Objektrelationen      │
+│                  → NICHT: Pixel-Farben, Schatten, Beleuchtung              │
+│                                                                             │
+│  Pixel-Space:    "Sind die RGB-Werte identisch?"                           │
+│                  → Jeder Pixel zählt gleich                                │
+│                  → Schatten, Beleuchtung, kleine Shifts dominieren         │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Warum die Metriken divergieren können
+
+**1. DINOv2 ist semantisch, nicht pixelbasiert**
+
+DINOv2 wurde auf Self-Supervised Learning trainiert und extrahiert **semantische Features**:
+- Kleine Positionsänderungen des Würfels → **große** Feature-Änderung
+- Große visuelle Änderungen (Schatten, Beleuchtung) → **kleine** Feature-Änderung
+
+```
+Beispiel:
+┌────────────────────────────────────────────────────────────────────┐
+│  Würfel um 2cm nach links verschoben:                              │
+│    Pixel-MAE:   +0.02 (nur wenige Pixel ändern sich)              │
+│    Feature-MSE: +0.45 (Position ist semantisch wichtig!)          │
+│                                                                    │
+│  Schatten ändert sich durch Beleuchtung:                          │
+│    Pixel-MAE:   +0.15 (viele Pixel werden dunkler)                │
+│    Feature-MSE: +0.01 (semantisch irrelevant)                     │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+**2. Der VQ-VAE Decoder verliert Information**
+
+Das dekodierte Bild ist eine **Rekonstruktion** aus dem Latent:
+- Der VQ-VAE wurde auf Rekonstruktion trainiert, nicht auf Task-Relevanz
+- Feine semantische Unterschiede im Latent können im Pixel-Bild **unsichtbar** sein
+- Der Decoder kann Artefakte einführen die den Pixel-MAE erhöhen
+
+```python
+# Informationsfluss — Verlust bei jedem Schritt
+img_original (224×224×3)
+    ↓ DINOv2 Encoder
+z_latent (256×768 = 196.608 dim)   ← CEM arbeitet HIER
+    ↓ VQ-VAE Quantisierung (Codebook-Lookup)
+z_quantized (256×codebook_dim)      ← Information verloren!
+    ↓ VQ-VAE Decoder
+img_reconstructed (224×224×3)       ← Visualisierung zeigt DAS
+```
+
+**3. Proprio-Loss kann dominieren**
+
+Mit `alpha=0.5` trägt der EEF-Position-Loss etwa **25% zum Gesamtloss** bei:
+
+```
+loss = loss_visual + 0.5 × loss_proprio
+```
+
+Der Loss kann sinken weil `loss_proprio` stark sinkt, selbst wenn `loss_visual` leicht steigt:
+
+```
+Beispiel:
+  Schritt N:   loss_visual=1.50, loss_proprio=0.80 → loss = 1.50 + 0.4 = 1.90
+  Schritt N+1: loss_visual=1.55, loss_proprio=0.30 → loss = 1.55 + 0.15 = 1.70
+                       ↑ +0.05                  ↓ -0.50              ↓ -0.20
+
+  → Loss sinkt um 0.20, obwohl Visual-Loss gestiegen ist!
+  → Das Bild sieht "schlechter" aus, aber EEF ist näher am Ziel
+```
+
+---
+
+#### Die Rollout-Strip Visualisierung im Detail
+
+Die Bilder `p2_place_rollout_stepXXX.png` zeigen:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  ROLLOUT-STRIP LAYOUT                                                       │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  ┌─────┐ ┌─────┐ ┌─────┐ ┌─────┐ ┌─────┐ ┌─────┐ ┌─────┐                  │
+│  │ C   │ │ t=1 │ │ t=2 │ │ t=3 │ │ t=4 │ │ t=5 │ │ G   │                  │
+│  │     │ │     │ │     │ │     │ │     │ │     │ │     │                  │
+│  └─────┘ └─────┘ └─────┘ └─────┘ └─────┘ └─────┘ └─────┘                  │
+│  Current  ←── WM-Prädiktionen (Horizon=5) ──→      Goal                    │
+│                                                                             │
+│  C = Aktuelles Kamerabild (input)                                          │
+│  t=1..5 = VQ-VAE dekodierte WM-Vorhersagen                                 │
+│  G = Zielbild                                                               │
+│                                                                             │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  WICHTIG:                                                                   │
+│                                                                             │
+│  • Die Bilder t=1..5 sind VQ-VAE REKONSTRUKTIONEN, nicht der Latent-Space  │
+│  • Der CEM optimiert im LATENT-SPACE (z_pred vs z_goal)                    │
+│  • Die Visualisierung zeigt den PIXEL-SPACE (img_pred vs img_goal)         │
+│  • Die Heatmap (4. Spalte bei wm_pred Bildern) zeigt |img_pred - img_goal| │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Was die verschiedenen Outputs bedeuten
+
+| Output | Was es zeigt | Was der CEM misst |
+|--------|--------------|-------------------|
+| `WM-Pred: MAE(G↔C)=0.16` | Pixel-Differenz Goal↔Current | ❌ Nicht relevant für CEM |
+| `WM-Pred: MAE(G↔P)=0.09` | Pixel-Differenz Goal↔Predicted | ❌ Nicht relevant für CEM |
+| `[Gating] loss=1.67` | Feature-MSE + Proprio-MSE | ✅ Das ist der CEM-Loss |
+| Heatmap im Bild | Pixelweise Differenz (jet colormap) | ❌ Nur zur Visualisierung |
+
+---
+
+#### Konsequenzen für die Interpretation
+
+**✓ Wann ist der Loss aussagekräftig:**
+- Der Loss im Feature-Space zeigt, ob das WM glaubt, dass wir dem **semantischen** Ziel näher kommen
+- Ein sinkender Loss bedeutet: "Die vorhergesagte Szene ähnelt dem Ziel konzeptuell mehr"
+- Das ist was wir wollen: Der Würfel soll an die richtige Position, nicht das Pixel-Muster stimmen
+
+**✗ Wann ist die Visualisierung irreführend:**
+- Bilder die "ähnlich" aussehen können sehr verschiedene Feature-Repräsentationen haben
+- VQ-VAE Dekodierungsartefakte können Bilder "schlechter" aussehen lassen als sie semantisch sind
+- Der MAE(G↔P) ist nur eine Debugging-Hilfe, nicht das tatsächliche Optimierungsziel
+
+**Empfehlung für Debug-Analyse:**
+
+1. **Vertraue dem Feature-Loss**, nicht dem Pixel-MAE
+2. **Prüfe loss_visual und loss_proprio separat** (kann in Logging hinzugefügt werden)
+3. **Fokussiere auf das Endergebnis**: Hat der Roboter den Würfel gegriffen/abgelegt?
+4. **Bei systematischen Problemen**: WM-Sanity-Check mit GT-Actions durchführen
+
+---
+
+#### Debugging-Erweiterung: Separate Loss-Komponenten loggen
+
+Um die Loss-Komponenten separat zu sehen, kann `compute_1step_loss()` erweitert werden:
+
+```python
+# planning_server.py — compute_1step_loss() Erweiterung
+
+def compute_1step_loss_detailed(cur_obs, actions, goal_obs):
+    """Berechnet 1-Step-Loss mit detaillierten Komponenten."""
+    # ... (Preprocessing wie bisher) ...
+    
+    with torch.no_grad():
+        z_pred, _ = model.rollout(obs_tensor, first_action)
+        z_goal = model.encode_obs(goal_tensor)
+        
+        # Separate Komponenten berechnen
+        metric = nn.MSELoss(reduction="none")
+        loss_visual = metric(z_pred["visual"][:, -1:], z_goal["visual"]).mean().item()
+        loss_proprio = metric(z_pred["proprio"][:, -1:], z_goal["proprio"]).mean().item()
+        
+        alpha = 0.5  # aus plan_franka.yaml
+        loss_total = loss_visual + alpha * loss_proprio
+        
+        return {
+            "total": loss_total,
+            "visual": loss_visual,
+            "proprio": loss_proprio,
+        }
+
+# Dann im Logging:
+# [Gating] AKZEPTIERT: 1.67 (vis=1.45, pro=0.44) < 1.75 (prev=1.70)
+```
+
+---
+
+### 16.10 Zusammenfassung: Loss-Gating
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         LOSS-GATING — KEY TAKEAWAYS                         │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  ✓ ZIEL:                                                                    │
+│    Verhindere Aktionen die den Zustand verschlechtern (MPC-Oszillationen)  │
+│                                                                             │
+│  ✓ MECHANISMUS:                                                             │
+│    1-Step-Rollout → Feature-MSE → Vergleich mit vorherigem Loss            │
+│    Nur akzeptieren wenn: new_loss < prev_loss × (1 + tolerance)            │
+│                                                                             │
+│  ✓ KEINE ESCAPE-HATCH:                                                      │
+│    Wiederholte Rejections = "Ziel erreicht" → Phase beenden → Pick/Place   │
+│                                                                             │
+│  ✓ WICHTIGE ERKENNTNIS:                                                     │
+│    Loss-Gating arbeitet im FEATURE-SPACE (DINOv2)                          │
+│    Visualisierung zeigt PIXEL-SPACE (VQ-VAE Rekonstruktion)                │
+│    → Diskrepanz ist NORMAL, kein Bug!                                      │
+│                                                                             │
+│  ✓ FÜR DEBUGGING:                                                           │
+│    - Vertraue dem Feature-Loss, nicht dem Pixel-MAE                        │
+│    - Fokussiere auf Task-Erfolg (Würfel gegriffen/abgelegt?)              │
+│    - Bei Problemen: loss_visual und loss_proprio separat analysieren       │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
 **Querverweise:**
 - Abschnitt 5: CEM Planner im Detail (Objective Function)
 - Abschnitt 6.7: Strategische Entscheidung für MPC
 - Abschnitt 6.7.5: Warm-Start im MPC-Kontext
 - Abschnitt 15: Two-Phase Planning Root-Cause (OOD-Proprio)
 - `conf/plan_franka.yaml`: Loss-Gating-Konfiguration
-- `planning_server.py`: `compute_1step_loss()`, `reset_loss_gating()`
+- `planning_server.py`: `compute_gating_loss()`, `reset_loss_gating()`
+- `planning_feature_visualizer.py`: `visualize_wm_prediction()`, `visualize_rollout_strip()`
+
+---
+
+### 16.11 Improvement-Ansatz: Zwei Vergleichsmethoden (15.03.2026)
+
+> **Update 15.03.2026:** Implementierung des "Improvement"-Ansatzes als Alternative zum
+> temporalen Vergleich. Die Frage hat sich geändert von "Ist es besser als vorher?" zu
+> "Ist diese Action besser als Stillstand?"
+
+#### Das Kernproblem: Unterschiedliche Feature-Spaces
+
+Bei der ursprünglichen Implementierung wurde der Loss wie folgt berechnet:
+
+```python
+# PROBLEMATISCHER ANSATZ (führte zu 50%+ Bias):
+cur_loss  = loss(encode(current), encode(goal))    # ← Encoding-Space
+pred_loss = loss(predict(current+action), encode(goal))  # ← Prediction-Space
+```
+
+**Das Problem**: `encode()` und `predict()` liefern Features in **unterschiedlichen Räumen**.
+Der Predictor transformiert und "glättet" die Features systematisch. Dadurch war `pred_loss`
+immer ~50% niedriger als `cur_loss` — unabhängig von der tatsächlichen Aktionsqualität!
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│              BEOBACHTETES SYMPTOM: UNREALISTISCH HOHE DELTAS                │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  [Gating] cur=2.9687, pred=1.8518, delta=+1.1169 ↓ (−37.6%)                │
+│  [Gating] cur=3.2158, pred=1.4293, delta=+1.7865 ↓ (−55.6%)                │
+│                                                                             │
+│  → Jede Action scheint "37-55% besser" zu sein als der aktuelle Zustand   │
+│  → Das ist UNREALISTISCH — Äpfel werden mit Birnen verglichen!            │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+#### Die zwei Vergleichsmethoden
+
+Es gibt zwei fundamental verschiedene Fragen die Loss-Gating beantworten kann:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    ZWEI VERSCHIEDENE GATING-ANSÄTZE                         │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  ┌───────────────────────────────────────────────────────────────────────┐ │
+│  │  ANSATZ 1: TEMPORAL (Zeitlicher Vergleich)                            │ │
+│  ├───────────────────────────────────────────────────────────────────────┤ │
+│  │                                                                       │ │
+│  │  Step t:   obs_t (Position A) → pred_loss_t                          │ │
+│  │  Step t+1: obs_{t+1} (Position B) → pred_loss_{t+1}                  │ │
+│  │                                                                       │ │
+│  │  Vergleich: pred_loss_{t+1} vs pred_loss_t                           │ │
+│  │                                                                       │ │
+│  │  Frage: "Bin ich JETZT näher am Ziel als beim LETZTEN Step?"         │ │
+│  │                                                                       │ │
+│  │  ✓ Vorteile:                                                          │ │
+│  │    - Nur 1 Rollout pro Step                                          │ │
+│  │    - Beide Losses im gleichen Feature-Space                          │ │
+│  │    - Misst echten zeitlichen Fortschritt                             │ │
+│  │                                                                       │ │
+│  │  ✗ Nachteile:                                                         │ │
+│  │    - Bewertet vergangene Action, nicht aktuelle                      │ │
+│  │    - Unterschiedliche Observations (Roboter hat sich bewegt)         │ │
+│  │                                                                       │ │
+│  └───────────────────────────────────────────────────────────────────────┘ │
+│                                                                             │
+│  ┌───────────────────────────────────────────────────────────────────────┐ │
+│  │  ANSATZ 2: IMPROVEMENT (Vergleich im gleichen Step)                   │ │
+│  ├───────────────────────────────────────────────────────────────────────┤ │
+│  │                                                                       │ │
+│  │  Step t: obs_t (Position A)                                          │ │
+│  │    → zero_loss    = rollout(obs_t, zero_action)     → Goal           │ │
+│  │    → planned_loss = rollout(obs_t, planned_action)  → Goal           │ │
+│  │                                                                       │ │
+│  │  Vergleich: planned_loss vs zero_loss                                │ │
+│  │                                                                       │ │
+│  │  Frage: "Bringt mich DIESE Action näher ans Ziel als STILLSTAND?"    │ │
+│  │                                                                       │ │
+│  │  ✓ Vorteile:                                                          │ │
+│  │    - GLEICHE Observation für beide Rollouts                          │ │
+│  │    - Beide Losses im gleichen Feature-Space (beide durch predict())  │ │
+│  │    - Bewertet die aktuelle Action VOR Ausführung                     │ │
+│  │    - Single-Step Entscheidung, kein State-Tracking nötig             │ │
+│  │                                                                       │ │
+│  │  ✗ Nachteile:                                                         │ │
+│  │    - 2 Rollouts pro Step (mehr Compute)                              │ │
+│  │    - Zero-Action ≠ perfekter Stillstand (ist Mittelwert)             │ │
+│  │                                                                       │ │
+│  └───────────────────────────────────────────────────────────────────────┘ │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+#### Der Improvement-Ansatz im Detail
+
+**Kernidee:** Beide Losses durch denselben `predict()`-Prozess berechnen, damit sie im
+**gleichen Feature-Space** vergleichbar sind.
+
+```python
+# IMPROVEMENT-ANSATZ — Fairer Vergleich im gleichen Space
+
+def compute_gating_losses(cur_obs, actions, goal_obs):
+    """
+    Berechnet zwei Losses für fairen Vergleich:
+    1. zero_loss: Was passiert wenn ich NICHTS tue?
+    2. planned_loss: Was passiert wenn ich die Action ausführe?
+    
+    Beide durch predict() → gleicher Feature-Space!
+    """
+    z_goal = encode(goal_obs)
+    
+    # Rollout 1: Mit Zero-Action ("Stillstand")
+    z_after_zero = rollout(cur_obs, zero_action)["visual"][:, -1:]
+    zero_loss = MSE(z_after_zero, z_goal)
+    
+    # Rollout 2: Mit geplanter Action
+    first_action = actions[:, :1, :]  # Nur erste Action
+    z_after_action = rollout(cur_obs, first_action)["visual"][:, -1:]
+    planned_loss = MSE(z_after_action, z_goal)
+    
+    return {"zero_loss": zero_loss, "planned_loss": planned_loss}
+```
+
+**Gating-Entscheidung:**
+
+```python
+if planned_loss < zero_loss:
+    # Action verbessert den Zustand → AKZEPTIEREN
+    return True
+else:
+    # Action ist nicht besser als Stillstand → ABLEHNEN
+    return False
+```
+
+---
+
+#### Warum Zero-Action als Baseline?
+
+Im **normalisierten Action-Space** ist `[0, 0, 0, ...]` der **Mittelwert** aller
+Trainings-Actions. Das ist keine perfekte "Stillstand"-Action, aber:
+
+1. **Im Training** haben wir Actions von `[min, max]` gesehen
+2. **Zero** liegt in der Mitte dieser Verteilung
+3. Das WM kennt Zero-ähnliche Actions und kann sie sinnvoll predicten
+4. Es ist ein **fairer Vergleich-Baseline** im gleichen Feature-Space
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    ZERO-ACTION ALS BASELINE                                 │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  normalized_action = (raw_action - mean) / std                             │
+│                                                                             │
+│  zero_action normalisiert = [0, 0, 0, 0, 0, 0, 0, 0]                       │
+│                            ↓                                                │
+│  zero_action denormalisiert = mean = [0.42, 0.08, 0.15, ...]              │
+│                               = durchschnittliche Trainings-Action         │
+│                                                                             │
+│  → Zero-Action ist keine "Stopp"-Action, aber eine "neutrale" Baseline    │
+│  → Jede geplante Action sollte BESSER sein als diese Baseline              │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+#### Erwartete Log-Ausgabe
+
+**Mit Improvement-Ansatz:**
+
+```
+[Gating] zero=1.7234, planned=1.4521, delta=+0.2713 ↓
+[Gating] ✓ AKZEPTIERT: planned=1.4521 < zero=1.7234 (−15.7%)
+    Sub-Action 0: target_ee=[0.425, 0.058, 0.052]
+
+[Gating] zero=1.4521, planned=1.5890, delta=-0.1369 ↑
+[Gating] ✗ ABGELEHNT #1: planned=1.5890 >= zero=1.4521 (+9.4%)
+    → Action ist nicht besser als Stillstand, wird nicht ausgeführt
+```
+
+**Die Deltas sind jetzt realistisch** (±10-20%), nicht mehr die unrealistischen ±50%
+die durch den Feature-Space-Mismatch entstanden waren.
+
+---
+
+#### Konfiguration
+
+```yaml
+# conf/plan_franka.yaml
+
+loss_gating:
+  enabled: true
+  mode: "improvement"  # "improvement" oder "temporal"
+  log_gating: true
+```
+
+| Parameter | Beschreibung | Empfehlung |
+|-----------|--------------|------------|
+| `mode: "improvement"` | Zwei-Rollout Vergleich (planned vs. zero) | ✓ Empfohlen |
+| `mode: "temporal"` | Ein-Rollout, Vergleich mit vorherigem Step | Alternative |
+| `log_gating: true` | Detailliertes Logging der Gating-Entscheidungen | Debugging |
+
+---
+
+#### Zusammenfassung: Welchen Ansatz wann?
+
+| Situation | Empfohlener Ansatz | Begründung |
+|-----------|-------------------|------------|
+| **Standard-Betrieb** | Improvement | Bewertet Action VOR Ausführung, fairer Vergleich |
+| **Performance-kritisch** | Temporal | Nur 1 Rollout statt 2, ~50% schneller |
+| **Debugging** | Improvement mit Logging | Zeigt ob Actions wirklich verbessern |
+
+**Empfehlung:** Der **Improvement-Ansatz** ist konzeptionell sauberer und beantwortet
+die richtige Frage: "Soll ich diese spezifische Action ausführen?" statt "Hat die
+letzte Action funktioniert?"

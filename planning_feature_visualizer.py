@@ -266,6 +266,11 @@ def create_kmeans_pca_image(patch_tokens: torch.Tensor, h_patches: int, w_patche
     seg_map = CLUSTER_COLORS[labels % len(CLUSTER_COLORS)].reshape(h_patches, w_patches, 3)
     seg_resized = np.array(Image.fromarray(seg_map).resize((img_w, img_h), Image.NEAREST))
     
+    # Cluster-Overlay: Segmentation transparent über Originalbild
+    cluster_alpha = 0.5  # 50% Cluster-Farben, 50% Original
+    seg_overlay = (seg_resized.astype(np.float32) * cluster_alpha + 
+                   img_np.astype(np.float32) * (1 - cluster_alpha)).astype(np.uint8)
+    
     # Per-Cluster PCA berechnen (für alle Cluster) - mit Goal-Referenz
     cluster_pca_results = {}
     for ci in range(n_clusters):
@@ -320,7 +325,7 @@ def create_kmeans_pca_image(patch_tokens: torch.Tensor, h_patches: int, w_patche
         grid = np.zeros((img_h * 2, img_w * 2, 3), dtype=np.uint8)
         grid[:img_h, :img_w] = img_np
         grid[:img_h, img_w:] = pca_all_resized
-        grid[img_h:, :img_w] = seg_resized
+        grid[img_h:, :img_w] = seg_overlay  # Cluster-Overlay auf Originalbild
         grid[img_h:, img_w:] = single_cluster_resized
         
         grids.append(grid)

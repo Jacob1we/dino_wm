@@ -463,7 +463,9 @@ class PlanningFeatureVisualizer:
         if not self.enabled:
             return result
             
-        os.makedirs(out_dir, exist_ok=True)
+        # Unterordner für verschiedene Visualisierungstypen
+        pca_naive_dir = os.path.join(out_dir, "pca_naive")
+        attention_dir = os.path.join(out_dir, "attention")
         
         # Convert image and extract features
         img_tensor = self._img_to_tensor(img_np)
@@ -485,7 +487,8 @@ class PlanningFeatureVisualizer:
                 self.goal_pca_data = pca_data
                 print(f"  Naive PCA vom Goal-Bild gespeichert")
             
-            path = os.path.join(out_dir, f"{prefix}_naive_pca_step{step_idx:03d}.png")
+            os.makedirs(pca_naive_dir, exist_ok=True)
+            path = os.path.join(pca_naive_dir, f"{prefix}_step{step_idx:03d}.png")
             Image.fromarray(pca_img).save(path)
             result["naive_pca"] = path
             
@@ -504,10 +507,12 @@ class PlanningFeatureVisualizer:
                 self.goal_kmeans_data = goal_data
                 print(f"  K-Means + PCA vom Goal-Bild gespeichert ({self.n_clusters} Cluster)")
             
-            # Speichere ein Bild pro Cluster
+            # Speichere ein Bild pro Cluster in separaten Unterordnern
             kmeans_paths = []
             for ci, grid in enumerate(kmeans_grids):
-                path = os.path.join(out_dir, f"{prefix}_kmeans_pca_cluster{ci}_step{step_idx:03d}.png")
+                cluster_dir = os.path.join(out_dir, f"pca_cluster{ci}")
+                os.makedirs(cluster_dir, exist_ok=True)
+                path = os.path.join(cluster_dir, f"{prefix}_step{step_idx:03d}.png")
                 Image.fromarray(grid).save(path)
                 kmeans_paths.append(path)
             result["kmeans_pca"] = kmeans_paths
@@ -516,7 +521,8 @@ class PlanningFeatureVisualizer:
             attn_img = create_attention_image(
                 cls_attn, h_patches, w_patches, img_np, self.n_heads_show
             )
-            path = os.path.join(out_dir, f"{prefix}_attention_step{step_idx:03d}.png")
+            os.makedirs(attention_dir, exist_ok=True)
+            path = os.path.join(attention_dir, f"{prefix}_step{step_idx:03d}.png")
             Image.fromarray(attn_img).save(path)
             result["attention"] = path
             

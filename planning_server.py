@@ -588,17 +588,42 @@ def init_metrics_csv(csv_path: str):
         writer = csv.writer(f)
         writer.writerow([
             'goal_name', 'step', 'timestamp',
+            # Pixel-Level Metriken (WM-Prediction)
             'mae_goal_current', 'mae_goal_predicted',
-            'mse_goal_current', 'mse_goal_predicted'
+            'mse_goal_current', 'mse_goal_predicted',
+            # CEM-Optimierung (Latent-Space)
+            'cem_loss_initial', 'cem_loss_final', 'cem_reduction_pct',
+            # Gating-Losses (Latent-Space)
+            'zero_loss', 'planned_loss', 'gating_delta', 'gating_accepted'
         ])
     metrics_csv_initialized = True
     print(f"  Metriken-CSV initialisiert: {csv_path}")
 
 def log_metrics_to_csv(csv_path: str, goal_name: str, step: int, metrics: dict):
-    """Fügt eine Zeile mit Metriken zur CSV hinzu."""
+    """Fügt eine Zeile mit Metriken zur CSV hinzu.
+    
+    Args:
+        csv_path: Pfad zur CSV-Datei
+        goal_name: Name des aktuellen Goals (z.B. "pick", "place")
+        step: Aktueller Step-Index
+        metrics: Dict mit folgenden optionalen Keys:
+            - mae_goal_current, mae_goal_predicted: Pixel-MAE
+            - mse_goal_current, mse_goal_predicted: Pixel-MSE
+            - cem_loss_initial, cem_loss_final, cem_reduction_pct: CEM-Optimierung
+            - zero_loss, planned_loss, gating_delta, gating_accepted: Gating
+    """
     global metrics_csv_initialized
     if not metrics_csv_initialized:
         init_metrics_csv(csv_path)
+    
+    # Helper für optionale Werte
+    def fmt(key, decimals=6):
+        val = metrics.get(key)
+        if val is None:
+            return ""
+        if isinstance(val, bool):
+            return str(val)
+        return f"{val:.{decimals}f}"
     
     with open(csv_path, 'a', newline='') as f:
         writer = csv.writer(f)
@@ -606,10 +631,20 @@ def log_metrics_to_csv(csv_path: str, goal_name: str, step: int, metrics: dict):
             goal_name,
             step,
             datetime.now().strftime("%H:%M:%S"),
-            f"{metrics['mae_goal_current']:.6f}",
-            f"{metrics['mae_goal_predicted']:.6f}",
-            f"{metrics['mse_goal_current']:.6f}",
-            f"{metrics['mse_goal_predicted']:.6f}",
+            # Pixel-Level
+            fmt('mae_goal_current'),
+            fmt('mae_goal_predicted'),
+            fmt('mse_goal_current'),
+            fmt('mse_goal_predicted'),
+            # CEM
+            fmt('cem_loss_initial'),
+            fmt('cem_loss_final'),
+            fmt('cem_reduction_pct', 2),
+            # Gating
+            fmt('zero_loss'),
+            fmt('planned_loss'),
+            fmt('gating_delta'),
+            metrics.get('gating_accepted', ''),
         ])
 
 if feature_viz_enabled:
@@ -1217,6 +1252,7 @@ while True:
                         # Akzeptiere WENN: planned_loss < zero_loss (Action bringt uns näher ans Ziel)
                         # WICHTIG: Gating ZUERST, dann nur bei Akzeptanz visualisieren!
                         action_rejected = False
+                        gating_result = None  # Initialisieren für späteren Check
                         if loss_gating_enabled and loss_gating_mode != "disabled":
                             gating_result = compute_gating_losses(cur_obs, actions, goal_obs)
                             
@@ -1253,9 +1289,33 @@ while True:
                                               f"(zero={zero_loss:.4f}, degradation={degradation:+.1f}%)")
 
                         # Response basierend auf Gating-Ergebnis
+                        # ─── STEP-METRIKEN SAMMELN ───
+                        # Alle relevanten Metriken für diesen Step (für CSV)
+                        step_metrics = {}
+                        
+                        # CEM-Loss (aus wandb_run)
+                        if wandb_run._losses:
+                            step_metrics["cem_loss_initial"] = wandb_run._losses[0]
+                            step_metrics["cem_loss_final"] = wandb_run._losses[-1]
+                            if wandb_run._losses[0] > 0:
+                                step_metrics["cem_reduction_pct"] = (
+                                    (1 - wandb_run._losses[-1] / wandb_run._losses[0]) * 100
+                                )
+                        
+                        # Gating-Losses (falls Gating aktiv war)
+                        if loss_gating_enabled and loss_gating_mode != "disabled" and gating_result is not None:
+                            step_metrics["zero_loss"] = gating_result["zero_loss"]
+                            step_metrics["planned_loss"] = gating_result["planned_loss"]
+                            step_metrics["gating_delta"] = gating_result["zero_loss"] - gating_result["planned_loss"]
+                            step_metrics["gating_accepted"] = not action_rejected
+                        
                         if action_rejected:
                             # Action abgelehnt: Client soll Position halten
-                            # KEINE Feature-Visualisierung bei Rejection!
+                            # KEINE Feature-Visualisierung bei Rejection, aber CSV-Log!
+                            if step_metrics and feature_viz_dir:
+                                csv_path = os.path.join(feature_viz_dir, "step_metrics.csv")
+                                log_metrics_to_csv(csv_path, current_goal_name, feature_viz_step_counter, step_metrics)
+                            
                             response = {
                                 "status": "ok",
                                 "actions": None,  # Keine Action → Position halten
@@ -1279,6 +1339,10 @@ while True:
                             wm_pred_prefix = f"{current_goal_name}_wm_pred"
                             rollout_prefix = f"{current_goal_name}_rollout"
                             
+                            # Unterordner für WM-Prediction und Rollout
+                            wm_pred_viz_dir = os.path.join(feature_viz_dir, "wm_prediction")
+                            rollout_viz_dir = os.path.join(feature_viz_dir, "rollout")
+                            
                             if (feature_viz_enabled and 
                                 feature_viz_cfg.get("visualize_current", True) and
                                 feature_viz_step_counter % viz_interval == 0):
@@ -1301,20 +1365,20 @@ while True:
                                 try:
                                     pred_img = get_wm_predicted_image(cur_obs, actions, goal_obs)
                                     if pred_img is not None:
+                                        os.makedirs(wm_pred_viz_dir, exist_ok=True)
                                         goal_img_np = extract_goal_image(goal_obs)
                                         current_img_np = extract_goal_image(cur_obs)  # Aktueller realer Zustand
                                         viz_result = feature_visualizer.visualize_wm_prediction(
                                             predicted_img=pred_img,
                                             goal_img=goal_img_np,
                                             current_img=current_img_np,
-                                            out_dir=feature_viz_dir,
+                                            out_dir=wm_pred_viz_dir,
                                             step_idx=feature_viz_step_counter,
                                             prefix=wm_pred_prefix
                                         )
-                                        # Metriken in CSV loggen
+                                        # Pixel-Metriken zu step_metrics hinzufügen
                                         if viz_result.get("metrics"):
-                                            csv_path = os.path.join(feature_viz_dir, "wm_prediction_metrics.csv")
-                                            log_metrics_to_csv(csv_path, current_goal_name, feature_viz_step_counter, viz_result["metrics"])
+                                            step_metrics.update(viz_result["metrics"])
                                 except Exception as e:
                                     print(f"  WM-Prediction Viz Fehler: {e}")
                             
@@ -1326,18 +1390,24 @@ while True:
                                 try:
                                     rollout_images = get_wm_rollout_images(cur_obs, actions)
                                     if len(rollout_images) > 0:
+                                        os.makedirs(rollout_viz_dir, exist_ok=True)
                                         goal_img_np = extract_goal_image(goal_obs)
                                         current_img_np = extract_goal_image(cur_obs)
                                         feature_visualizer.visualize_rollout_strip(
                                             current_img=current_img_np,
                                             rollout_images=rollout_images,
                                             goal_img=goal_img_np,
-                                            out_dir=feature_viz_dir,
+                                            out_dir=rollout_viz_dir,
                                             step_idx=feature_viz_step_counter,
                                             prefix=rollout_prefix
                                         )
                                 except Exception as e:
                                     print(f"  Rollout-Strip Fehler: {e}")
+                            
+                            # ─── ALLE METRIKEN IN CSV SCHREIBEN ───
+                            if step_metrics and feature_viz_dir:
+                                csv_path = os.path.join(feature_viz_dir, "step_metrics.csv")
+                                log_metrics_to_csv(csv_path, current_goal_name, feature_viz_step_counter, step_metrics)
                             
                             # Step-Counter NUR bei akzeptierten Aktionen inkrementieren
                             feature_viz_step_counter += 1
@@ -1371,6 +1441,10 @@ while True:
                     wm_pred_prefix = f"{current_goal_name}_wm_pred"
                     rollout_prefix = f"{current_goal_name}_rollout"
                     
+                    # Unterordner für WM-Prediction und Rollout
+                    wm_pred_viz_dir = os.path.join(feature_viz_dir, "wm_prediction")
+                    rollout_viz_dir = os.path.join(feature_viz_dir, "rollout")
+                    
                     if (feature_viz_enabled and 
                         feature_viz_cfg.get("visualize_current", True) and
                         feature_viz_step_counter % viz_interval == 0):
@@ -1387,26 +1461,38 @@ while True:
                             print(f"  Feature-Viz Fehler: {e}")
                     
                     # WM-Prediction Visualisierung nach CEM-Optimierung
+                    # Step-Metriken für plan_all
+                    step_metrics = {}
+                    
+                    # CEM-Loss
+                    if wandb_run._losses:
+                        step_metrics["cem_loss_initial"] = wandb_run._losses[0]
+                        step_metrics["cem_loss_final"] = wandb_run._losses[-1]
+                        if wandb_run._losses[0] > 0:
+                            step_metrics["cem_reduction_pct"] = (
+                                (1 - wandb_run._losses[-1] / wandb_run._losses[0]) * 100
+                            )
+                    
                     if (feature_viz_enabled and 
                         visualize_wm_prediction and
                         feature_viz_step_counter % viz_interval == 0):
                         try:
                             pred_img = get_wm_predicted_image(cur_obs, actions, goal_obs)
                             if pred_img is not None:
+                                os.makedirs(wm_pred_viz_dir, exist_ok=True)
                                 goal_img_np = extract_goal_image(goal_obs)
                                 current_img_np = extract_goal_image(cur_obs)  # Aktueller realer Zustand
                                 viz_result = feature_visualizer.visualize_wm_prediction(
                                     predicted_img=pred_img,
                                     goal_img=goal_img_np,
                                     current_img=current_img_np,
-                                    out_dir=feature_viz_dir,
+                                    out_dir=wm_pred_viz_dir,
                                     step_idx=feature_viz_step_counter,
                                     prefix=wm_pred_prefix
                                 )
-                                # Metriken in CSV loggen
+                                # Pixel-Metriken zu step_metrics
                                 if viz_result.get("metrics"):
-                                    csv_path = os.path.join(feature_viz_dir, "wm_prediction_metrics.csv")
-                                    log_metrics_to_csv(csv_path, current_goal_name, feature_viz_step_counter, viz_result["metrics"])
+                                    step_metrics.update(viz_result["metrics"])
                         except Exception as e:
                             print(f"  WM-Prediction Viz Fehler: {e}")
                     
@@ -1418,18 +1504,24 @@ while True:
                         try:
                             rollout_images = get_wm_rollout_images(cur_obs, actions)
                             if len(rollout_images) > 0:
+                                os.makedirs(rollout_viz_dir, exist_ok=True)
                                 goal_img_np = extract_goal_image(goal_obs)
                                 current_img_np = extract_goal_image(cur_obs)
                                 feature_visualizer.visualize_rollout_strip(
                                     current_img=current_img_np,
                                     rollout_images=rollout_images,
                                     goal_img=goal_img_np,
-                                    out_dir=feature_viz_dir,
+                                    out_dir=rollout_viz_dir,
                                     step_idx=feature_viz_step_counter,
                                     prefix=rollout_prefix
                                 )
                         except Exception as e:
                             print(f"  Rollout-Strip Fehler: {e}")
+                    
+                    # ─── ALLE METRIKEN IN CSV SCHREIBEN ───
+                    if step_metrics and feature_viz_dir:
+                        csv_path = os.path.join(feature_viz_dir, "step_metrics.csv")
+                        log_metrics_to_csv(csv_path, current_goal_name, feature_viz_step_counter, step_metrics)
                     
                     feature_viz_step_counter += 1
 

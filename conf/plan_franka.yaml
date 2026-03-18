@@ -39,7 +39,7 @@ objective:
 #   → Bei sigma=1 (norm) wird z physisch 1.7-2.3x weniger exploriert als xy.
 # Lösung: sigma_scale_z > 1 kompensiert das.
 sigma_scale:
-  enabled: true
+  enabled: false
   xy: 1.0
   z:  2.0    # ≈ action_std_xy / action_std_z
   g:  1.0
@@ -106,9 +106,9 @@ feature_visualization:
 # → "Bringt mich diese Action näher ans Ziel als Stillstand?"
 loss_gating:
   enabled: true                    # true = Loss-Gating aktivieren
-  initial_tolerance: 0.05           # Anfangs-Toleranz: Action akzeptiert wenn
+  initial_tolerance: 0.2           # Anfangs-Toleranz: Action akzeptiert wenn
                                     # planned_loss < zero_loss * (1 + tolerance)
-  min_tolerance: 0.02               # Minimale Toleranz (wird strenger über Zeit)
+  min_tolerance: 0.01               # Minimale Toleranz (wird strenger über Zeit)
   decay: 0.95                       # Toleranz *= decay nach jeder Akzeptanz
   log_gating: true                  # Gating-Entscheidungen loggen
   
@@ -122,7 +122,7 @@ loss_gating:
   #
   # "enabled"   - Improvement-Ansatz aktiv
   # "disabled"  - Gating deaktiviert, Actions immer akzeptiert
-  mode: "enabled"
+  mode: "enabled"  # "enabled" oder "disabled"
   
   # IN CLIENT_CONFIG -> max_rejections: 5  # Nach N Rejections: Phase beenden (Client-seitig)
   # Kein Server-Escape-Hatch: Wiederholte Rejections = "Ziel erreicht"

@@ -80,6 +80,33 @@ class CEMPlanner(BasePlanner):
             action = torch.clamp(action, min=lower, max=upper)
         return action
 
+    def _sample_truncated_actions(self, mu, sigma, num_samples, max_resample_iters=64):
+        """Samplet aus einer auf die Bounds truncierten Gaußverteilung.
+
+        Verwendet Rejection Sampling pro Dimension, sodass die Anzahl der
+        zurückgegebenen Samples exakt `num_samples` bleibt.
+        """
+        sample_shape = (num_samples,) + tuple(mu.shape)
+        samples = torch.randn(sample_shape, device=mu.device, dtype=mu.dtype) * sigma + mu
+
+        if self.action_lower is None:
+            return samples
+
+        lower = self.action_lower.to(device=mu.device, dtype=mu.dtype).view(1, 1, -1)
+        upper = self.action_upper.to(device=mu.device, dtype=mu.dtype).view(1, 1, -1)
+
+        invalid = (samples < lower) | (samples > upper)
+        for _ in range(max_resample_iters):
+            if not invalid.any():
+                return samples
+            redraw = torch.randn_like(samples) * sigma + mu
+            samples = torch.where(invalid, redraw, samples)
+            invalid = (samples < lower) | (samples > upper)
+
+        # Safety-Fallback für pathologische Fälle; die Sample-Anzahl bleibt erhalten.
+        samples = torch.clamp(samples, min=lower, max=upper)
+        return samples
+
     def _quantize_gripper(self, action):
         """Quantisiert Gripper-Dimensionen auf {norm(0), norm(1)}."""
         if self.gripper_indices is None:
@@ -151,6 +178,7 @@ class CEMPlanner(BasePlanner):
                         norm_open = (0.0 - action_mean[gi].item()) / action_std[gi].item()
                         mu[:, :, gi] = norm_open
 
+                mu = self._clamp_actions(mu)
         return mu, sigma
 
     def plan(self, obs_0, obs_g, actions=None):
@@ -190,17 +218,14 @@ class CEMPlanner(BasePlanner):
                     )
                     for key, arr in z_obs_g.items()
                 }
-                action = (
-                    torch.randn(self.num_samples, self.horizon, self.action_dim).to(
-                        self.device
-                    )
-                    * sigma[traj]
-                    + mu[traj]
+                action = self._sample_truncated_actions(
+                    mu=mu[traj],
+                    sigma=sigma[traj],
+                    num_samples=self.num_samples,
                 )
                 action[0] = mu[traj]  # mu selbst als ein Sample
 
-                # Action Bounds & Gripper-Quantisierung
-                action = self._clamp_actions(action)
+                # Gripper-Quantisierung nach dem Sampling anwenden
                 action = self._quantize_gripper(action)
 
                 # Init-Actions für History-Frames hinzufügen (IMMER, auch bei num_hist=1)

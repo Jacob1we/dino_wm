@@ -12,6 +12,7 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
+from matplotlib.gridspec import GridSpec
 from scipy.stats import norm
 import os
 
@@ -33,13 +34,13 @@ IX, IY, IZ = 4, 5, 6
 WS_LOWER = np.array([0.05, -0.40, 0.00])
 WS_UPPER = np.array([0.80,  0.45, 0.12])
 
-SIGMA_SCALE_Z = 3.0
+SIGMA_SCALE_Z = 2.0
 
 N_SAMPLES = 3000
 np.random.seed(42)
 
 # Farben (mattes Blau)
-BLUE_RAW       = '#B0C4D8'   # Blassblau für Samples VOR Trunkierung
+BLUE_RAW       = '#5A8FB4'   # Gleiche Blaustärke wie bei Trunkierung
 BLUE_TRUNCATED = '#5A8FB4'   # Kräftigeres Blau für Samples NACH Trunkierung
 BLUE_LINE    = '#6E96AE'
 BLUE_FILL    = '#9DBDD5'
@@ -52,7 +53,7 @@ RED_BOUNDS   = '#C62828'
 mu_x, mu_y, mu_z = ACTION_MEAN[IX], ACTION_MEAN[IY], ACTION_MEAN[IZ]
 sx = VAR_SCALE * ACTION_STD[IX]
 sy = VAR_SCALE * ACTION_STD[IY]
-sz = VAR_SCALE * SIGMA_SCALE_Z * ACTION_STD[IZ]  # mit sigma_scale z×3
+sz = VAR_SCALE * SIGMA_SCALE_Z * ACTION_STD[IZ]  # reduzierte Z-Streuung für die Seitenansicht
 
 raw_x = np.random.normal(mu_x, sx, N_SAMPLES)
 raw_y = np.random.normal(mu_y, sy, N_SAMPLES)
@@ -92,18 +93,66 @@ def gauss(x, mu, sigma):
     return norm.pdf(x, loc=mu, scale=sigma)
 
 
+def create_joint_axes(fig_size):
+    fig = plt.figure(figsize=(fig_size, fig_size))
+    gs = GridSpec(
+        2, 2, figure=fig,
+        width_ratios=[4.2, 1.2],
+        height_ratios=[1.2, 4.2],
+        wspace=0.05,
+        hspace=0.05,
+    )
+    ax_top = fig.add_subplot(gs[0, 0])
+    ax_main = fig.add_subplot(gs[1, 0], sharex=ax_top)
+    ax_right = fig.add_subplot(gs[1, 1], sharey=ax_main)
+    return fig, ax_main, ax_top, ax_right
+
+
+def add_marginal_distribution(ax_top, ax_right, samples_x, samples_y, color, xlim, ylim):
+    bins = 50
+
+    ax_top.hist(samples_x, bins=bins, density=True, color=color, alpha=0.20, edgecolor='none')
+    x_grid = np.linspace(xlim[0], xlim[1], 400)
+    mu_fit_x = np.mean(samples_x)
+    sigma_fit_x = max(np.std(samples_x), 1e-6)
+    ax_top.plot(x_grid, gauss(x_grid, mu_fit_x, sigma_fit_x), color=color, lw=1.8)
+    ax_top.set_xlim(*xlim)
+    ax_top.set_yticks([])
+    ax_top.tick_params(axis='x', labelbottom=False)
+    ax_top.spines['right'].set_visible(False)
+    ax_top.spines['top'].set_visible(False)
+    ax_top.spines['left'].set_visible(False)
+
+    ax_right.hist(samples_y, bins=bins, density=True, orientation='horizontal',
+                  color=color, alpha=0.20, edgecolor='none')
+    y_grid = np.linspace(ylim[0], ylim[1], 400)
+    mu_fit_y = np.mean(samples_y)
+    sigma_fit_y = max(np.std(samples_y), 1e-6)
+    ax_right.plot(gauss(y_grid, mu_fit_y, sigma_fit_y), y_grid, color=color, lw=1.8)
+    ax_right.set_ylim(*ylim)
+    ax_right.set_xticks([])
+    ax_right.tick_params(axis='y', labelleft=False)
+    ax_right.spines['right'].set_visible(False)
+    ax_right.spines['top'].set_visible(False)
+    ax_right.spines['bottom'].set_visible(False)
+
+
 # ============================================================================
 # FIGUR 1: XY-EBENE — Einzelbild vor ODER nach Trunkierung
 # ============================================================================
 
 def create_xy_bounds_single(is_truncated, labeled=True):
     fig_size = 4.5
-    fig, ax = plt.subplots(1, 1, figsize=(fig_size, fig_size))
+    fig, ax, ax_top, ax_right = create_joint_axes(fig_size)
 
     samples_x = trunc_x if is_truncated else raw_x
     samples_y = trunc_y if is_truncated else raw_y
     dot_color = BLUE_TRUNCATED if is_truncated else BLUE_RAW
     title_text = 'Nach Trunkierung (Action Bounds)' if is_truncated else 'Vor Trunkierung (Gaußverteilung)'
+    xlim = (-0.15, 1.0)
+    ylim = (-0.65, 0.65)
+
+    add_marginal_distribution(ax_top, ax_right, samples_x, samples_y, dot_color, xlim, ylim)
 
     # Workspace Bounds
     rect = patches.Rectangle(
@@ -127,10 +176,22 @@ def create_xy_bounds_single(is_truncated, labeled=True):
     # Mittelwert
     ax.plot(mu_x, mu_y, 'k+', markersize=12, markeredgewidth=2, zorder=5)
 
-    ax.set_xlim(-0.15, 1.0)
-    ax.set_ylim(-0.65, 0.65)
+    ax.set_xlim(*xlim)
+    ax.set_ylim(*ylim)
     ax.set_aspect('equal')
     make_axes_black(ax)
+    make_axes_black(ax_top)
+    make_axes_black(ax_right)
+
+    if is_truncated:
+        ax.annotate('', xy=(WS_UPPER[0], 0.0), xytext=(WS_UPPER[0] + 0.12, 0.0),
+                    arrowprops=dict(arrowstyle='->', color=RED_BOUNDS, lw=2))
+        ax.annotate('', xy=(WS_LOWER[0], 0.0), xytext=(WS_LOWER[0] - 0.07, 0.0),
+                    arrowprops=dict(arrowstyle='->', color=RED_BOUNDS, lw=2))
+        ax.annotate('', xy=(0.4, WS_UPPER[1]), xytext=(0.4, WS_UPPER[1] + 0.12),
+                    arrowprops=dict(arrowstyle='->', color=RED_BOUNDS, lw=2))
+        ax.annotate('', xy=(0.4, WS_LOWER[1]), xytext=(0.4, WS_LOWER[1] - 0.12),
+                    arrowprops=dict(arrowstyle='->', color=RED_BOUNDS, lw=2))
 
     if labeled:
         ax.set_xlabel('X (m)')
@@ -144,14 +205,6 @@ def create_xy_bounds_single(is_truncated, labeled=True):
                 bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.85))
 
         if is_truncated:
-            ax.annotate('', xy=(WS_UPPER[0], 0.0), xytext=(WS_UPPER[0] + 0.12, 0.0),
-                        arrowprops=dict(arrowstyle='->', color=RED_BOUNDS, lw=2))
-            ax.annotate('', xy=(WS_LOWER[0], 0.0), xytext=(WS_LOWER[0] - 0.07, 0.0),
-                        arrowprops=dict(arrowstyle='->', color=RED_BOUNDS, lw=2))
-            ax.annotate('', xy=(0.4, WS_UPPER[1]), xytext=(0.4, WS_UPPER[1] + 0.12),
-                        arrowprops=dict(arrowstyle='->', color=RED_BOUNDS, lw=2))
-            ax.annotate('', xy=(0.4, WS_LOWER[1]), xytext=(0.4, WS_LOWER[1] - 0.12),
-                        arrowprops=dict(arrowstyle='->', color=RED_BOUNDS, lw=2))
             in_bounds = ((raw_x >= WS_LOWER[0]) & (raw_x <= WS_UPPER[0]) &
                          (raw_y >= WS_LOWER[1]) & (raw_y <= WS_UPPER[1]))
             pct = 100 * np.mean(in_bounds)
@@ -170,6 +223,8 @@ def create_xy_bounds_single(is_truncated, labeled=True):
         ax.set_yticklabels([])
         ax.tick_params(length=0)
         ax.grid(False)
+        ax_top.set_xticklabels([])
+        ax_right.set_yticklabels([])
 
     plt.tight_layout()
     return fig
@@ -181,12 +236,16 @@ def create_xy_bounds_single(is_truncated, labeled=True):
 
 def create_xz_bounds_single(is_truncated, labeled=True):
     fig_size = 4.5
-    fig, ax = plt.subplots(1, 1, figsize=(fig_size, fig_size))
+    fig, ax, ax_top, ax_right = create_joint_axes(fig_size)
 
     s_x = trunc_x if is_truncated else raw_x
     s_z = trunc_z if is_truncated else raw_z
     dot_color = BLUE_TRUNCATED if is_truncated else BLUE_RAW
     title_text = 'Nach Trunkierung (Action Bounds)' if is_truncated else 'Vor Trunkierung (σ_z × 3.0)'
+    xlim = (-0.15, 1.0)
+    ylim = (-0.35, 0.45)
+
+    add_marginal_distribution(ax_top, ax_right, s_x, s_z, dot_color, xlim, ylim)
 
     # Workspace Bounds Rechteck (XZ)
     rect = patches.Rectangle(
@@ -217,10 +276,20 @@ def create_xz_bounds_single(is_truncated, labeled=True):
     # Mittelwert
     ax.plot(mu_x, mu_z, 'k+', markersize=12, markeredgewidth=2, zorder=5)
 
-    ax.set_xlim(-0.15, 1.0)
-    ax.set_ylim(-0.35, 0.45)
+    ax.set_xlim(*xlim)
+    ax.set_ylim(*ylim)
     ax.set_aspect('equal')
     make_axes_black(ax)
+    make_axes_black(ax_top)
+    make_axes_black(ax_right)
+
+    if is_truncated:
+        ax.annotate('', xy=(0.4, WS_UPPER[2]),
+                    xytext=(0.4, WS_UPPER[2] + 0.15),
+                    arrowprops=dict(arrowstyle='->', color=RED_BOUNDS, lw=2))
+        ax.annotate('', xy=(0.4, WS_LOWER[2]),
+                    xytext=(0.4, WS_LOWER[2] - 0.15),
+                    arrowprops=dict(arrowstyle='->', color=RED_BOUNDS, lw=2))
 
     if labeled:
         ax.set_xlabel('X (m)')
@@ -240,12 +309,6 @@ def create_xz_bounds_single(is_truncated, labeled=True):
                 ha='center', va='center', alpha=0.7)
 
         if is_truncated:
-            ax.annotate('', xy=(0.4, WS_UPPER[2]),
-                        xytext=(0.4, WS_UPPER[2] + 0.15),
-                        arrowprops=dict(arrowstyle='->', color=RED_BOUNDS, lw=2))
-            ax.annotate('', xy=(0.4, WS_LOWER[2]),
-                        xytext=(0.4, WS_LOWER[2] - 0.15),
-                        arrowprops=dict(arrowstyle='->', color=RED_BOUNDS, lw=2))
             in_z = 100 * np.mean((raw_z >= WS_LOWER[2]) & (raw_z <= WS_UPPER[2]))
             ax.text(0.03, 0.97,
                     f'{in_z:.0f}% der Samples\nlagen bereits im z-Intervall',
@@ -263,6 +326,8 @@ def create_xz_bounds_single(is_truncated, labeled=True):
         ax.set_yticklabels([])
         ax.tick_params(length=0)
         ax.grid(False)
+        ax_top.set_xticklabels([])
+        ax_right.set_yticklabels([])
 
     plt.tight_layout()
     return fig

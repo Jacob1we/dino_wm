@@ -109,7 +109,15 @@ def run_sanity_check(args):
     # Model laden — erst auf CPU, dann auf GPU
     print("[3/5] Lade Model-Checkpoint...")
     torch.cuda.empty_cache()
-    model_ckpt = Path(model_path) / "checkpoints" / "model_latest.pth"
+    if args.epoch is not None:
+        ckpt_name = f"model_{args.epoch}.pth"
+    else:
+        ckpt_name = "model_latest.pth"
+    model_ckpt = Path(model_path) / "checkpoints" / ckpt_name
+    if not model_ckpt.exists():
+        print(f"  FEHLER: Checkpoint nicht gefunden: {model_ckpt}")
+        return
+    print(f"  Checkpoint: {ckpt_name}")
     model = load_model(model_ckpt, model_cfg, model_cfg.num_action_repeat, device)
     model.eval()
 
@@ -171,7 +179,10 @@ def run_sanity_check(args):
     print(f"  Ausgewählte Episoden: {selected_idxs}")
 
     # ── 3. Output-Verzeichnis ──
-    output_dir = os.path.join(dino_wm_dir, "wm_sanity_outputs", args.model_name.replace("/", "_"))
+    if args.output_dir:
+        output_dir = args.output_dir
+    else:
+        output_dir = os.path.join(dino_wm_dir, "wm_sanity_outputs", args.model_name.replace("/", "_"))
     os.makedirs(output_dir, exist_ok=True)
     print(f"\n[4/5] Output-Verzeichnis: {output_dir}")
 
@@ -364,12 +375,14 @@ def run_sanity_check(args):
               f"(PSNR: {compute_psnr(np.mean(recon_mses)):.2f} dB)")
     
     print(f"\nPrediction mit GT-Aktionen (pro Horizont-Schritt):")
+    recon_mean = np.mean(recon_mses) if recon_mses else None
     for step_name in sorted(pred_mses_by_step.keys()):
         mses = pred_mses_by_step[step_name]
         mean_mse = np.mean(mses)
+        ratio_str = f"  Ratio: {mean_mse / recon_mean:.1f}x" if recon_mean else ""
         print(f"  {step_name}: Ø MSE = {mean_mse:.6f}  "
               f"(PSNR: {compute_psnr(mean_mse):.2f} dB)  "
-              f"[n={len(mses)}]")
+              f"[n={len(mses)}]{ratio_str}")
     
     # Gesamtbewertung
     all_pred_mses = [m for ms in pred_mses_by_step.values() for m in ms]
@@ -382,7 +395,6 @@ def run_sanity_check(args):
         print(f"\n{'─'*60}")
         print("DIAGNOSE:")
         if recon_mses:
-            recon_mean = np.mean(recon_mses)
             pred_mean = overall_pred_mse
             ratio = pred_mean / recon_mean if recon_mean > 0 else float('inf')
             print(f"  Prediction/Reconstruction MSE Ratio: {ratio:.2f}x")
@@ -418,6 +430,10 @@ def run_sanity_check(args):
                 "pred_mse_by_step": {
                     k: float(np.mean(v)) for k, v in pred_mses_by_step.items()
                 },
+                "pred_recon_ratio_by_step": {
+                    k: float(np.mean(v) / recon_mean) for k, v in pred_mses_by_step.items()
+                } if recon_mean else None,
+                "pred_recon_ratio_overall": float(np.mean(all_pred_mses) / recon_mean) if recon_mean else None,
             }
         }, f, indent=2)
     print(f"\n  Metriken gespeichert: {metrics_path}")
@@ -451,6 +467,32 @@ def run_sanity_check(args):
         plt.close(fig)
         print(f"  Zusammenfassung: {summary_stem}.svg / .pdf")
     
+    # Zusätzlicher Plot: MSE-Ratio (Prediction / Reconstruction) pro Schritt
+    if pred_mses_by_step and recon_mean and recon_mean > 0:
+        fig2, ax2 = plt.subplots(figsize=(TEXTWIDTH_IN, TEXTWIDTH_IN * 0.5))
+        steps = sorted(pred_mses_by_step.keys())
+        step_nums = [int(s.split("_")[1]) for s in steps]
+        mean_ratios = [np.mean(pred_mses_by_step[s]) / recon_mean for s in steps]
+        # Auch pro-Episode Ratios für Fehlerbalken
+        std_ratios = [np.std([m / recon_mean for m in pred_mses_by_step[s]]) for s in steps]
+        
+        ax2.errorbar(step_nums, mean_ratios, yerr=std_ratios,
+                    marker='s', capsize=4, linewidth=2, color='tab:orange')
+        ax2.axhline(y=1.0, color='gray', linestyle='--', alpha=0.5, label='Ratio = 1 (= Recon)')
+        ax2.axhline(y=2.0, color='green', linestyle=':', alpha=0.5, label='Ratio = 2 (gut)')
+        ax2.axhline(y=5.0, color='red', linestyle=':', alpha=0.5, label='Ratio = 5 (schlecht)')
+        ax2.set_xlabel("Vorhersage-Schritt")
+        ax2.set_ylabel("MSE(Prediction) / MSE(Reconstruction)")
+        ax2.set_title(f"WM Prediction/Reconstruction MSE-Ratio\n"
+                     f"Model: {args.model_name} | Ø Recon MSE: {recon_mean:.6f} | {n_episodes} Episoden")
+        ax2.grid(True, alpha=0.3)
+        ax2.legend(fontsize='small')
+        
+        ratio_stem = os.path.join(output_dir, "mse_ratio_over_horizon")
+        save_ma_figure(fig2, ratio_stem, fixed_canvas=True)
+        plt.close(fig2)
+        print(f"  MSE-Ratio Plot: {ratio_stem}.svg / .pdf")
+    
     print(f"\n{'='*60}")
     print(f"Fertig! Alle Outputs in: {output_dir}")
     print(f"{'='*60}")
@@ -475,6 +517,14 @@ if __name__ == "__main__":
     parser.add_argument(
         "--rollout_len", type=int, default=5,
         help="Anzahl Vorhersage-Schritte nach num_hist (default: 5)"
+    )
+    parser.add_argument(
+        "--output_dir", type=str, default=None,
+        help="Optionaler Output-Pfad (default: wm_sanity_outputs/<model_name>)"
+    )
+    parser.add_argument(
+        "--epoch", type=int, default=None,
+        help="Checkpoint-Epoche (default: latest). Z.B. --epoch 50 → model_50.pth"
     )
     
     args = parser.parse_args()

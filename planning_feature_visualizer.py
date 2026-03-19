@@ -675,12 +675,18 @@ class PlanningFeatureVisualizer:
 
     def visualize_rollout_strip(self, current_img: np.ndarray, rollout_images: list,
                                   goal_img: np.ndarray, out_dir: str, step_idx: int = 0,
-                                  prefix: str = "rollout") -> dict:
+                                  prefix: str = "rollout",
+                                  recon_img: np.ndarray = None) -> dict:
         """
         Erzeugt horizontalen Streifen mit dem kompletten WM-Rollout.
         
         Layout (1 Zeile):
-          | Current | t=1 | t=2 | ... | t=H | Goal |
+          | Current | Recon? | t=1 | t=2 | ... | t=H | Goal |
+        
+        Wenn recon_img angegeben: wird zwischen Current und t=1 eingefügt.
+        recon_img zeigt die Encode→Decode Rekonstruktion des Input-Frames.
+        Wenn recon_img ≈ current_img → Preprocessing korrekt.
+        Wenn recon_img ≠ current_img → Preprocessing/Verteilungs-Problem!
         
         Args:
             current_img: (H, W, 3) uint8 RGB - Aktueller realer Zustand
@@ -689,6 +695,7 @@ class PlanningFeatureVisualizer:
             out_dir: Ausgabe-Verzeichnis
             step_idx: Schritt-Index für Dateinamen
             prefix: Präfix für Dateinamen
+            recon_img: (H, W, 3) uint8 RGB - Encode→Decode Rekonstruktion (optional)
             
         Returns:
             dict mit "rollout_strip": Pfad zum gespeicherten Bild oder None
@@ -709,29 +716,37 @@ class PlanningFeatureVisualizer:
         current_img = to_uint8(current_img)
         goal_img = to_uint8(goal_img)
         rollout_images = [to_uint8(img) for img in rollout_images]
+        if recon_img is not None:
+            recon_img = to_uint8(recon_img)
         
         img_h, img_w = current_img.shape[:2]
         horizon = len(rollout_images)
         
-        # Gesamtbreite: Current + H×Rollout + Goal = (H+2) Bilder
-        n_images = horizon + 2
+        # Gesamtbreite: Current + (Recon?) + H×Rollout + Goal
+        n_images = horizon + 2 + (1 if recon_img is not None else 0)
         total_w = img_w * n_images
         
         # Grid erstellen
         grid = np.zeros((img_h, total_w, 3), dtype=np.uint8)
         
         # Bilder einfügen
-        grid[:, 0:img_w] = current_img  # Current (Index 0)
+        col = 0
+        grid[:, col*img_w:(col+1)*img_w] = current_img  # Current
+        col += 1
+        if recon_img is not None:
+            grid[:, col*img_w:(col+1)*img_w] = recon_img  # Recon (Diagnose)
+            col += 1
         for t, rollout_img in enumerate(rollout_images):
-            x_start = (t + 1) * img_w
-            grid[:, x_start:x_start + img_w] = rollout_img
-        grid[:, (horizon + 1) * img_w:] = goal_img  # Goal (letztes Bild)
+            grid[:, col*img_w:(col+1)*img_w] = rollout_img
+            col += 1
+        grid[:, col*img_w:(col+1)*img_w] = goal_img  # Goal
         
         path = os.path.join(out_dir, f"{prefix}_step{step_idx:03d}.png")
         Image.fromarray(grid).save(path)
         result["rollout_strip"] = path
         
-        print(f"  Rollout-Strip: {horizon} Schritte → {path}")
+        recon_tag = "+recon " if recon_img is not None else ""
+        print(f"  Rollout-Strip: {recon_tag}{horizon} Schritte → {path}")
         
         return result
 

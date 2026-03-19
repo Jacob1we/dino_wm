@@ -65,6 +65,9 @@ parser.add_argument("--n_sub_actions", type=int, default=1,
                          "Max = frameskip. 0 = alle (=frameskip).")
 parser.add_argument("--planning_config", type=str, default="plan_franka",
                     help="Name der Planning-Config (ohne .yaml). Default: plan_franka")
+parser.add_argument("--checkpoint", type=str, default="latest",
+                    help="Checkpoint-Name: 'latest' fuer model_latest.pth, "
+                         "oder Epoch-Nummer (z.B. '50', '100') fuer model_50.pth etc.")
 args = parser.parse_args()
 
 # # Default Parameter aus dem Paper:
@@ -174,8 +177,19 @@ else:
 print(f"  action_dim={base_action_dim}, Stats extrahiert, Dataset freigegeben ✓")
 
 # 3. Model laden (wie plan.py)
-print("Lade Model...")
-model_ckpt = Path(model_path) / "checkpoints" / "model_latest.pth"
+if args.checkpoint == "latest":
+    ckpt_filename = "model_latest.pth"
+else:
+    ckpt_filename = f"model_{args.checkpoint}.pth"
+model_ckpt = Path(model_path) / "checkpoints" / ckpt_filename
+if not model_ckpt.exists():
+    available = sorted(model_ckpt.parent.glob("model_*.pth"))
+    avail_str = ", ".join(p.stem.replace("model_", "") for p in available)
+    raise FileNotFoundError(
+        f"Checkpoint nicht gefunden: {model_ckpt}\n"
+        f"Verfuegbare Checkpoints: {avail_str}"
+    )
+print(f"Lade Model (checkpoint={ckpt_filename})...")
 model = load_model(model_ckpt, model_cfg, model_cfg.num_action_repeat, device)
 model.eval()  # WICHTIG: Eval-Modus fuer deterministische Inferenz (kein Dropout etc.)
 
@@ -451,7 +465,7 @@ server_config = {
     # Modell-Info
     "model_name": args.model_name,
     "model_path": model_path,
-    "model_epoch": "latest",
+    "model_epoch": args.checkpoint,
     # Planning-Parameter
     "mode": args.mode,
     "goal_H": horizon,
@@ -1006,7 +1020,7 @@ def get_wm_predicted_image(cur_obs: dict, actions: torch.Tensor, goal_obs: dict)
         return None
 
 
-def get_wm_rollout_images(cur_obs: dict, actions: torch.Tensor) -> list:
+def get_wm_rollout_images(cur_obs: dict, actions: torch.Tensor) -> tuple:
     """
     Berechnet das vollständige WM-Rollout und dekodiert alle Bilder.
     
@@ -1021,16 +1035,130 @@ def get_wm_rollout_images(cur_obs: dict, actions: torch.Tensor) -> list:
         actions: (1, horizon, full_action_dim) normalisierte Actions vom CEM
     
     Returns:
-        rollout_images: Liste von (H, W, 3) uint8 RGB Bildern für jeden Horizon-Schritt
-                        oder leere Liste wenn kein Decoder verfügbar
+        (rollout_images, recon_img): Tuple von
+            - rollout_images: Liste von (H, W, 3) uint8 RGB Bildern für jeden Horizon-Schritt
+            - recon_img: (H, W, 3) uint8 RGB — Encode→Decode Rekonstruktion des letzten
+                         History-Frames (für Diagnose: Preprocessing vs. Sanity-Check)
+        oder ([], None) wenn kein Decoder verfügbar
     """
     if not has_decoder:
-        return []
+        return [], None
     
     try:
         # Preprocessor auf cur_obs anwenden
         obs_tensor = preprocessor.transform_obs(cur_obs.copy())
         obs_tensor = {k: v.float().to(device) for k, v in obs_tensor.items()}
+        
+        # ─── EINMALIGE SHAPE/VALUE-DIAGNOSE ───
+        if not hasattr(get_wm_rollout_images, '_diag_done'):
+            get_wm_rollout_images._diag_done = True
+            v = cur_obs['visual']
+            vt = obs_tensor['visual']
+            print(f"\n  [WM-DIAG] === ERSTE ROLLOUT-DIAGNOSE ===")
+            print(f"  [WM-DIAG] Input cur_obs['visual']: shape={v.shape}, dtype={v.dtype}, "
+                  f"range=[{v.min():.1f}, {v.max():.1f}]")
+            print(f"  [WM-DIAG] Nach transform_obs:      shape={vt.shape}, dtype={vt.dtype}, "
+                  f"range=[{vt.min():.3f}, {vt.max():.3f}]")
+            p = cur_obs['proprio']
+            pt = obs_tensor['proprio']
+            print(f"  [WM-DIAG] Input proprio:   shape={p.shape}, range=[{p.min():.4f}, {p.max():.4f}]")
+            print(f"  [WM-DIAG] Norm. proprio:   shape={pt.shape}, range=[{pt.min():.3f}, {pt.max():.3f}]")
+            print(f"  [WM-DIAG] proprio_mean={preprocessor.proprio_mean.numpy()}, "
+                  f"proprio_std={preprocessor.proprio_std.numpy()}")
+            print(f"  [WM-DIAG] action_mean (first 8)={preprocessor.action_mean[:8].numpy()}")
+            print(f"  [WM-DIAG] action_std  (first 8)={preprocessor.action_std[:8].numpy()}")
+            
+            # ─── DATENSATZ-REFERENZBILD: Recon-MSE Vergleich ───
+            # Lade ein Datensatz-Bild und schicke es durch dieselbe Pipeline.
+            # Falls Recon-MSE_dataset ≈ Sanity-Check → Problem ist Bildinhalt (Domain Shift).
+            # Falls Recon-MSE_dataset ≈ Recon-MSE_live → Problem ist in der Pipeline.
+            try:
+                import glob as _glob
+                _ep_dirs = sorted(_glob.glob(os.path.join(dataset_path, "*")))
+                _ep_dirs = [d for d in _ep_dirs if os.path.isdir(d) and os.path.basename(d).isdigit()]
+                if _ep_dirs:
+                    _obses_path = os.path.join(_ep_dirs[0], "obses.pth")
+                    if os.path.exists(_obses_path):
+                        _dset_img = torch.load(_obses_path, map_location='cpu', weights_only=False)
+                        _dset_frame = _dset_img[0].numpy()  # (H, W, 3) float32 [~0-255]
+                        # Durch identische Pipeline wie Live-Bilder
+                        _dset_obs = {
+                            "visual": _dset_frame[np.newaxis, np.newaxis, ...].astype(np.float32),
+                            "proprio": cur_obs['proprio'].copy(),
+                        }
+                        _dset_tensor = preprocessor.transform_obs(_dset_obs)
+                        _dset_tensor = {k: vv.float().to(device) for k, vv in _dset_tensor.items()}
+                        with torch.no_grad():
+                            _z_dset, _ = model.rollout(
+                                _dset_tensor,
+                                torch.zeros(1, 1, actions.shape[-1], device=device)
+                            )
+                            _dset_decoded, _ = model.decode_obs(_z_dset)
+                            _dset_recon = _dset_decoded['visual'][0, 0]
+                            _dset_orig = _dset_tensor['visual'][0, 0]
+                            _dset_mse = ((_dset_recon - _dset_orig) ** 2).mean().item()
+                        with torch.no_grad():
+                            _z_live, _ = model.rollout(
+                                obs_tensor,
+                                torch.zeros(1, 1, actions.shape[-1], device=device)
+                            )
+                            _live_decoded, _ = model.decode_obs(_z_live)
+                            _live_recon = _live_decoded['visual'][0, 0]
+                            _live_orig = obs_tensor['visual'][0, 0]
+                            _live_mse = ((_live_recon - _live_orig) ** 2).mean().item()
+                        _ratio = _live_mse / _dset_mse if _dset_mse > 1e-10 else float('inf')
+                        print(f"  [WM-DIAG] *** REFERENZ-VERGLEICH ***")
+                        print(f"  [WM-DIAG]   Dataset-Bild Recon MSE = {_dset_mse:.6f}")
+                        print(f"  [WM-DIAG]   Live-Bild    Recon MSE = {_live_mse:.6f}")
+                        print(f"  [WM-DIAG]   Ratio Live/Dataset     = {_ratio:.1f}x")
+                        if _ratio > 10:
+                            print(f"  [WM-DIAG]   ⚠ DOMAIN SHIFT! Live-Bilder weichen stark ab.")
+                            print(f"  [WM-DIAG]   → Prüfe: Kamera-Config, Render-Settings, sRGB vs Linear")
+                        elif _ratio > 3:
+                            print(f"  [WM-DIAG]   ⚠ Moderate Abweichung — leichter Domain Shift.")
+                        else:
+                            print(f"  [WM-DIAG]   ✓ Recon-Qualität ähnlich — kein Domain Shift.")
+                        _pixel_diff = ((_dset_tensor['visual'][0, 0] - obs_tensor['visual'][0, 0]) ** 2).mean().item()
+                        print(f"  [WM-DIAG]   Pixel-MSE Dataset↔Live = {_pixel_diff:.6f}")
+                        print(f"  [WM-DIAG]   Dataset range: [{_dset_frame.min():.0f}, {_dset_frame.max():.0f}]")
+                        print(f"  [WM-DIAG]   Live    range: [{v.min():.0f}, {v.max():.0f}]")
+                        
+                        # Speichere Vergleichsbild: Dataset vs Live (Side-by-Side)
+                        try:
+                            _dset_vis = ((_dset_tensor['visual'][0, 0] + 1) / 2 * 255).clamp(0, 255)
+                            _dset_vis = _dset_vis.permute(1, 2, 0).cpu().numpy().astype(np.uint8)
+                            _live_vis = ((obs_tensor['visual'][0, 0] + 1) / 2 * 255).clamp(0, 255)
+                            _live_vis = _live_vis.permute(1, 2, 0).cpu().numpy().astype(np.uint8)
+                            _dset_rec_vis = ((_dset_recon + 1) / 2 * 255).clamp(0, 255)
+                            _dset_rec_vis = _dset_rec_vis.permute(1, 2, 0).cpu().numpy().astype(np.uint8)
+                            _live_rec_vis = ((_live_recon + 1) / 2 * 255).clamp(0, 255)
+                            _live_rec_vis = _live_rec_vis.permute(1, 2, 0).cpu().numpy().astype(np.uint8)
+                            # 2×2 Grid: [Dataset-Orig | Dataset-Recon]
+                            #            [Live-Orig   | Live-Recon  ]
+                            from PIL import Image, ImageDraw, ImageFont
+                            _grid = Image.new('RGB', (224*2 + 10, 224*2 + 10 + 40), (30, 30, 30))
+                            _grid.paste(Image.fromarray(_dset_vis), (0, 40))
+                            _grid.paste(Image.fromarray(_dset_rec_vis), (224 + 10, 40))
+                            _grid.paste(Image.fromarray(_live_vis), (0, 224 + 10 + 40))
+                            _grid.paste(Image.fromarray(_live_rec_vis), (224 + 10, 224 + 10 + 40))
+                            _draw = ImageDraw.Draw(_grid)
+                            _draw.text((5, 5), f"Dataset Recon MSE={_dset_mse:.6f}", fill=(200, 255, 200))
+                            _draw.text((5, 20), f"Live    Recon MSE={_live_mse:.6f} ({_ratio:.1f}x)", fill=(255, 200, 200))
+                            _diag_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "plan_outputs")
+                            os.makedirs(_diag_dir, exist_ok=True)
+                            _diag_path = os.path.join(_diag_dir, "domain_shift_diagnostic.png")
+                            _grid.save(_diag_path)
+                            print(f"  [WM-DIAG]   Vergleichsbild: {_diag_path}")
+                        except Exception as _img_e:
+                            print(f"  [WM-DIAG]   Vergleichsbild-Fehler: {_img_e}")
+                    else:
+                        print(f"  [WM-DIAG] obses.pth nicht gefunden in {_ep_dirs[0]}")
+                else:
+                    print(f"  [WM-DIAG] Keine Episoden in {dataset_path}")
+            except Exception as _e:
+                print(f"  [WM-DIAG] Referenz-Vergleich fehlgeschlagen: {_e}")
+            
+            print(f"  [WM-DIAG] ===========================\n")
         
         horizon = actions.shape[1]
         actions_device = actions.to(device)
@@ -1042,15 +1170,39 @@ def get_wm_rollout_images(cur_obs: dict, actions: torch.Tensor) -> list:
         
         # WM Rollout mit allen Actions
         rollout_images = []
+        recon_img = None
         with torch.no_grad():
             z_obses, _ = model.rollout(obs_tensor, full_actions)
             
             # Alle vorhergesagten Zustände dekodieren
             obs_decoded, _ = model.decode_obs(z_obses)
             
-            # obs_decoded['visual'] hat shape (1, horizon, 3, H, W)
+            # obs_decoded['visual'] hat shape (1, T_obs + horizon + 1, 3, H, W)
+            # Die ersten T_obs Frames sind Rekonstruktionen der History-Frames,
+            # die PREDICTED Frames beginnen ab Index T_obs.
+            
+            # ─── DIAGNOSE: Rekonstruktionsqualität des letzten History-Frames ───
+            # Vergleich: Originalbild (nach Transform) vs Encode→Decode Rekonstruktion.
+            # GLEICHE Metrik wie wm_sanity_check.py → direkt vergleichbar!
+            # Falls Recon-MSE >> Sanity-Check-Recon-MSE → Preprocessing-Problem.
+            recon_visual = obs_decoded['visual'][0, T_obs - 1]  # (3, H, W) letzter History-Frame
+            orig_visual = obs_tensor['visual'][0, T_obs - 1]    # (3, H, W) Original (transformiert)
+            recon_mse = ((recon_visual - orig_visual) ** 2).mean().item()
+            recon_psnr = -10.0 * np.log10(recon_mse + 1e-10)
+            # Auch für den ersten Prediction-Frame vs letzten History-Frame (= wie viel ändert sich?)
+            pred_first = obs_decoded['visual'][0, T_obs]  # erster Prediction-Frame
+            pred_vs_input_mse = ((pred_first - orig_visual) ** 2).mean().item()
+            print(f"  [WM-DIAG] Recon MSE={recon_mse:.6f} PSNR={recon_psnr:.1f}dB | "
+                  f"Pred[0]-vs-Input MSE={pred_vs_input_mse:.6f} | "
+                  f"Decoded range=[{obs_decoded['visual'].min():.2f}, {obs_decoded['visual'].max():.2f}]")
+            
+            # Rekonstruktionsbild für visuelle Inspektion (Diagnose)
+            recon_vis = (recon_visual + 1.0) / 2.0
+            recon_img = (recon_vis * 255.0).clamp(0, 255)
+            recon_img = recon_img.permute(1, 2, 0).cpu().numpy().astype(np.uint8)
+            
             for t in range(horizon):
-                pred_visual = obs_decoded['visual'][0, t]  # (3, H, W)
+                pred_visual = obs_decoded['visual'][0, T_obs + t]  # (3, H, W)
                 
                 # Decoder-Output ist im Bereich [-1, 1] → auf [0, 255] skalieren
                 pred_visual = (pred_visual + 1.0) / 2.0  # [-1,1] → [0,1]
@@ -1058,13 +1210,13 @@ def get_wm_rollout_images(cur_obs: dict, actions: torch.Tensor) -> list:
                 pred_img = pred_img.permute(1, 2, 0).cpu().numpy().astype(np.uint8)  # CHW → HWC
                 rollout_images.append(pred_img)
         
-        return rollout_images
+        return rollout_images, recon_img
         
     except Exception as e:
         print(f"  WM-Rollout Fehler: {e}")
         import traceback
         traceback.print_exc()
-        return []
+        return [], None
 
 
 def extract_goal_image(goal_obs: dict) -> np.ndarray:
@@ -1309,6 +1461,24 @@ while True:
                             step_metrics["gating_delta"] = gating_result["zero_loss"] - gating_result["planned_loss"]
                             step_metrics["gating_accepted"] = not action_rejected
                         
+                        # ─── CEM-Info für Client-Logging ───
+                        cem_info = {
+                            "plan_time": t_plan,
+                            "phase": current_goal_name,
+                            "opt_steps": int(planner_cfg.opt_steps),
+                            "num_samples": int(planner_cfg.num_samples),
+                        }
+                        if wandb_run._losses:
+                            cem_info["loss_initial"] = wandb_run._losses[0]
+                            cem_info["loss_final"] = wandb_run._losses[-1]
+                            if wandb_run._losses[0] > 0:
+                                cem_info["loss_reduction_pct"] = (
+                                    (1 - wandb_run._losses[-1] / wandb_run._losses[0]) * 100
+                                )
+                        if gating_result is not None:
+                            cem_info["zero_loss"] = gating_result["zero_loss"]
+                            cem_info["planned_loss"] = gating_result["planned_loss"]
+
                         if action_rejected:
                             # Action abgelehnt: Client soll Position halten
                             # KEINE Feature-Visualisierung bei Rejection, aber CSV-Log!
@@ -1321,6 +1491,7 @@ while True:
                                 "actions": None,  # Keine Action → Position halten
                                 "rejected": True,
                                 "reason": "loss_gating",
+                                "cem_info": cem_info,
                             }
                         else:
                             # Action akzeptiert: Normale Response
@@ -1388,7 +1559,7 @@ while True:
                                 visualize_wm_prediction and
                                 feature_viz_step_counter % viz_interval == 0):
                                 try:
-                                    rollout_images = get_wm_rollout_images(cur_obs, actions)
+                                    rollout_images, recon_img = get_wm_rollout_images(cur_obs, actions)
                                     if len(rollout_images) > 0:
                                         os.makedirs(rollout_viz_dir, exist_ok=True)
                                         goal_img_np = extract_goal_image(goal_obs)
@@ -1399,7 +1570,8 @@ while True:
                                             goal_img=goal_img_np,
                                             out_dir=rollout_viz_dir,
                                             step_idx=feature_viz_step_counter,
-                                            prefix=rollout_prefix
+                                            prefix=rollout_prefix,
+                                            recon_img=recon_img,
                                         )
                                 except Exception as e:
                                     print(f"  Rollout-Strip Fehler: {e}")
@@ -1417,6 +1589,7 @@ while True:
                                 "actions": sub_actions.tolist(),
                                 "n_actions": len(sub_actions),
                                 "action_dim": base_action_dim,
+                                "cem_info": cem_info,
                             }
 
             elif cmd == "plan_all":
@@ -1502,7 +1675,7 @@ while True:
                         visualize_wm_prediction and
                         feature_viz_step_counter % viz_interval == 0):
                         try:
-                            rollout_images = get_wm_rollout_images(cur_obs, actions)
+                            rollout_images, recon_img = get_wm_rollout_images(cur_obs, actions)
                             if len(rollout_images) > 0:
                                 os.makedirs(rollout_viz_dir, exist_ok=True)
                                 goal_img_np = extract_goal_image(goal_obs)
@@ -1513,7 +1686,8 @@ while True:
                                     goal_img=goal_img_np,
                                     out_dir=rollout_viz_dir,
                                     step_idx=feature_viz_step_counter,
-                                    prefix=rollout_prefix
+                                    prefix=rollout_prefix,
+                                    recon_img=recon_img,
                                 )
                         except Exception as e:
                             print(f"  Rollout-Strip Fehler: {e}")
@@ -1533,11 +1707,25 @@ while True:
                         all_actions = np.concatenate(kept, axis=0)
                     else:
                         all_actions = all_sub
+                    cem_info_all = {
+                        "plan_time": t_plan,
+                        "phase": current_goal_name,
+                        "opt_steps": int(planner_cfg.opt_steps),
+                        "num_samples": int(planner_cfg.num_samples),
+                    }
+                    if wandb_run._losses:
+                        cem_info_all["loss_initial"] = wandb_run._losses[0]
+                        cem_info_all["loss_final"] = wandb_run._losses[-1]
+                        if wandb_run._losses[0] > 0:
+                            cem_info_all["loss_reduction_pct"] = (
+                                (1 - wandb_run._losses[-1] / wandb_run._losses[0]) * 100
+                            )
                     response = {
                         "status": "ok",
                         "actions": all_actions.tolist(),
                         "n_actions": len(all_actions),
                         "plan_time": t_plan,
+                        "cem_info": cem_info_all,
                     }
                     wandb_run.log_plan_summary(t_plan, len(all_actions), mode="plan_all")
                     print(f"  → {len(all_actions)} Actions in {t_plan:.1f}s")

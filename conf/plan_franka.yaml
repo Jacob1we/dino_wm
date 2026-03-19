@@ -122,7 +122,7 @@ loss_gating:
   #
   # "enabled"   - Improvement-Ansatz aktiv
   # "disabled"  - Gating deaktiviert, Actions immer akzeptiert
-  mode: "enabled"  # "enabled" oder "disabled"
+  mode: "disabled"  # "enabled" oder "disabled"
   
   # IN CLIENT_CONFIG -> max_rejections: 5  # Nach N Rejections: Phase beenden (Client-seitig)
   # Kein Server-Escape-Hatch: Wiederholte Rejections = "Ziel erreicht"
